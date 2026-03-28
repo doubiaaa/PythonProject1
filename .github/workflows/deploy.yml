@@ -1,0 +1,54 @@
+# 简单部署（无 Docker）：把代码 rsync 到自有 Linux 服务器，再装依赖
+#
+# 仓库 Settings → Secrets → Actions 新增：
+#   DEPLOY_HOST        服务器 IP 或域名
+#   DEPLOY_USER        SSH 用户名
+#   DEPLOY_SSH_KEY     私钥全文
+#   DEPLOY_PATH        远端目录，如 /home/ubuntu/PythonProject1
+# 可选：
+#   DEPLOY_REMOTE_COMMAND  装依赖后多执行一行，例如：sudo systemctl restart replay
+#
+# 服务器首次：在 DEPLOY_PATH 下手动放 replay_config.json（或仅用环境变量跑 nightly）。
+# 常驻运行：ssh 登录后执行 bash scripts/run_gunicorn.sh（建议写 systemd）
+name: Deploy
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.DEPLOY_SSH_KEY }}
+
+      - name: Add server to known_hosts
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Rsync to server
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+          PATH_REMOTE: ${{ secrets.DEPLOY_PATH }}
+        run: |
+          rsync -avz \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude '.venv' \
+            --exclude 'replay_config.json' \
+            --exclude '__pycache__' \
+            ./ "${USER}@${HOST}:${PATH_REMOTE}/"
+
+      - name: Install deps on server (venv + pip)
+        env:
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+          PATH_REMOTE: ${{ secrets.DEPLOY_PATH }}
+          REMOTE_CMD: ${{ secrets.DEPLOY_REMOTE_COMMAND }}
+        run: |
+          ssh "${USER}@${HOST}" "set -e; cd '${PATH_REMOTE}'; bash scripts/after_rsync.sh; ${REMOTE_CMD:-true}"

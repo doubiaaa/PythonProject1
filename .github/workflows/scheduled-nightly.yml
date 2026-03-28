@@ -1,0 +1,35 @@
+# 北京时间每天 21:00 触发；仅当「当日为 A 股交易日」时才跑复盘并发微信，周末/节假日脚本直接跳过（成功退出）。
+# 须在仓库 Secrets 中配置（Settings → Secrets and variables → Actions）：
+#   ZHIPU_API_KEY      智谱 API Key
+#   SERVERCHAN_SENDKEY Server酱 Turbo SendKey（SCT…）
+#
+# 说明：cron 使用 UTC。北京时间 21:00 = UTC 13:00（中国无夏令时）。
+# GitHub 可能对定时任务有几分钟抖动；仅默认分支会按计划执行。
+name: Nightly replay (21:00 CST)
+
+on:
+  schedule:
+    - cron: "0 13 * * *"
+  workflow_dispatch:
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run nightly replay
+        env:
+          ZHIPU_API_KEY: ${{ secrets.ZHIPU_API_KEY }}
+          SERVERCHAN_SENDKEY: ${{ secrets.SERVERCHAN_SENDKEY }}
+        run: python scripts/nightly_replay.py

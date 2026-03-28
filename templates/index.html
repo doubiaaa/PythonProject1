@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>次日竞价半路模式 · 智能复盘</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/marked@12.0.0/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.0.8/dist/purify.min.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        bg: '#0a0a0f',
+                        fg: '#f4f4f8',
+                        accent: '#6366f1',
+                        accent2: '#22d3ee',
+                        success: '#34d399',
+                        error: '#fb7185',
+                        card: 'rgba(22, 22, 32, 0.75)',
+                        entry_bg: 'rgba(30, 30, 45, 0.9)',
+                        button_bg: 'rgba(55, 55, 75, 0.9)',
+                        button_hover: 'rgba(70, 70, 95, 0.95)',
+                    },
+                    fontFamily: {
+                        sans: ['"Noto Sans SC"', 'system-ui', 'sans-serif'],
+                        display: ['Outfit', '"Noto Sans SC"', 'sans-serif'],
+                        mono: ['ui-monospace', 'Consolas', 'monospace'],
+                    },
+                    boxShadow: {
+                        'glow': '0 0 60px -12px rgba(99, 102, 241, 0.35)',
+                        'card': '0 25px 50px -12px rgba(0, 0, 0, 0.5)',
+                        'inner-light': 'inset 0 1px 0 0 rgba(255,255,255,0.06)',
+                    },
+                },
+            }
+        }
+    </script>
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .scrollbar-thin { scrollbar-width: thin; }
+            .scrollbar-thin::-webkit-scrollbar { width: 7px; height: 7px; }
+            .scrollbar-thin::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); border-radius: 4px; }
+            .scrollbar-thin::-webkit-scrollbar-thumb {
+                background: linear-gradient(180deg, rgba(99,102,241,0.45), rgba(34,211,238,0.35));
+                border-radius: 4px;
+            }
+            .scrollbar-thin::-webkit-scrollbar-thumb:hover {
+                background: linear-gradient(180deg, rgba(99,102,241,0.65), rgba(34,211,238,0.5));
+            }
+        }
+        .mesh-bg {
+            background-color: #07070c;
+            background-image:
+                radial-gradient(ellipse 100% 80% at 50% -30%, rgba(99, 102, 241, 0.22), transparent 55%),
+                radial-gradient(ellipse 70% 50% at 100% 20%, rgba(34, 211, 238, 0.08), transparent 50%),
+                radial-gradient(ellipse 50% 40% at 0% 80%, rgba(139, 92, 246, 0.06), transparent 45%);
+        }
+        .grid-bg {
+            background-size: 48px 48px;
+            background-image:
+                linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+            mask-image: linear-gradient(to bottom, black 0%, black 40%, transparent 100%);
+        }
+        .glass-panel {
+            background: linear-gradient(145deg, rgba(22, 22, 35, 0.85) 0%, rgba(18, 18, 28, 0.72) 100%);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.45), inset 0 1px 0 0 rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+        }
+        .input-premium {
+            width: 100%;
+            border-radius: 0.75rem;
+            border: 1px solid rgba(255,255,255,0.08);
+            background: rgba(255,255,255,0.04);
+            padding: 0.75rem 1rem;
+            color: #f4f4f8;
+            outline: none;
+            transition: border-color 0.2s, box-shadow 0.2s;
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .input-premium::placeholder { color: #52525b; }
+        .input-premium:focus {
+            border-color: rgba(99, 102, 241, 0.45);
+            box-shadow: inset 0 2px 4px rgba(0,0,0,0.2), 0 0 0 3px rgba(99, 102, 241, 0.15);
+        }
+        .btn-secondary {
+            border-radius: 0.75rem;
+            border: 1px solid rgba(255,255,255,0.08);
+            background: rgba(255,255,255,0.06);
+            padding: 0.625rem 1rem;
+            font-size: 0.875rem;
+            font-weight: 500;
+            color: #e4e4e7;
+            transition: background 0.2s, border-color 0.2s;
+        }
+        .btn-secondary:hover {
+            background: rgba(255,255,255,0.1);
+            border-color: rgba(255,255,255,0.12);
+        }
+        .btn-ghost {
+            border-radius: 0.5rem;
+            padding: 0.375rem 0.75rem;
+            font-size: 0.875rem;
+            color: #9ca3af;
+            transition: color 0.2s;
+        }
+        .btn-ghost:hover { color: #fff; }
+        .stat-tile {
+            position: relative;
+            overflow: hidden;
+            border-radius: 1rem;
+            border: 1px solid rgba(255,255,255,0.06);
+            padding: 1.25rem;
+            transition: all 0.3s;
+            background: linear-gradient(165deg, rgba(35, 35, 50, 0.9) 0%, rgba(25, 25, 38, 0.95) 100%);
+            box-shadow: inset 0 1px 0 0 rgba(255,255,255,0.04);
+        }
+        .stat-tile:hover {
+            border-color: rgba(99, 102, 241, 0.25);
+            transform: translateY(-2px);
+            box-shadow: 0 20px 40px -20px rgba(99, 102, 241, 0.2);
+        }
+        .title-gradient {
+            background: linear-gradient(135deg, #ffffff 0%, #c7d2fe 45%, #a5b4fc 100%);
+            -webkit-background-clip: text;
+            background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .report-md { color: #e4e4ec; word-break: break-word; font-size: 0.9375rem; line-height: 1.75; }
+        .report-md h1 { font-size: 1.5rem; font-weight: 700; margin: 1.5rem 0 0.75rem; letter-spacing: -0.02em;
+            background: linear-gradient(90deg, #a5b4fc, #22d3ee); -webkit-background-clip: text; background-clip: text; -webkit-text-fill-color: transparent; }
+        .report-md h2 { font-size: 1.2rem; font-weight: 600; margin: 1.25rem 0 0.5rem; color: #c4b5fd; border-bottom: 1px solid rgba(99,102,241,0.25); padding-bottom: 0.35rem; }
+        .report-md h3 { font-size: 1.05rem; font-weight: 600; margin: 0.85rem 0 0.4rem; color: #e0e7ff; }
+        .report-md p { margin: 0.5rem 0; }
+        .report-md ul, .report-md ol { margin: 0.4rem 0 0.4rem 1.25rem; }
+        .report-md li { margin: 0.3rem 0; }
+        .report-md strong { color: #fff; font-weight: 600; }
+        .report-md code { background: rgba(30, 30, 50, 0.95); border: 1px solid rgba(255,255,255,0.06); padding: 0.15rem 0.4rem; border-radius: 6px; font-size: 0.85em; }
+        .report-md pre { background: rgba(12, 12, 22, 0.9); border: 1px solid rgba(255,255,255,0.06); padding: 1rem; border-radius: 12px; overflow-x: auto; margin: 0.75rem 0; }
+        .report-md pre code { background: transparent; border: 0; padding: 0; }
+        .report-md blockquote { border-left: 3px solid rgba(99,102,241,0.5); margin: 0.75rem 0; padding: 0.5rem 0 0.5rem 1rem; color: #a8a8c0; background: rgba(99,102,241,0.06); border-radius: 0 8px 8px 0; }
+        .report-md hr { border-color: rgba(255,255,255,0.08); margin: 1.25rem 0; }
+        @keyframes toast-in { from { opacity: 0; transform: translateY(-10px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
+        .toast-item { animation: toast-in 0.28s cubic-bezier(0.16, 1, 0.3, 1); }
+    </style>
+</head>
+<body class="mesh-bg text-fg min-h-screen font-sans antialiased selection:bg-indigo-500/30">
+    <div class="fixed inset-0 grid-bg pointer-events-none -z-10"></div>
+
+    <div class="container mx-auto px-4 sm:px-6 py-10 sm:py-14 max-w-5xl">
+        <!-- Hero -->
+        <header class="text-center mb-12 sm:mb-16 relative">
+            <div class="inline-flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.04] px-4 py-1.5 text-xs font-medium tracking-wide text-indigo-200/90 mb-6 backdrop-blur-sm">
+                <span class="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]"></span>
+                量化复盘 · 单一策略引擎
+            </div>
+            <h1 class="font-display text-4xl sm:text-5xl md:text-[3.25rem] font-bold tracking-tight title-gradient leading-tight">
+                次日竞价半路模式
+            </h1>
+            <p class="mt-5 text-base sm:text-lg text-gray-400 max-w-2xl mx-auto leading-relaxed font-light">
+                收盘后<strong class="text-gray-300 font-medium">主线筛选 → 龙头池 → 多维评分</strong>，结合智谱 GLM 生成<strong class="text-gray-300 font-medium">次日竞价预案</strong>
+            </p>
+            <p class="mt-3 text-xs sm:text-sm text-gray-600 max-w-xl mx-auto">
+                数据以东财行业板块为主 · 与申万/同花顺分类存在差异 · 仅供研究参考
+            </p>
+        </header>
+
+        <!-- 配置 -->
+        <section class="glass-panel rounded-2xl sm:rounded-3xl p-6 sm:p-8 mb-8">
+            <div class="flex items-start gap-4 mb-8">
+                <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500/30 to-cyan-500/20 border border-white/10 shadow-glow">
+                    <i class="fa fa-sliders text-lg text-indigo-200"></i>
+                </div>
+                <div>
+                    <h2 class="font-display text-xl font-semibold text-white tracking-tight">配置</h2>
+                    <p class="text-sm text-gray-500 mt-1">复盘日期、智谱 API Key，可选 Server酱 推送至微信</p>
+                </div>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+                <div>
+                    <label class="block text-xs font-medium uppercase tracking-wider text-gray-500 mb-2">复盘日期</label>
+                    <div class="flex flex-wrap items-stretch gap-2">
+                        <input type="text" id="date-input" class="input-premium font-mono text-sm flex-1 min-w-[140px]" placeholder="YYYYMMDD" autocomplete="off">
+                        <button type="button" id="today-btn" class="btn-secondary shrink-0">今日</button>
+                        <button type="button" id="yesterday-btn" class="btn-secondary shrink-0">昨日</button>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs font-medium uppercase tracking-wider text-gray-500 mb-2">智谱 API Key</label>
+                    <div class="flex gap-2">
+                        <input type="password" id="api-key-input" class="input-premium flex-1" placeholder="sk-..." autocomplete="off">
+                        <button type="button" id="toggle-key-btn" class="btn-secondary px-4" title="显示/隐藏">
+                            <i class="fa fa-eye-slash"></i>
+                        </button>
+                    </div>
+                </div>
+            </div>
+            <div class="mt-8 pt-8 border-t border-white/[0.06]">
+                <label class="block text-xs font-medium uppercase tracking-wider text-gray-500 mb-2">Server酱 SendKey（可选）</label>
+                <p class="text-xs text-gray-600 mb-3">在 <a href="https://sct.ftqq.com/" target="_blank" rel="noopener noreferrer" class="text-indigo-400/90 hover:text-cyan-400/90 underline underline-offset-2">sct.ftqq.com</a> 获取 Turbo 版 SendKey（以 SCT 开头），填写后复盘完成或失败将推送到微信</p>
+                <div class="flex gap-2">
+                    <input type="password" id="serverchan-input" class="input-premium flex-1 font-mono text-sm" placeholder="SCT… 留空则不推送" autocomplete="off">
+                    <button type="button" id="toggle-sct-btn" class="btn-secondary px-4 shrink-0" title="显示/隐藏">
+                        <i class="fa fa-eye-slash"></i>
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- 仪表盘 -->
+        <section class="glass-panel rounded-2xl sm:rounded-3xl p-6 sm:p-8 mb-8">
+            <div class="flex items-start gap-4 mb-8">
+                <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500/25 to-fuchsia-500/15 border border-white/10">
+                    <i class="fa fa-dashboard text-lg text-violet-200"></i>
+                </div>
+                <div>
+                    <h2 class="font-display text-xl font-semibold text-white tracking-tight">情绪周期</h2>
+                    <p class="text-sm text-gray-500 mt-1">随报告生成后由 AI 结论驱动更新</p>
+                </div>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div class="stat-tile">
+                    <div class="text-[11px] font-semibold uppercase tracking-wider text-gray-500">情绪温度</div>
+                    <div class="text-3xl font-bold mt-3 font-display tracking-tight text-white flex items-baseline gap-1" id="emotion-temperature">
+                        <span class="mr-1">--</span><span class="text-base font-normal text-gray-500">°C</span>
+                    </div>
+                    <div class="mt-4 h-1.5 rounded-full bg-black/40 overflow-hidden ring-1 ring-white/5">
+                        <div id="temperature-bar" class="h-full rounded-full bg-gradient-to-r from-indigo-500 to-cyan-400 transition-all duration-500" style="width: 0%"></div>
+                    </div>
+                </div>
+                <div class="stat-tile">
+                    <div class="text-[11px] font-semibold uppercase tracking-wider text-gray-500">市场阶段</div>
+                    <div class="text-2xl font-bold mt-3 font-display text-white leading-tight" id="market-phase">--</div>
+                    <div class="mt-2 text-xs text-gray-500 leading-snug min-h-[2.5rem]" id="phase-desc">--</div>
+                </div>
+                <div class="stat-tile">
+                    <div class="text-[11px] font-semibold uppercase tracking-wider text-gray-500">建议仓位</div>
+                    <div class="text-3xl font-bold mt-3 font-display text-amber-200/90" id="position-suggestion">--</div>
+                    <div class="mt-4 h-1.5 rounded-full bg-black/40 overflow-hidden ring-1 ring-white/5">
+                        <div id="position-bar" class="h-full rounded-full bg-gradient-to-r from-amber-600 to-amber-400 transition-all duration-500" style="width: 0%"></div>
+                    </div>
+                </div>
+                <div class="stat-tile">
+                    <div class="text-[11px] font-semibold uppercase tracking-wider text-gray-500">北向资金</div>
+                    <div class="text-2xl font-bold mt-3 font-display text-sky-200/95 break-all" id="north-money">--亿</div>
+                    <div class="mt-2 text-xs text-gray-500" id="north-desc">--</div>
+                </div>
+            </div>
+        </section>
+
+        <!-- 主操作 -->
+        <section class="glass-panel rounded-2xl sm:rounded-3xl p-6 sm:p-8 mb-8 overflow-hidden relative">
+            <div class="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none"></div>
+            <div class="relative flex flex-col lg:flex-row lg:items-center gap-8">
+                <button type="button" id="replay-btn" aria-busy="false"
+                    class="group relative w-full lg:w-auto min-w-[260px] overflow-hidden rounded-2xl bg-gradient-to-r from-indigo-600 via-indigo-500 to-cyan-600 px-8 py-4 text-base font-semibold text-white shadow-lg shadow-indigo-500/25 transition-all hover:shadow-xl hover:shadow-indigo-500/35 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-55 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:shadow-lg">
+                    <span class="absolute inset-0 bg-gradient-to-r from-white/0 via-white/10 to-white/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700"></span>
+                    <span class="relative flex items-center justify-center gap-2">
+                        <i class="fa fa-bolt" id="replay-btn-icon"></i><span id="replay-btn-label">生成复盘报告</span>
+                    </span>
+                </button>
+                <div class="flex-1 flex flex-col sm:flex-row sm:items-center gap-4 min-w-0">
+                    <div class="shrink-0">
+                        <div class="text-xs uppercase tracking-wider text-gray-500">状态</div>
+                        <div class="text-lg font-semibold text-white mt-0.5" id="status-text">就绪</div>
+                        <div id="elapsed-wrap" class="text-xs text-cyan-500/80 mt-1 hidden font-medium">已运行 <span id="elapsed-text">0</span> 秒</div>
+                    </div>
+                    <div class="flex items-center gap-3 flex-1 min-w-0">
+                        <div class="flex-1 h-2.5 rounded-full bg-black/50 overflow-hidden ring-1 ring-white/[0.06] min-w-[100px]">
+                            <div id="progress-bar" class="h-full rounded-full bg-gradient-to-r from-indigo-500 via-violet-500 to-cyan-400 transition-all duration-500 relative overflow-hidden" style="width: 0%">
+                                <span class="absolute inset-0 bg-gradient-to-t from-transparent to-white/20"></span>
+                            </div>
+                        </div>
+                        <span id="progress-percentage" class="text-sm font-mono font-medium text-indigo-200/90 w-12 text-right shrink-0">0%</span>
+                    </div>
+                </div>
+            </div>
+            <p class="relative mt-6 text-xs text-gray-600 leading-relaxed border-t border-white/[0.06] pt-5">
+                生成时按钮将锁定；完成后可复制 Markdown 或下载文本。数据拉取与选股耗时因网络波动，请耐心等待进度更新。
+            </p>
+        </section>
+
+        <!-- 日志 -->
+        <section class="glass-panel rounded-2xl sm:rounded-3xl p-6 sm:p-8 mb-8">
+            <div class="flex justify-between items-center mb-6">
+                <div class="flex items-center gap-3">
+                    <div class="h-10 w-10 rounded-xl bg-white/[0.06] flex items-center justify-center border border-white/[0.06]">
+                        <i class="fa fa-terminal text-cyan-400/90"></i>
+                    </div>
+                    <div>
+                        <h2 class="font-display text-lg font-semibold text-white">实时日志</h2>
+                        <p class="text-xs text-gray-600">任务步骤与异常信息</p>
+                    </div>
+                </div>
+                <button type="button" id="clear-log-btn" class="btn-ghost"><i class="fa fa-trash mr-1.5 opacity-70"></i>清空</button>
+            </div>
+            <div id="log-container" class="rounded-2xl border border-white/[0.06] bg-black/30 p-4 h-52 sm:h-60 overflow-y-auto scrollbar-thin font-mono text-[13px] leading-relaxed text-gray-300" role="log" aria-live="polite"></div>
+        </section>
+
+        <!-- 结果 -->
+        <section id="result-section" class="glass-panel rounded-2xl sm:rounded-3xl p-6 sm:p-8 mb-10 scroll-mt-8">
+            <div class="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4 mb-6">
+                <div class="flex items-center gap-3">
+                    <div class="h-10 w-10 rounded-xl bg-gradient-to-br from-indigo-500/20 to-purple-500/20 flex items-center justify-center border border-white/[0.08]">
+                        <i class="fa fa-file-text-o text-indigo-300"></i>
+                    </div>
+                    <div>
+                        <h2 class="font-display text-lg font-semibold text-white">复盘结果</h2>
+                        <p class="text-xs text-gray-600">支持 Markdown 渲染与导出</p>
+                    </div>
+                </div>
+                <div class="flex flex-wrap gap-2">
+                    <button type="button" id="copy-btn" class="btn-secondary text-sm disabled:opacity-40" disabled title="复制原始 Markdown">复制全文</button>
+                    <button type="button" id="save-btn" class="btn-secondary text-sm disabled:opacity-40" disabled>保存报告</button>
+                    <button type="button" id="clear-result-btn" class="rounded-xl border border-white/[0.06] bg-transparent px-4 py-2.5 text-sm text-gray-400 hover:text-white hover:bg-white/[0.04] transition-colors">清空</button>
+                </div>
+            </div>
+            <div id="result-container" class="rounded-2xl border border-white/[0.06] bg-black/25 min-h-[420px] max-h-[72vh] overflow-y-auto scrollbar-thin p-5 sm:p-8"></div>
+        </section>
+
+        <footer class="text-center text-xs text-gray-600 pb-8">
+            <p>数据来源于公开接口 · 不构成投资建议</p>
+        </footer>
+    </div>
+    <div id="toast-root" class="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none max-w-sm" aria-live="polite"></div>
+
+    <script>
+        let isKeyVisible = false;
+        let pollingInterval = null;
+        let lastLogCount = 0;
+        let lastResultText = '';
+        let pollStartTime = 0;
+
+        function showToast(message, type) {
+            type = type || 'info';
+            const root = document.getElementById('toast-root');
+            const el = document.createElement('div');
+            el.className = 'toast-item pointer-events-auto max-w-sm rounded-xl border px-4 py-3 text-sm shadow-2xl backdrop-blur-xl';
+            if (type === 'error') {
+                el.className += ' border-rose-500/35 bg-rose-950/92 text-rose-50';
+            } else if (type === 'success') {
+                el.className += ' border-emerald-500/35 bg-emerald-950/92 text-emerald-50';
+            } else {
+                el.className += ' border-white/10 bg-[#12121c]/95 text-gray-100';
+            }
+            el.textContent = message;
+            root.appendChild(el);
+            setTimeout(function () {
+                el.style.opacity = '0';
+                el.style.transition = 'opacity 0.3s';
+                setTimeout(function () { el.remove(); }, 300);
+            }, 3200);
+        }
+
+        function setRunningState(running) {
+            const btn = document.getElementById('replay-btn');
+            const icon = document.getElementById('replay-btn-icon');
+            const label = document.getElementById('replay-btn-label');
+            btn.disabled = !!running;
+            btn.setAttribute('aria-busy', running ? 'true' : 'false');
+            if (running) {
+                icon.className = 'fa fa-spinner fa-spin mr-2';
+                label.textContent = '生成中…';
+            } else {
+                icon.className = 'fa fa-bolt mr-2';
+                label.textContent = '生成复盘报告';
+            }
+        }
+
+        function setProgressUI(pct) {
+            pct = Math.max(0, Math.min(100, pct | 0));
+            document.getElementById('progress-bar').style.width = pct + '%';
+            document.getElementById('progress-percentage').textContent = pct + '%';
+        }
+
+        document.addEventListener('DOMContentLoaded', function () {
+            const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+            document.getElementById('date-input').value = today;
+
+            fetch('/api/get_defaults')
+                .then(function (r) { return r.json(); })
+                .then(function (data) {
+                    if (data.default_api_key) {
+                        document.getElementById('api-key-input').value = data.default_api_key;
+                    }
+                    if (data.default_serverchan_sendkey) {
+                        document.getElementById('serverchan-input').value = data.default_serverchan_sendkey;
+                    }
+                })
+                .catch(function () {});
+
+            bindEvents();
+        });
+
+        function bindEvents() {
+            document.getElementById('today-btn').addEventListener('click', function () {
+                const t = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+                document.getElementById('date-input').value = t;
+            });
+
+            document.getElementById('yesterday-btn').addEventListener('click', function () {
+                const y = new Date();
+                y.setDate(y.getDate() - 1);
+                document.getElementById('date-input').value = y.toISOString().slice(0, 10).replace(/-/g, '');
+            });
+
+            document.getElementById('toggle-key-btn').addEventListener('click', function () {
+                const input = document.getElementById('api-key-input');
+                const icon = this.querySelector('i');
+                if (isKeyVisible) {
+                    input.type = 'password';
+                    icon.className = 'fa fa-eye-slash';
+                } else {
+                    input.type = 'text';
+                    icon.className = 'fa fa-eye';
+                }
+                isKeyVisible = !isKeyVisible;
+            });
+
+            let isSctVisible = false;
+            document.getElementById('toggle-sct-btn').addEventListener('click', function () {
+                const input = document.getElementById('serverchan-input');
+                const icon = this.querySelector('i');
+                if (isSctVisible) {
+                    input.type = 'password';
+                    icon.className = 'fa fa-eye-slash';
+                } else {
+                    input.type = 'text';
+                    icon.className = 'fa fa-eye';
+                }
+                isSctVisible = !isSctVisible;
+            });
+
+            document.getElementById('replay-btn').addEventListener('click', startReplay);
+
+            document.getElementById('clear-log-btn').addEventListener('click', function () {
+                document.getElementById('log-container').innerHTML = '';
+                lastLogCount = 0;
+                addLog('日志已清空');
+            });
+
+            document.getElementById('clear-result-btn').addEventListener('click', function () {
+                document.getElementById('result-container').innerHTML = '';
+                lastResultText = '';
+                document.getElementById('save-btn').disabled = true;
+                document.getElementById('copy-btn').disabled = true;
+                document.getElementById('status-text').textContent = '已清空';
+            });
+
+            document.getElementById('save-btn').addEventListener('click', saveReport);
+            document.getElementById('copy-btn').addEventListener('click', copyReport);
+
+            document.getElementById('date-input').addEventListener('keydown', function (e) {
+                if (e.key === 'Enter') startReplay();
+            });
+        }
+
+        function startReplay() {
+            const date = document.getElementById('date-input').value.trim();
+            const apiKey = document.getElementById('api-key-input').value.trim();
+            const serverchanSendkey = document.getElementById('serverchan-input').value.trim();
+
+            if (!date || date.length !== 8) {
+                showToast('日期格式应为 YYYYMMDD，如 20260309', 'error');
+                return;
+            }
+            if (!/^\d{8}$/.test(date)) {
+                showToast('日期须为 8 位数字', 'error');
+                return;
+            }
+            if (!apiKey) {
+                showToast('请输入智谱 API Key', 'error');
+                return;
+            }
+
+            document.getElementById('log-container').innerHTML = '';
+            lastLogCount = 0;
+            document.getElementById('result-container').innerHTML = '';
+            lastResultText = '';
+            document.getElementById('save-btn').disabled = true;
+            document.getElementById('copy-btn').disabled = true;
+            document.getElementById('status-text').textContent = '正在连接…';
+            setProgressUI(0);
+            document.getElementById('elapsed-wrap').classList.add('hidden');
+
+            setRunningState(true);
+
+            fetch('/api/start_replay', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ date: date, api_key: apiKey, serverchan_sendkey: serverchanSendkey })
+            })
+                .then(function (response) {
+                    if (response.status === 409) {
+                        return response.json().then(function (d) {
+                            throw new Error(d.error || '已有任务在运行');
+                        });
+                    }
+                    if (!response.ok) {
+                        return response.text().then(function (t) {
+                            throw new Error('请求失败 ' + response.status + (t ? '：' + t.slice(0, 80) : ''));
+                        });
+                    }
+                    return response.json();
+                })
+                .then(function (data) {
+                    if (data.error) {
+                        showToast(data.error, 'error');
+                        setRunningState(false);
+                        setProgressUI(0);
+                        document.getElementById('status-text').textContent = '就绪';
+                        return;
+                    }
+                    document.getElementById('status-text').textContent = '运行中';
+                    startPolling();
+                })
+                .catch(function (err) {
+                    console.error(err);
+                    showToast(err.message || '启动失败', 'error');
+                    setRunningState(false);
+                    setProgressUI(0);
+                    document.getElementById('status-text').textContent = '就绪';
+                });
+        }
+
+        function pollTaskOnce() {
+            fetch('/api/task_status')
+                .then(function (r) {
+                    if (!r.ok) throw new Error('状态轮询失败');
+                    return r.json();
+                })
+                .then(function (data) {
+                    if (data.logs && data.logs.length > lastLogCount) {
+                        for (let i = lastLogCount; i < data.logs.length; i++) {
+                            addLog(data.logs[i].message);
+                        }
+                        lastLogCount = data.logs.length;
+                    }
+
+                    document.getElementById('status-text').textContent = getStatusText(data.status);
+
+                    const ew = document.getElementById('elapsed-wrap');
+                    if (data.status === 'running') {
+                        ew.classList.remove('hidden');
+                        document.getElementById('elapsed-text').textContent = String(
+                            Math.floor((Date.now() - pollStartTime) / 1000)
+                        );
+                    } else {
+                        ew.classList.add('hidden');
+                    }
+
+                    if (data.progress !== undefined && data.progress !== null) {
+                        setProgressUI(data.progress);
+                    }
+
+                    if (data.status === 'completed') {
+                        lastResultText = data.result || '';
+                        document.getElementById('result-container').innerHTML = formatResult(data.result);
+                        document.getElementById('save-btn').disabled = false;
+                        document.getElementById('copy-btn').disabled = false;
+                        updateEmotionDashboard(data.result || '');
+                        clearInterval(pollingInterval);
+                        pollingInterval = null;
+                        setRunningState(false);
+                        document.getElementById('status-text').textContent = '已完成';
+                        showToast('报告已生成', 'success');
+                        const sec = document.getElementById('result-section');
+                        if (sec) sec.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                    } else if (data.status === 'error') {
+                        lastResultText = data.result || '';
+                        document.getElementById('result-container').innerHTML =
+                            '<pre class="text-rose-300/95 text-sm whitespace-pre-wrap font-mono leading-relaxed border border-rose-500/20 rounded-xl p-4 bg-rose-950/30">' +
+                            escapeHtml(data.result || '未知错误') + '</pre>';
+                        clearInterval(pollingInterval);
+                        pollingInterval = null;
+                        setRunningState(false);
+                        document.getElementById('status-text').textContent = '失败';
+                        showToast('任务失败，请查看结果区', 'error');
+                    }
+                })
+                .catch(function (err) {
+                    console.error(err);
+                    clearInterval(pollingInterval);
+                    pollingInterval = null;
+                    setRunningState(false);
+                    setProgressUI(0);
+                    document.getElementById('status-text').textContent = '就绪';
+                    document.getElementById('elapsed-wrap').classList.add('hidden');
+                    showToast('网络异常，轮询已停止', 'error');
+                });
+        }
+
+        function startPolling() {
+            if (pollingInterval) clearInterval(pollingInterval);
+            pollStartTime = Date.now();
+            document.getElementById('elapsed-wrap').classList.remove('hidden');
+            document.getElementById('elapsed-text').textContent = '0';
+            pollTaskOnce();
+            pollingInterval = setInterval(pollTaskOnce, 1000);
+        }
+
+        function escapeHtml(s) {
+            const d = document.createElement('div');
+            d.textContent = s;
+            return d.innerHTML;
+        }
+
+        function getStatusText(status) {
+            switch (status) {
+                case 'idle': return '就绪';
+                case 'running': return '运行中';
+                case 'completed': return '已完成';
+                case 'error': return '失败';
+                default: return status;
+            }
+        }
+
+        function addLog(message) {
+            const logContainer = document.getElementById('log-container');
+            const timestamp = new Date().toLocaleTimeString();
+            logContainer.innerHTML += '<div class="mb-1 text-gray-300">[' + timestamp + '] ' + escapeHtml(message) + '</div>';
+            logContainer.scrollTop = logContainer.scrollHeight;
+        }
+
+        function formatResult(text) {
+            if (!text) return '<p class="text-gray-600 text-center py-12">暂无内容</p>';
+            lastResultText = text;
+            if (typeof marked !== 'undefined' && typeof DOMPurify !== 'undefined') {
+                try {
+                    marked.setOptions({ gfm: true, breaks: true });
+                    const raw = marked.parse(text);
+                    const safe = DOMPurify.sanitize(raw);
+                    return '<div class="report-md">' + safe + '</div>';
+                } catch (e) {
+                    console.warn(e);
+                }
+            }
+            return legacyFormatResult(text);
+        }
+
+        function legacyFormatResult(text) {
+            const sections = text.split('## ');
+            let html = '';
+            sections.forEach(function (section) {
+                if (!section.trim()) return;
+                const lines = section.split('\n');
+                const title = lines[0].trim();
+                const content = lines.slice(1).join('\n').trim();
+                let bar = '#6366f1';
+                let bg = 'rgba(99,102,241,0.08)';
+                if (title.indexOf('市场阶段') >= 0) { bar = '#818cf8'; bg = 'rgba(99,102,241,0.12)'; }
+                else if (title.indexOf('主线') >= 0 || title.indexOf('选股') >= 0) { bar = '#34d399'; bg = 'rgba(52,211,153,0.1)'; }
+                else if (title.indexOf('预案') >= 0 || title.indexOf('竞价') >= 0) { bar = '#fbbf24'; bg = 'rgba(251,191,36,0.1)'; }
+                else if (title.indexOf('风险') >= 0) { bar = '#fb7185'; bg = 'rgba(251,113,133,0.1)'; }
+                html += createSection(title, content, bar, bg);
+            });
+            return html || '<pre class="text-sm text-gray-300 whitespace-pre-wrap font-mono leading-relaxed">' + escapeHtml(text) + '</pre>';
+        }
+
+        function createSection(title, content, barColor, bgTint) {
+            let processedContent = content.replace(/\n- (.*?)(?=\n- |$)/g, function (_, item) {
+                return '<li class="mb-2">' + item.trim() + '</li>';
+            });
+            processedContent = processedContent.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+            processedContent = processedContent.replace(/\*\*分析\*\*：(.*?)(?=\n|$)/g, '<div class="text-gray-500 mt-2 mb-4">$1</div>');
+            const wrapStyle = 'border-radius:1rem;padding:1.25rem;margin-bottom:1rem;border:1px solid rgba(255,255,255,0.06);border-left:4px solid ' + barColor + ';background:' + bgTint + ';';
+            return (
+                '<div style="' + wrapStyle + '">' +
+                '<h3 class="text-lg font-semibold mb-3 text-white tracking-tight font-display">' + escapeHtml(title) + '</h3>' +
+                '<div class="text-sm text-gray-300 leading-relaxed">' +
+                (processedContent.indexOf('<li>') >= 0 ? '<ul class="list-disc pl-5">' + processedContent + '</ul>' : processedContent) +
+                '</div></div>'
+            );
+        }
+
+        function copyReport() {
+            const t = lastResultText || document.getElementById('result-container').innerText;
+            if (!t || !t.trim()) {
+                showToast('没有可复制的内容', 'error');
+                return;
+            }
+            if (navigator.clipboard && navigator.clipboard.writeText) {
+                navigator.clipboard.writeText(t).then(function () {
+                    showToast('已复制到剪贴板', 'success');
+                }).catch(function () {
+                    showToast('复制失败，请手动选择文本', 'error');
+                });
+            } else {
+                showToast('浏览器不支持一键复制', 'error');
+            }
+        }
+
+        function updateEmotionDashboard(result) {
+            if (!result || typeof result !== 'string') return;
+            // 从结果中提取情绪温度
+            let temp = 0;
+            // 匹配多种格式：情绪温度：20°C 或 情绪温度20°C
+            const tempMatch = result.match(/情绪温度[：:]?\s*(\d+)°C/);
+            if (tempMatch) {
+                temp = parseInt(tempMatch[1], 10) || 0;
+            } else {
+                // 如果没有直接的情绪温度，根据市场阶段和其他指标估算
+                const phaseMatch = result.match(/当前市场阶段：([^\n]+)/) || result.match(/市场阶段：([^\n]+)/);
+                if (phaseMatch) {
+                    const phase = phaseMatch[1];
+                    if (phase.includes('主升期')) {
+                        temp = 80;
+                    } else if (phase.includes('震荡期')) {
+                        temp = 50;
+                    } else if (phase.includes('退潮期')) {
+                        temp = 20;
+                    }
+                }
+            }
+            
+            // 更新情绪温度显示
+            const tempNum = parseInt(temp, 10) || 0;
+            document.getElementById('emotion-temperature').innerHTML =
+                '<span class="mr-1">' + tempNum + '</span><span class="text-base font-normal text-gray-500">°C</span>';
+            document.getElementById('temperature-bar').style.width = tempNum + '%';
+            // 根据温度设置颜色
+            const tempBar = document.getElementById('temperature-bar');
+            if (tempNum < 30) {
+                tempBar.className = 'h-full bg-blue-500 transition-all duration-500';
+            } else if (tempNum < 70) {
+                tempBar.className = 'h-full bg-yellow-500 transition-all duration-500';
+            } else {
+                tempBar.className = 'h-full bg-red-500 transition-all duration-500';
+            }
+
+            // 从结果中提取市场阶段
+            const phaseMatch = result.match(/当前市场阶段：([^\n]+)/) || result.match(/市场阶段：([^\n]+)/);
+            if (phaseMatch) {
+                const phase = phaseMatch[1];
+                document.getElementById('market-phase').textContent = phase;
+                // 更新阶段描述
+                let phaseDesc = '';
+                if (phase.includes('主升期')) {
+                    phaseDesc = '市场情绪高涨，机会较多';
+                } else if (phase.includes('震荡期')) {
+                    phaseDesc = '市场情绪平稳，谨慎操作';
+                } else if (phase.includes('退潮期')) {
+                    phaseDesc = '市场情绪低迷，控制仓位';
+                } else {
+                    phaseDesc = '--';
+                }
+                document.getElementById('phase-desc').textContent = phaseDesc;
+            }
+
+            // 从结果中提取建议仓位
+            const positionMatch = result.match(/建议仓位：([^\n]+)/);
+            if (positionMatch) {
+                const position = positionMatch[1];
+                document.getElementById('position-suggestion').textContent = position;
+                // 更新仓位条
+                let positionPercent = 0;
+                if (position.includes('80%')) {
+                    positionPercent = 80;
+                } else if (position.includes('30%')) {
+                    positionPercent = 30;
+                } else if (position.includes('0-10%')) {
+                    positionPercent = 5;
+                }
+                document.getElementById('position-bar').style.width = positionPercent + '%';
+            }
+
+            // 从结果中提取北向资金
+            let northMoney = '--亿';
+            let northDesc = '数据暂缺';
+            
+            // 匹配多种格式的北向资金数据
+            const northMatch = result.match(/北向资金净流入[：:]?\s*([^\n]+)/) || result.match(/北向资金[：:]?\s*([^\n]+)/);
+            if (northMatch) {
+                northMoney = northMatch[1];
+                // 更新北向资金描述
+                const northValue = parseFloat(northMoney);
+                if (!isNaN(northValue)) {
+                    if (northValue > 50) {
+                        northDesc = '大幅流入，市场看好';
+                    } else if (northValue > 0) {
+                        northDesc = '小幅流入，市场稳定';
+                    } else if (northValue < -50) {
+                        northDesc = '大幅流出，市场谨慎';
+                    } else if (northValue < 0) {
+                        northDesc = '小幅流出，注意风险';
+                    } else {
+                        northDesc = '无明显流入流出';
+                    }
+                }
+            }
+            
+            document.getElementById('north-money').textContent = northMoney;
+            document.getElementById('north-desc').textContent = northDesc;
+        }
+
+        function saveReport() {
+            const content =
+                (lastResultText && lastResultText.trim()) ||
+                document.getElementById('result-container').innerText;
+            if (!content || !content.trim()) {
+                showToast('没有可保存的内容', 'error');
+                return;
+            }
+
+            const date = document.getElementById('date-input').value;
+            const timestamp = new Date().toLocaleTimeString().replace(/:/g, '');
+            const filename = '复盘报告_' + date + '_' + timestamp + '.txt';
+
+            const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = filename;
+            link.click();
+            URL.revokeObjectURL(url);
+
+            showToast('已保存为 ' + filename, 'success');
+            addLog('报告已保存为：' + filename);
+        }
+    </script>
+</body>
+</html>
