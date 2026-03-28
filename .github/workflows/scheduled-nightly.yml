@@ -1,18 +1,30 @@
-# 北京时间每天 21:00 触发；仅当「当日为 A 股交易日」时才跑复盘并发微信，周末/节假日脚本直接跳过（成功退出）。
+# 北京时间每天 21:00 触发；仅当「当日为 A 股交易日」时才跑复盘并发微信，周末/节假日直接跳过（成功退出）。
 # 须在仓库 Secrets 中配置（Settings → Secrets and variables → Actions）：
 #   ZHIPU_API_KEY       智谱 API Key
 #   SERVERCHAN_SENDKEY  Server酱 SendKey；多人推送可在同一 Secret 内用英文逗号写多个：SCTxxx,SCTyyy
 # 可选：
-#   SERVERCHAN_SENDKEY_FRIEND  朋友的 SendKey（单独一个 Secret，与上面叠加推送）
+#   SERVERCHAN_SENDKEY_FRIEND  朋友的 SendKey（单独 Secret，与上面叠加推送）
 #
-# 说明：cron 使用 UTC。北京时间 21:00 = UTC 13:00（中国无夏令时）。
-# GitHub 可能对定时任务有几分钟抖动；仅默认分支会按计划执行。
+# 说明：cron 使用 UTC。北京时间 21:00 = UTC 13:00。GitHub 可能对定时任务有几分钟抖动。
+# 仅默认分支会按计划执行；并发组避免定时与手动同时跑两套任务。
 name: Nightly replay (21:00 CST)
 
 on:
   schedule:
     - cron: "0 13 * * *"
   workflow_dispatch:
+    inputs:
+      date:
+        description: "可选，指定复盘日 YYYYMMDD（须为交易日）。留空则按北京时间当日判断。"
+        required: false
+        type: string
+
+concurrency:
+  group: nightly-replay-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
   replay:
@@ -20,6 +32,8 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
       - uses: actions/setup-python@v5
         with:
@@ -35,4 +49,13 @@ jobs:
           ZHIPU_API_KEY: ${{ secrets.ZHIPU_API_KEY }}
           SERVERCHAN_SENDKEY: ${{ secrets.SERVERCHAN_SENDKEY }}
           SERVERCHAN_SENDKEY_2: ${{ secrets.SERVERCHAN_SENDKEY_FRIEND }}
-        run: python scripts/nightly_replay.py
+        run: |
+          set -e
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            D='${{ github.event.inputs.date }}'
+            if [ -n "$D" ]; then
+              python scripts/nightly_replay.py --date "$D"
+              exit $?
+            fi
+          fi
+          python scripts/nightly_replay.py

@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import time
 from datetime import datetime
 
 # 项目根加入 path
@@ -66,7 +67,16 @@ def main() -> int:
         cache_expire=cm.get("cache_expire", 3600),
         retry_times=cm.get("retry_times", 1),
     )
-    trade_days = fetcher.get_trade_cal()
+    trade_days: list = []
+    for attempt in range(3):
+        trade_days = fetcher.get_trade_cal()
+        if trade_days:
+            break
+        print(
+            f"[nightly] 交易日历暂不可用，{5 * (attempt + 1)} 秒后重试 ({attempt + 1}/3)…",
+            flush=True,
+        )
+        time.sleep(5 * (attempt + 1))
     if not trade_days:
         print("无法获取 A 股交易日历，请检查网络或 akshare 数据源", file=sys.stderr)
         return 1
