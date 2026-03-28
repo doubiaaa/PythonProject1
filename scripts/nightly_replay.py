@@ -9,7 +9,8 @@
   python scripts/nightly_replay.py
   python scripts/nightly_replay.py --date 20260328
 
-密钥优先级：环境变量 ZHIPU_API_KEY、SERVERCHAN_SENDKEY > replay_config.json
+密钥优先级：环境变量 ZHIPU_API_KEY、SERVERCHAN_SENDKEY（可多 key）> replay_config.json
+多个 Server酱：同一变量内用英文逗号分隔，或使用 SERVERCHAN_SENDKEY_2 / _3
 """
 
 from __future__ import annotations
@@ -83,9 +84,13 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
-    if not serverchan_sendkey:
+
+    from app.services.serverchan_notify import has_serverchan_keys
+
+    if not has_serverchan_keys(serverchan_sendkey or None):
         print(
-            "未配置 Server酱：请设置环境变量 SERVERCHAN_SENDKEY 或在 replay_config.json 中填写 serverchan_sendkey",
+            "未配置 Server酱：环境变量 SERVERCHAN_SENDKEY / SERVERCHAN_SENDKEY_2、"
+            "或 replay_config.json 中 serverchan_sendkey（可填多个 key，英文逗号分隔）",
             file=sys.stderr,
         )
         return 1

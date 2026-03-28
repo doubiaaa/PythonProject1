@@ -10,7 +10,7 @@ CONFIG_FILE = os.path.join(_PROJECT_ROOT, "replay_config.json")
 # 默认配置
 DEFAULT_CONFIG = {
     "zhipu_api_key": "",
-    "serverchan_sendkey": "",  # Server酱 Turbo SendKey（SCT…），空则不发微信
+    "serverchan_sendkey": "",  # Server酱 SendKey；多个用英文逗号分隔，空则不发微信
     "cache_expire": 3600,  # 缓存过期时间（秒）
     "retry_times": 1,  # 网络请求重试次数
 }
