@@ -319,9 +319,9 @@ def main() -> int:
             if cm.get("enable_simulated_account", False):
                 _maybe_plot_sim_equity(cm)
 
-        from app.utils.email_template import embed_image_cid, markdown_to_html
+        from app.utils.email_template import embed_image_cid, markdown_to_email_html
 
-        html_frag = markdown_to_html(md)
+        html_frag = markdown_to_email_html(md)
         inline_images: list[tuple[str, str]] = []
         for cid, fname in (
             ("wchart", "weights_trend.png"),

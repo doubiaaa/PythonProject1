@@ -186,6 +186,7 @@ class DataFetcher:
         self._last_news_push_prefix: str = ""
         # 程序选股 meta（龙头池等），供存档与周度统计
         self._last_auction_meta: dict = {}
+        self._last_email_kpi: dict = {}
 
     def _is_cache_valid(self, key):
         if key in self.cache:
@@ -692,10 +693,12 @@ class DataFetcher:
         """获取完整市场摘要（文本形式）"""
         self._last_news_push_prefix = ""
         self._last_auction_meta = {}
+        self._last_email_kpi = {}
         summary = ""
         trade_days = self.get_trade_cal()
         if not trade_days:
             summary += "## 基础数据\n- 无法获取交易日历，请检查网络或数据源。\n\n"
+            self._last_email_kpi = {}
             return summary, date
         if date not in trade_days:
             print(f"{date} 非交易日，将自动调整")
@@ -844,4 +847,13 @@ class DataFetcher:
             self._last_news_push_prefix = ""
             self._last_auction_meta = {}
 
+        self._last_email_kpi = {
+            "zt_count": int(zt_count),
+            "dt_count": int(dt_count),
+            "zb_count": int(zb_count),
+            "zhaban_rate": float(zhaban_rate),
+            "premium": float(premium) if premium != -99 else None,
+            "premium_note": str(premium_note),
+            "position_suggestion": str(position_suggestion),
+        }
         return summary, date  # 返回可能调整后的日期

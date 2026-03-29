@@ -16,9 +16,11 @@ import markdown
 from app.utils.email_template import (
     build_email_content_prefix,
     build_plain_text_email_header,
-    markdown_to_html as _md_to_html_ext,
+    markdown_to_email_html,
     render_email_template,
+    render_simulated_trade_email,
     should_skip_rich_email_prefix,
+    simulated_trade_plain_text,
     strip_first_summary_line,
 )
 
@@ -97,6 +99,10 @@ def resolve_email_config(cm) -> Optional[dict[str, Any]]:
         "email_html_template_enabled": bool(cm.get("email_html_template_enabled", True)),
         "email_app_version": str(cm.get("email_app_version", "1.0")),
         "email_content_prefix": bool(cm.get("email_content_prefix", True)),
+        "email_news_max_items": int(cm.get("email_news_max_items", 3)),
+        "email_news_filter_prefix": str(
+            cm.get("email_news_filter_prefix", "【本文系数据通用户提前专享】")
+        ),
     }
 
 
@@ -260,7 +266,7 @@ def send_report_email(
         if use_template:
             ev_mail = dict(ev)
             ev_mail["content_prefix_html"] = content_prefix_html
-            inner = _md_to_html_ext(md_src)
+            inner = markdown_to_email_html(md_src)
             final_html = render_email_template(inner, subject, ev_mail)
         else:
             inner = _markdown_to_html_fragment_legacy(raw_body)
@@ -365,5 +371,41 @@ def send_beautiful_email(
         md_content,
         extra_vars=extra_vars,
         inline_images=inline_images,
+        timeout=timeout,
+    )
+
+
+def send_simulated_trade_notification(
+    cfg: dict[str, Any],
+    trade_info: dict[str, Any],
+    account_snapshot: dict[str, Any],
+    *,
+    extra_vars: Optional[dict[str, Any]] = None,
+    timeout: float = 45.0,
+) -> tuple[bool, str]:
+    """
+    模拟账户成交通知：专用 HTML 模板 + 纯文本备选。
+    trade_info 须含 side, symbol, name, shares, price, amount, reason, trade_date；
+    account_snapshot 须含 total_value, cash, holding_market_value, n_positions, initial_capital，可选 day_return_pct。
+    """
+    ev = dict(extra_vars or {})
+    subj = str(trade_info.get("subject") or "").strip()
+    if not subj:
+        side = trade_info.get("side") or "buy"
+        op = "买入" if side == "buy" else "卖出"
+        sym = trade_info.get("symbol") or ""
+        name = trade_info.get("name") or ""
+        sh = int(trade_info.get("shares") or 0)
+        price = float(trade_info.get("price") or 0)
+        subj = f"【模拟账户{op}】{sym} {name} {sh}股@{price:.2f}"
+    ev.setdefault("title", subj)
+    html_doc = render_simulated_trade_email(trade_info, account_snapshot, ev)
+    plain = simulated_trade_plain_text(trade_info, account_snapshot)
+    return send_report_email(
+        cfg,
+        subj,
+        plain,
+        html_document=html_doc,
+        extra_vars=ev,
         timeout=timeout,
     )

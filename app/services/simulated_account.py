@@ -222,20 +222,15 @@ class SimulatedAccount:
                 from app.services.email_notify import (
                     has_email_config,
                     resolve_email_config,
-                    send_report_email,
+                    send_simulated_trade_notification,
                 )
-                from app.utils.email_template import (
-                    build_simulated_trade_html,
-                    holdings_to_html_rows,
-                )
+                from app.utils.email_template import holdings_to_html_rows
 
                 ecfg = resolve_email_config(cm)
                 if not has_email_config(ecfg):
                     return
                 op = "买入" if side == "buy" else "卖出"
-                subj = (
-                    f"【复盘】【模拟账户{op}】{symbol} {name} {shares}股@{price:.2f}"
-                )
+                subj = f"【模拟账户{op}】{symbol} {name} {shares}股@{price:.2f}"
                 tv = float(self._state.get("total_value") or 0)
                 cash = float(self._state.get("cash") or 0)
                 n_hold = len(self._state.get("holdings") or [])
@@ -252,33 +247,43 @@ class SimulatedAccount:
                     except Exception:
                         pass
                 rows = holdings_to_html_rows(
-                    list(self._state.get("holdings") or []), limit=3
+                    list(self._state.get("holdings") or []),
+                    limit=3,
+                    total_portfolio_value=tv,
                 )
-                html_frag, plain = build_simulated_trade_html(
-                    side=side,
-                    symbol=str(symbol),
-                    name=str(name),
-                    shares=int(shares),
-                    price=float(price),
-                    amount=float(shares) * float(price),
-                    reason=str(reason),
-                    trade_date=str(trade_date),
-                    total_value=tv,
-                    cash=cash,
-                    holding_market_value=hmv,
-                    n_positions=n_hold,
-                    top_holdings_html_rows=rows,
-                    initial_capital=ic,
-                    day_return_pct=day_ret,
+                action_line = (
+                    f"建议跟随模拟账户【{op}】{symbol} {name}；"
+                    "以下为模拟盘逻辑输出，实盘请自行决策与风控。"
                 )
-                ok, msg = send_report_email(
+                trade_info = {
+                    "side": side,
+                    "symbol": str(symbol),
+                    "name": str(name),
+                    "shares": int(shares),
+                    "price": float(price),
+                    "amount": float(shares) * float(price),
+                    "reason": str(reason),
+                    "trade_date": str(trade_date),
+                    "subject": subj,
+                    "action_line": action_line,
+                    "top_holdings_html_rows": rows,
+                }
+                account_snapshot = {
+                    "total_value": tv,
+                    "cash": cash,
+                    "holding_market_value": hmv,
+                    "n_positions": n_hold,
+                    "initial_capital": ic,
+                    "day_return_pct": day_ret,
+                }
+                ok, msg = send_simulated_trade_notification(
                     ecfg,
-                    subj,
-                    plain,
-                    html_fragment=html_frag,
+                    trade_info,
+                    account_snapshot,
                     extra_vars={
                         "header_date": f"成交日 {trade_date}",
                         "title": subj,
+                        "email_app_version": ecfg.get("email_app_version", "1.0"),
                     },
                 )
                 if not ok and msg != "skipped":

@@ -1,0 +1,48 @@
+/**
+ * 邮件 HTML 内联样式参考（与 app/templates/email_base.html 中 <style> 保持一致）。
+ * 多数客户端忽略外链 CSS，实际渲染以模板内嵌样式为准。
+ */
+.email-outer {
+  font-family: "Segoe UI", "Helvetica Neue", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+  font-size: 16px;
+  line-height: 1.6;
+  color: #334155;
+  background: #f5f7fa;
+}
+.email-shell { max-width: 600px; margin: 0 auto; padding: 20px 12px 28px; }
+.email-card {
+  background: #ffffff;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid #e2e8f0;
+  box-shadow: 0 2px 12px rgba(15, 23, 42, 0.06);
+}
+.email-header-bar { background: #1e3a5f; color: #f8fafc; padding: 18px 20px; }
+.content.email-md table.md-table td:before,
+.content.email-md table.email-table td:before {
+  content: attr(data-label);
+}
+@media only screen and (max-width: 480px) {
+  .content.email-md table.md-table thead,
+  .content.email-md table.email-table thead { display: none !important; }
+  .content.email-md table.md-table tr,
+  .content.email-md table.email-table tr { display: block !important; margin-bottom: 12px !important; }
+  .content.email-md table.md-table td,
+  .content.email-md table.email-table td {
+    display: block !important;
+    text-align: right !important;
+    padding-left: 38% !important;
+    position: relative !important;
+  }
+  .content.email-md table.md-table td:before,
+  .content.email-md table.email-table td:before {
+    position: absolute !important;
+    left: 12px !important;
+    top: 10px !important;
+    width: 32% !important;
+    text-align: left !important;
+    font-weight: 600 !important;
+    font-size: 11px !important;
+    color: #64748b !important;
+  }
+}

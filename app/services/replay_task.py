@@ -5,6 +5,7 @@ from typing import Optional
 import requests
 
 from app.services.email_notify import has_email_config, send_report_email
+from app.utils.email_template import truncate_finance_news_push_prefix
 from app.services.serverchan_notify import send_serverchan
 from app.services.strategy_preference import (
     build_prompt_addon,
@@ -219,6 +220,17 @@ class ReplayTask:
             sum_line = _extract_summary_line(result)
             news_pre = (getattr(data_fetcher, "_last_news_push_prefix", None) or "").strip()
             if news_pre:
+                _cm_news = ConfigManager()
+                news_pre = truncate_finance_news_push_prefix(
+                    news_pre,
+                    max_items=int(_cm_news.get("email_news_max_items", 3)),
+                    filter_prefix=str(
+                        _cm_news.get(
+                            "email_news_filter_prefix",
+                            "【本文系数据通用户提前专享】",
+                        )
+                    ),
+                )
                 result = news_pre + result
                 self.log("已附加财经要闻摘要（推送与正文顶部）")
 
@@ -308,6 +320,7 @@ class ReplayTask:
                     if sum_line
                     else f"【复盘】✅ 复盘完成 · {MODE_NAME} · {actual_date}"
                 )
+                _kpi = getattr(data_fetcher, "_last_email_kpi", None) or {}
                 eok, emsg = send_report_email(
                     email_cfg,
                     subj,
@@ -315,6 +328,7 @@ class ReplayTask:
                     extra_vars={
                         "header_date": f"交易日 {actual_date}",
                         "title": subj,
+                        "email_kpi": _kpi,
                     },
                 )
                 if eok and emsg != "skipped":

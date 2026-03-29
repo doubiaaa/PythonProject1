@@ -22,6 +22,10 @@ DEFAULT_CONFIG = {
     "email_html_template_enabled": True,
     # 长文邮件是否增加「报告标题区 + 摘要高亮 + 报告说明」前缀（false 则仅渲染裸 Markdown）
     "email_content_prefix": True,
+    # 邮件顶部要闻推送块最多展示条数（超出则提示回系统查看全文）
+    "email_news_max_items": 3,
+    # 要闻摘要中需剔除的固定前缀（正则字面替换）
+    "email_news_filter_prefix": "【本文系数据通用户提前专享】",
     "email_app_version": "1.0",
     # 周报邮件是否尝试内嵌项目根目录下的权重/净值图（需先生成 png）
     "weekly_email_attach_charts": True,

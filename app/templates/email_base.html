@@ -6,119 +6,95 @@
   <meta http-equiv="X-UA-Compatible" content="IE=edge">
   <title>{{ title | e }}</title>
   <!--[if mso]>
-  <noscript>
-    <xml>
-      <o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings>
-    </xml>
-  </noscript>
+  <noscript><xml><o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript>
   <![endif]-->
   <style type="text/css">
     body { margin:0; padding:0; width:100% !important; -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%; }
-    .email-root { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; font-size:16px; line-height:1.65; color:#1e293b; background:#e8edf3; }
-    .email-shell { max-width:600px; margin:0 auto; padding:20px 12px 32px; }
-    .email-card { background:#ffffff; border-radius:12px; overflow:hidden; box-shadow:0 4px 24px rgba(15, 23, 42, 0.08); border:1px solid #e2e8f0; }
-    .email-header { background:linear-gradient(135deg, #0f172a 0%, #1a365d 48%, #0c4a6e 100%); color:#f8fafc; padding:18px 20px 18px; }
-    .email-header h1 { margin:0 0 4px; font-size:17px; font-weight:600; letter-spacing:0.02em; line-height:1.35; }
-    .email-header .sub { margin:0; font-size:12px; opacity:0.9; font-weight:400; }
-    .email-header .hdr-icon { font-size:20px; line-height:1; opacity:0.95; }
-    .intel-badge-wrap { margin:0 0 18px; }
+    a { color:#1e40af; }
+    .email-outer { font-family:'Segoe UI','Helvetica Neue','PingFang SC','Hiragino Sans GB','Microsoft YaHei',sans-serif; font-size:16px; line-height:1.6; color:#334155; background:#f5f7fa; }
+    .email-shell { max-width:600px; margin:0 auto; padding:20px 12px 28px; }
+    .email-card { background:#ffffff; border-radius:12px; overflow:hidden; border:1px solid #e2e8f0; box-shadow:0 2px 12px rgba(15,23,42,0.06); }
+    .email-header-bar { background:#1e3a5f; color:#f8fafc; padding:18px 20px; }
+    .email-header-bar h1 { margin:0 0 4px; font-size:18px; font-weight:600; letter-spacing:0.02em; line-height:1.3; }
+    .email-header-bar .sub { margin:0; font-size:12px; opacity:0.92; font-weight:400; }
+    .email-body-pad { padding:20px 20px 24px; color:#334155; }
+    .intel-badge-wrap { margin:0 0 16px; }
     .intel-badge { display:inline-block; padding:6px 14px; border-radius:999px; font-size:10px; font-weight:700; letter-spacing:0.08em; background:#dcfce7; color:#166534; text-transform:uppercase; }
-    .email-body { padding:22px 22px 28px; color:#334155; }
-    .email-body .content { font-size:15px; }
-    .email-body .content h1 { font-size:1.45em; color:#0f172a; font-weight:700; border-bottom:1px solid #e2e8f0; padding-bottom:10px; margin:0 0 14px; letter-spacing:-0.02em; }
-    .email-body .content h2 { font-size:1.12em; color:#1e293b; margin:1.35em 0 0.5em; padding:10px 12px; background:linear-gradient(90deg, #eff6ff 0%, rgba(239,246,255,0.35) 55%, transparent 100%); border-left:4px solid #3b82f6; border-radius:0 8px 8px 0; font-weight:600; }
-    .email-body .content h3 { font-size:1.05em; color:#334155; margin:1em 0 0.45em; font-weight:600; }
-    .email-body .content p { margin:0.65em 0; text-align:justify; text-justify:inter-ideograph; }
-    .email-body .content table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; }
-    .email-body .content th, .email-body .content td { border:1px solid #cbd5e1; padding:10px 12px; text-align:left; }
-    .email-body .content thead th { background:#f1f5f9; color:#0f172a; font-weight:600; font-size:12px; letter-spacing:0.04em; text-transform:uppercase; }
-    .email-body .content tbody tr:nth-child(even) { background:#f8fafc; }
-    .email-body .content blockquote { border-left:4px solid #2563eb; margin:14px 0; padding:12px 16px; background:#ffffff; color:#475569; border-radius:0 8px 8px 0; box-shadow:0 1px 3px rgba(15,23,42,0.06); font-style:italic; }
-    .email-body .content pre { background:#0f172a; color:#e2e8f0; padding:14px 16px; border-radius:8px; overflow-x:auto; font-size:12px; line-height:1.5; border:1px solid #1e293b; font-family:ui-monospace, Consolas, monospace; }
-    .email-body .content pre code { background:transparent; color:#bae6fd; padding:0; }
-    .email-body .content code { background:#f1f5f9; padding:2px 6px; border-radius:4px; font-size:0.88em; color:#0f172a; }
-    .email-body .content ul, .email-body .content ol { padding-left:1.35em; margin:0.5em 0; }
-    .email-body .content hr { border:none; border-top:1px solid #e2e8f0; margin:1.35em 0; }
-    .email-body .content img { max-width:100% !important; height:auto !important; display:block; margin:12px auto; border-radius:8px; }
-    .email-watermark { text-align:center; padding:12px 8px 4px; font-size:42px; font-weight:800; letter-spacing:0.15em; color:#0f172a; opacity:0.04; line-height:1; user-select:none; }
-    .email-footer { padding:16px 22px 20px; background:#f8fafc; border-top:1px solid #e2e8f0; font-size:12px; color:#64748b; line-height:1.65; }
-    .email-footer .disclaimer { margin:0 0 12px; padding:12px 14px; background:#fffbeb; border:1px solid #fde68a; border-radius:8px; color:#92400e; }
-    .email-footer .footer-nav { margin:0 0 10px; text-align:center; font-size:10px; letter-spacing:0.06em; color:#94a3b8; text-transform:uppercase; }
-    .email-footer .footer-nav a { color:#94a3b8; text-decoration:none; }
-    .email-footer .meta { margin:0 0 6px; text-align:center; }
-    .email-footer .meta-en { margin:0; text-align:center; font-size:11px; color:#94a3b8; letter-spacing:0.02em; }
-    .badge { display:inline-block; padding:4px 12px; border-radius:999px; font-size:12px; font-weight:600; letter-spacing:0.03em; }
-    .badge-buy { background:#dcfce7; color:#166534; }
-    .badge-sell { background:#fee2e2; color:#991b1b; }
-    .alert-info { padding:12px 14px; border-radius:8px; background:#eff6ff; border:1px solid #bfdbfe; color:#1e40af; margin:12px 0; font-size:14px; }
-    .alert-warn { padding:12px 14px; border-radius:8px; background:#fffbeb; border:1px solid #fde68a; color:#92400e; margin:12px 0; font-size:14px; }
-    @media (prefers-color-scheme: dark) {
-      .email-root { background:#0f172a !important; color:#e2e8f0 !important; }
-      .email-card { background:#1e293b !important; border-color:#334155 !important; }
-      .email-body { color:#cbd5e1 !important; }
-      .email-body .content { color:#cbd5e1 !important; }
-      .email-body .content h1 { color:#f8fafc !important; border-color:#334155 !important; }
-      .email-body .content h2 { color:#e2e8f0 !important; background:linear-gradient(90deg, #1e3a5f 0%, rgba(30,58,95,0.3) 100%) !important; border-left-color:#60a5fa !important; }
-      .email-body .content th, .email-body .content td { border-color:#475569 !important; }
-      .email-body .content thead th { background:#334155 !important; color:#f8fafc !important; }
-      .email-body .content tbody tr:nth-child(even) { background:#0f172a !important; }
-      .email-body .content blockquote { background:#1e293b !important; color:#94a3b8 !important; }
-      .email-watermark { color:#f1f5f9 !important; opacity:0.06 !important; }
-      .email-footer { background:#0f172a !important; border-color:#334155 !important; color:#94a3b8 !important; }
-      .email-footer .footer-nav a { color:#64748b !important; }
-    }
-    @media only screen and (max-width: 480px) {
-      .email-shell { padding:12px 8px 24px !important; }
-      .email-header { padding:16px 14px !important; }
-      .email-body { padding:18px 16px 22px !important; }
+    .content.email-md { font-size:15px; }
+    .content.email-md h1 { font-size:1.45em; color:#0f172a; font-weight:700; border-bottom:1px solid #e2e8f0; padding-bottom:10px; margin:0 0 14px; }
+    .content.email-md h2 { font-size:1.12em; color:#1e293b; margin:1.25em 0 0.5em; padding:10px 12px; background:linear-gradient(90deg,#eff6ff 0%,rgba(239,246,255,0.35) 55%,transparent 100%); border-left:4px solid #3b82f6; border-radius:0 8px 8px 0; font-weight:600; }
+    .content.email-md h3 { font-size:1.05em; color:#334155; margin:1em 0 0.45em; font-weight:600; }
+    .content.email-md p { margin:0.65em 0; }
+    .content.email-md table,
+    .email-table { border-collapse:collapse; width:100%; margin:14px 0; font-size:14px; }
+    .content.email-md th, .content.email-md td,
+    .email-table th, .email-table td { border:1px solid #e2e8f0; padding:10px 12px; text-align:left; }
+    .content.email-md thead th, .email-table thead th { background:#f1f5f9; color:#0f172a; font-weight:600; font-size:12px; }
+    .content.email-md tbody tr:nth-child(even) { background:#f8fafc; }
+    .content.email-md blockquote { border-left:4px solid #2563eb; margin:14px 0; padding:12px 16px; background:#fff; color:#475569; border-radius:0 8px 8px 0; }
+    .content.email-md pre { background:#0f172a; color:#e2e8f0; padding:14px 16px; border-radius:8px; font-size:12px; overflow-x:auto; border:1px solid #1e293b; }
+    .content.email-md code { background:#f1f5f9; padding:2px 6px; border-radius:4px; font-size:0.88em; }
+    .content.email-md img { max-width:100% !important; height:auto !important; display:block; margin:12px auto; border-radius:8px; }
+    .content.email-md ul, .content.email-md ol { padding-left:1.35em; margin:0.5em 0; }
+    .email-watermark { text-align:center; padding:10px 8px 4px; font-size:36px; font-weight:800; letter-spacing:0.12em; color:#0f172a; opacity:0.035; line-height:1; }
+    .email-footer { padding:14px 20px 18px; background:#f1f5f9; border-top:1px solid #e2e8f0; font-size:11px; color:#64748b; line-height:1.6; }
+    .email-footer .disclaimer { margin:0 0 10px; padding:10px 12px; background:#fffbeb; border:1px solid #fde68a; border-radius:8px; color:#92400e; }
+    .email-footer .meta { margin:0; text-align:center; }
+    .email-footer .gen { margin:8px 0 0; text-align:center; font-size:10px; color:#94a3b8; }
+    @media only screen and (max-width:480px) {
+      .email-shell { padding:12px 8px 20px !important; }
+      .email-body-pad { padding:16px 14px 20px !important; }
+      .content.email-md table.email-table,
+      table.md-table { border:0 !important; }
+      .content.email-md table.email-table thead,
+      table.md-table thead { display:none !important; }
+      .content.email-md table.email-table tr,
+      table.md-table tr { display:block !important; margin-bottom:12px !important; border:1px solid #e2e8f0 !important; border-radius:8px !important; overflow:hidden; }
+      .content.email-md table.email-table td,
+      table.md-table td { display:block !important; border:none !important; border-bottom:1px solid #f1f5f9 !important; text-align:right !important; padding:10px 12px !important; position:relative !important; padding-left:38% !important; min-height:20px; }
+      .content.email-md table.email-table td:last-child,
+      table.md-table td:last-child { border-bottom:none !important; }
+      .content.email-md table.email-table td:before,
+      table.md-table td:before { content:attr(data-label) !important; position:absolute !important; left:12px !important; top:10px !important; width:32% !important; text-align:left !important; font-weight:600 !important; font-size:11px !important; color:#64748b !important; white-space:normal !important; }
     }
   </style>
 </head>
-<body class="email-root" style="margin:0;padding:0;background:#e8edf3;">
-  <div class="email-shell" style="max-width:600px;margin:0 auto;padding:20px 12px 32px;">
-    <div class="email-card" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(15,23,42,0.08);border:1px solid #e2e8f0;">
-      <!-- 页头：原型三栏 — 机构图标 | 标题+日期 | 历史图标（table 布局便于 Outlook） -->
-      <div class="email-header" style="background:linear-gradient(135deg,#0f172a 0%,#1a365d 48%,#0c4a6e 100%);color:#f8fafc;padding:18px 20px 18px;">
+<body class="email-outer" style="margin:0;padding:0;background:#f5f7fa;">
+  <div class="email-shell" style="max-width:600px;margin:0 auto;padding:20px 12px 28px;">
+    <div class="email-card" style="background:#ffffff;border-radius:12px;overflow:hidden;border:1px solid #e2e8f0;box-shadow:0 2px 12px rgba(15,23,42,0.06);">
+      <div class="email-header-bar" style="background:#1e3a5f;color:#f8fafc;padding:18px 20px;">
         <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;">
           <tr>
-            <td class="hdr-icon" width="36" valign="middle" style="font-size:20px;line-height:1;width:36px;">&#127963;</td>
-            <td valign="middle" style="padding:0 8px;">
-              <h1 style="margin:0 0 4px;font-size:17px;font-weight:600;letter-spacing:0.02em;line-height:1.35;">{{ system_name | e }}</h1>
-              <p class="sub" style="margin:0;font-size:12px;opacity:0.9;">{{ header_date | e }}</p>
+            <td valign="middle" style="padding:0;">
+              <h1 style="margin:0 0 4px;font-size:18px;font-weight:600;color:#f8fafc;">{{ system_name | e }}</h1>
+              <p class="sub" style="margin:0;font-size:12px;opacity:0.92;color:#f8fafc;">{{ header_date | e }}</p>
             </td>
-            <td class="hdr-icon" width="36" valign="middle" align="right" style="font-size:18px;line-height:1;width:36px;">&#128336;</td>
           </tr>
         </table>
       </div>
-      <div class="email-body" style="padding:22px 22px 28px;color:#334155;">
+      <div class="email-body-pad" style="padding:20px 20px 24px;color:#334155;">
+        {% block main_column %}
         {% if show_intel_badge | default(true) %}
-        <div class="intel-badge-wrap" style="margin:0 0 18px;">
+        <div class="intel-badge-wrap" style="margin:0 0 16px;">
           <span class="intel-badge" style="display:inline-block;padding:6px 14px;border-radius:999px;font-size:10px;font-weight:700;letter-spacing:0.08em;background:#dcfce7;color:#166534;text-transform:uppercase;">{{ intel_badge_text | default('INTERNAL INTELLIGENCE REPORT') | e }}</span>
         </div>
         {% endif %}
         {% if content_prefix_html %}
-        <div class="email-prefix" style="margin:0 0 4px;">{{ content_prefix_html | safe }}</div>
+        <div class="email-prefix" style="margin:0 0 8px;">{{ content_prefix_html | safe }}</div>
         {% endif %}
-        <div class="content">{{ content_html | safe }}</div>
+        <div class="content email-md">{{ content_html | safe }}</div>
+        {% endblock %}
       </div>
-      <div class="email-watermark" style="text-align:center;padding:12px 8px 4px;font-size:42px;font-weight:800;letter-spacing:0.15em;color:#0f172a;opacity:0.04;line-height:1;">NB</div>
-      <div class="email-footer" style="padding:16px 22px 20px;background:#f8fafc;border-top:1px solid #e2e8f0;font-size:12px;color:#64748b;line-height:1.65;">
-        <p class="disclaimer" style="margin:0 0 12px;padding:12px 14px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;color:#92400e;">
+      <div class="email-watermark" style="text-align:center;padding:10px 8px 4px;font-size:36px;font-weight:800;letter-spacing:0.12em;color:#0f172a;opacity:0.035;">NB</div>
+      <div class="email-footer" style="padding:14px 20px 18px;background:#f1f5f9;border-top:1px solid #e2e8f0;font-size:11px;color:#64748b;">
+        <p class="disclaimer" style="margin:0 0 10px;padding:10px 12px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;color:#92400e;">
           <span style="margin-right:6px;" aria-hidden="true">&#9888;</span>{{ disclaimer | e }}
         </p>
-        {% if footer_show_nav | default(true) %}
-        <p class="footer-nav" style="margin:0 0 10px;text-align:center;font-size:10px;letter-spacing:0.06em;color:#94a3b8;text-transform:uppercase;">
-          <a href="#" style="color:#94a3b8;text-decoration:none;">Confidentiality</a>
-          <span style="color:#cbd5e1;padding:0 6px;">·</span>
-          <a href="#" style="color:#94a3b8;text-decoration:none;">System status</a>
-          <span style="color:#cbd5e1;padding:0 6px;">·</span>
-          <a href="#" style="color:#94a3b8;text-decoration:none;">Archive</a>
-        </p>
-        {% endif %}
-        <p class="meta" style="margin:0 0 6px;text-align:center;">{{ footer_line | e }}</p>
+        <p class="meta" style="margin:0;text-align:center;">{{ footer_line | e }}</p>
         {% if footer_line_secondary %}
-        <p class="meta-en" style="margin:0;text-align:center;font-size:11px;color:#94a3b8;letter-spacing:0.02em;">{{ footer_line_secondary | e }}</p>
+        <p class="meta" style="margin:6px 0 0;text-align:center;font-size:10px;color:#94a3b8;">{{ footer_line_secondary | e }}</p>
         {% endif %}
+        <p class="gen" style="margin:8px 0 0;text-align:center;font-size:10px;color:#94a3b8;">生成时间 {{ footer_generated_at | e }}</p>
       </div>
     </div>
   </div>
