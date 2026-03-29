@@ -109,6 +109,8 @@ class SignalReturnRow:
     exit_date: Optional[str]
     ret_pct: Optional[float]
     note: str
+    tag: str = ""
+    sector: str = ""
 
 
 def _iso_week_key(dstr: str) -> tuple[int, int]:
@@ -143,6 +145,8 @@ def compute_returns_for_records(
         name = str(r.get("name") or "")
         signal_date = str(r.get("signal_date") or "")
         rank = int(r.get("rank") or 0)
+        tag = str(r.get("tag") or "").strip()
+        sector = str(r.get("sector") or "").strip()
         entry, exit_day = entry_exit_for_signal(signal_date, trade_days)
         if not entry:
             rows.append(
@@ -155,6 +159,8 @@ def compute_returns_for_records(
                     None,
                     None,
                     "无次一交易日（数据不足）",
+                    tag=tag,
+                    sector=sector,
                 )
             )
             continue
@@ -169,6 +175,8 @@ def compute_returns_for_records(
                     None,
                     None,
                     "无法确定周内卖出日",
+                    tag=tag,
+                    sector=sector,
                 )
             )
             continue
@@ -183,6 +191,8 @@ def compute_returns_for_records(
                     exit_day,
                     None,
                     f"尚未到期（卖出日 {exit_day} 晚于报告锚点 {as_of_trade}）",
+                    tag=tag,
+                    sector=sector,
                 )
             )
             continue
@@ -198,6 +208,8 @@ def compute_returns_for_records(
                     exit_day,
                     None,
                     "行情获取失败",
+                    tag=tag,
+                    sector=sector,
                 )
             )
             continue
@@ -212,6 +224,8 @@ def compute_returns_for_records(
                 exit_day,
                 round(ret, 2),
                 "ok",
+                tag=tag,
+                sector=sector,
             )
         )
     return rows
@@ -240,12 +254,38 @@ def aggregate_completed(rows: list[SignalReturnRow]) -> dict[str, Any]:
     }
 
 
+def build_attribution_markdown(rows: list[SignalReturnRow]) -> str:
+    """按程序龙头池标签分组，做策略归因（可结算样本）。"""
+    done = [r for r in rows if r.ret_pct is not None and r.note == "ok"]
+    by_tag: dict[str, list[float]] = {}
+    for r in done:
+        t = r.tag or "（未标注）"
+        by_tag.setdefault(t, []).append(float(r.ret_pct))
+    if not by_tag:
+        return ""
+    lines = [
+        "### 策略归因（程序龙头池标签）\n\n",
+        "> 按选股时的 **标签**（人气龙头/活口核心等）分组，比较平均涨跌；"
+        "样本过少时仅作风格参考。\n\n",
+    ]
+    for tag, vals in sorted(by_tag.items(), key=lambda x: -len(x[1])):
+        avg = sum(vals) / len(vals)
+        up = sum(1 for v in vals if v > 0)
+        dn = sum(1 for v in vals if v < 0)
+        lines.append(
+            f"- **{tag}**：{len(vals)} 条，平均 **{round(avg, 2)}%**（涨{up}/跌{dn}）\n"
+        )
+    lines.append("\n")
+    return "".join(lines)
+
+
 def build_weekly_report_markdown(
     iso_year: int,
     iso_week: int,
     trade_days: list[str],
     anchor_trade: str,
     four_week_stats: Optional[list[dict[str, Any]]] = None,
+    fetcher: Any = None,
 ) -> str:
     """anchor_trade: 一般为上一交易日（周五），用于截断未到期信号。"""
     all_recs = load_all_records()
@@ -271,15 +311,33 @@ def build_weekly_report_markdown(
         + "\n\n"
     )
 
+    snapshot_md = ""
+    if fetcher is not None:
+        from app.utils.config import ConfigManager
+
+        if ConfigManager().get("enable_weekly_market_snapshot", True):
+            from app.services.weekly_market_snapshot import (
+                collect_week_snapshot,
+                format_snapshot_markdown,
+            )
+
+            snap = collect_week_snapshot(
+                fetcher, trade_days, iso_year, iso_week, anchor_trade
+            )
+            snapshot_md = format_snapshot_markdown(snap)
+    lines.append(snapshot_md)
+    lines.append(build_attribution_markdown(rows))
+
     lines.append("### 明细\n\n")
     lines.append(
-        "| 信号日 | 代码 | 名称 | 买入日 | 卖出日 | 区间涨跌 | 备注 |\n"
-        "|--------|------|------|--------|--------|----------|------|\n"
+        "| 信号日 | 代码 | 名称 | 标签 | 买入日 | 卖出日 | 区间涨跌 | 备注 |\n"
+        "|--------|------|------|------|--------|--------|----------|------|\n"
     )
     for r in sorted(rows, key=lambda x: (x.signal_date, x.code)):
         rp = f"{r.ret_pct}%" if r.ret_pct is not None else "—"
+        tag_s = r.tag or "—"
         lines.append(
-            f"| {r.signal_date} | {r.code} | {r.name} | {r.entry_date or '—'} | "
+            f"| {r.signal_date} | {r.code} | {r.name} | {r.tag or '—'} | {r.entry_date or '—'} | "
             f"{r.exit_date or '—'} | {rp} | {r.note} |\n"
         )
     lines.append("\n")
@@ -300,7 +358,7 @@ def build_weekly_report_markdown(
     lines.append(
         "### 使用说明\n\n"
         "- 数据来自本地 `data/watchlist_records.json`（每次复盘成功且程序产出龙头池时追加）。\n"
-        "- 「规律总结」可结合各周平均涨跌与主线环境自行归纳；也可打开配置中的智谱简评（若启用）。\n\n"
+        "- 市场快照与标签归因由程序汇总；**风格诊断与下周侧重**见文末智谱分析（若已开启 `enable_weekly_ai_insight`）。\n\n"
     )
     return "".join(lines)
 
@@ -366,8 +424,9 @@ def build_weekly_report_markdown_auto(
     anchor_trade: str,
     iso_year: int,
     iso_week: int,
+    fetcher: Any = None,
 ) -> str:
-    """生成周报 Markdown（含近四周汇总表 + 自然月汇总）。"""
+    """生成周报 Markdown（市场快照 + 标签归因 + 明细 + 近四周 + 自然月）。"""
     four = compute_four_week_rollup(
         trade_days, anchor_trade, iso_year, iso_week
     )
@@ -377,6 +436,7 @@ def build_weekly_report_markdown_auto(
         trade_days,
         anchor_trade,
         four_week_stats=four,
+        fetcher=fetcher,
     )
     md += build_monthly_section(trade_days, anchor_trade)
     return md

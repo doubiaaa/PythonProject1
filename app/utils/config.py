@@ -32,8 +32,10 @@ DEFAULT_CONFIG = {
     "enable_finance_news": True,
     # 龙头池周度邮件：周末脚本汇总涨跌；关闭则只跑脚本不寄信（或手动 --dry-run）
     "enable_weekly_performance_email": True,
-    # 周报复盘末尾是否调用智谱生成「短评」（需 ZHIPU_API_KEY）
+    # 周报复盘末尾是否调用智谱生成「风格诊断+下周侧重」（需 ZHIPU_API_KEY）
     "enable_weekly_ai_insight": True,
+    # 周报中是否拉取本周交易日市场快照（涨停家数、溢价、锚点日涨幅前20市值等）
+    "enable_weekly_market_snapshot": True,
 }
 
 

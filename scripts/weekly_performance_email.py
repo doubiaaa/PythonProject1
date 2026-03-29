@@ -30,15 +30,28 @@ def _resolve_anchor_trade(trade_days: list[str], as_of: datetime) -> str:
     return prior[-1]
 
 
-def _call_zhipu_insight(api_key: str, md: str) -> str:
+def _call_zhipu_weekly_style(api_key: str, md: str) -> str:
+    """周度「风格诊断」：归纳本周赚钱效应与模式，非简单复述数字。"""
     import requests
 
     url = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
     prompt = (
-        "你是 A 股短线复盘助手。根据下列「龙头池周度表现」统计（Markdown），"
-        "用 5～8 条短句总结：哪些情况上涨概率高、哪些情况需谨慎、对下周方向的一句中性判断。"
-        "不要重复表格数字，不要投资建议式措辞，用「观察」「统计上」等表述。\n\n"
-        + md[:12000]
+        "你是一位 A 股短线交易风格分析师。请根据下列「本周周报」全文（Markdown，"
+        "含市场快照、龙头池区间收益、按标签的策略归因、近四周与月度汇总），"
+        "完成**归纳与判断**，不要逐条复述表格中的数字。\n\n"
+        "【请按以下结构用 Markdown 输出】\n"
+        "### 风格诊断\n"
+        "- **情绪阶段**（四选一：主升期 / 震荡分歧 / 退潮期 / 数据不足）：简述依据（1～2 点）。\n"
+        "- **占优模式**（四选一：打板接力 / 趋势抱团 / 低吸反包 / 混沌难辨）：结合涨停家数、炸板率、溢价、连板高度、标签归因等简述。\n"
+        "- **体量风格**（大盘 / 小盘 / 数据不足）：参考文中「锚点日涨幅前 20」的市值与换手。\n"
+        "- **与上周对比**：若文中有上周溢价对比，写一句；若无则写「本周数据未提供上周对比」。\n\n"
+        "### 策略归因摘要\n"
+        "- 用一句话概括：本周程序龙头池样本中，哪类标签（若有）平均表现相对更好/更差（统计向，非荐股）。\n\n"
+        "### 下周侧重（观察向，非投资建议）\n"
+        "- 给出 2～4 条**观察清单式**建议（如更关注分歧转一致、控制追高节奏等），避免「买入/卖出」指令式措辞。\n\n"
+        "---\n\n"
+        "【本周周报全文】\n"
+        + md[:14000]
     )
     r = requests.post(
         url,
@@ -49,10 +62,10 @@ def _call_zhipu_insight(api_key: str, md: str) -> str:
         json={
             "model": "glm-4-flash",
             "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.35,
-            "max_tokens": 1024,
+            "temperature": 0.38,
+            "max_tokens": 2048,
         },
-        timeout=90,
+        timeout=120,
     )
     if r.status_code != 200:
         return f"（智谱简评失败：HTTP {r.status_code}）"
@@ -110,7 +123,7 @@ def main() -> int:
     from app.services.weekly_performance import build_weekly_report_markdown_auto
 
     md = build_weekly_report_markdown_auto(
-        trade_days, anchor, iso_year, iso_week
+        trade_days, anchor, iso_year, iso_week, fetcher=fetcher
     )
 
     if cm.get("enable_weekly_ai_insight", False):
@@ -119,12 +132,16 @@ def main() -> int:
         ).strip()
         if api_key:
             try:
-                insight = _call_zhipu_insight(api_key, md)
-                md += "\n## 智谱简评（统计归纳，非投资建议）\n\n" + insight + "\n"
+                insight = _call_zhipu_weekly_style(api_key, md)
+                md += (
+                    "\n## 智谱 · 风格诊断与下周侧重（归纳，非投资建议）\n\n"
+                    + insight
+                    + "\n"
+                )
             except Exception as e:
-                md += f"\n## 智谱简评\n\n（生成失败：{e}）\n"
+                md += f"\n## 智谱 · 风格诊断\n\n（生成失败：{e}）\n"
         else:
-            md += "\n## 智谱简评\n\n（未配置 ZHIPU_API_KEY）\n"
+            md += "\n## 智谱 · 风格诊断\n\n（未配置 ZHIPU_API_KEY）\n"
 
     if args.dry_run:
         print(md)
