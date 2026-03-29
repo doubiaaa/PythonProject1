@@ -11,6 +11,13 @@ CONFIG_FILE = os.path.join(_PROJECT_ROOT, "replay_config.json")
 DEFAULT_CONFIG = {
     "zhipu_api_key": "",
     "serverchan_sendkey": "",  # Server酱 SendKey；多个用英文逗号分隔，空则不发微信
+    "smtp_host": "",
+    "smtp_port": 587,
+    "smtp_user": "",
+    "smtp_password": "",
+    "smtp_from": "",
+    "mail_to": "",  # 收件人，多个英文逗号分隔
+    "smtp_ssl": False,  # True 时用 SMTPS（如 465）
     "cache_expire": 3600,  # 缓存过期时间（秒）
     "retry_times": 1,  # 网络请求重试次数
 }

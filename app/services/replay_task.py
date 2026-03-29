@@ -2,6 +2,7 @@ from datetime import datetime
 import threading
 import requests
 
+from app.services.email_notify import has_email_config, send_report_email
 from app.services.serverchan_notify import send_serverchan
 
 ZHIPU_API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
@@ -120,7 +121,7 @@ class ReplayTask:
         except Exception as e:
             return f"调用智谱API异常：{str(e)}"
 
-    def run(self, date, api_key, data_fetcher, serverchan_sendkey=None):
+    def run(self, date, api_key, data_fetcher, serverchan_sendkey=None, email_cfg=None):
         actual_date = date
         try:
             data_fetcher.set_current_task(self)
@@ -152,6 +153,13 @@ class ReplayTask:
                 self.log("微信通知已发送（Server酱）")
             elif not ok:
                 self.log(f"微信通知发送失败：{msg}")
+            if email_cfg and has_email_config(email_cfg):
+                subj = f"✅ 复盘完成 · {MODE_NAME} · {actual_date}"
+                eok, emsg = send_report_email(email_cfg, subj, result)
+                if eok and emsg != "skipped":
+                    self.log("邮件通知已发送")
+                elif not eok:
+                    self.log(f"邮件发送失败：{emsg}")
         except Exception as e:
             error_msg = f"❌ 复盘失败：{str(e)}"
             self.log(error_msg)
@@ -166,5 +174,12 @@ class ReplayTask:
                 self.log("失败通知已发送（Server酱）")
             elif not ok:
                 self.log(f"微信通知发送失败：{msg}")
+            if email_cfg and has_email_config(email_cfg):
+                subj = f"❌ 复盘失败 · {MODE_NAME} · {actual_date}"
+                eok, emsg = send_report_email(email_cfg, subj, error_msg)
+                if eok and emsg != "skipped":
+                    self.log("失败通知邮件已发送")
+                elif not eok:
+                    self.log(f"邮件发送失败：{emsg}")
         finally:
             data_fetcher.set_current_task(None)

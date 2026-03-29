@@ -181,7 +181,7 @@
                 </div>
                 <div>
                     <h2 class="font-display text-xl font-semibold text-white tracking-tight">配置</h2>
-                    <p class="text-sm text-gray-500 mt-1">复盘日期、智谱 API Key，可选 Server酱 推送至微信</p>
+                    <p class="text-sm text-gray-500 mt-1">复盘日期、智谱 API Key；可选 Server酱 与 SMTP 邮件</p>
                 </div>
             </div>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
@@ -212,6 +212,40 @@
                         <i class="fa fa-eye-slash"></i>
                     </button>
                 </div>
+            </div>
+            <div class="mt-8 pt-8 border-t border-white/[0.06]">
+                <label class="block text-xs font-medium uppercase tracking-wider text-gray-500 mb-2">邮件通知 SMTP（可选）</label>
+                <p class="text-xs text-gray-600 mb-4">与微信推送可同时开启。QQ/163 等需在邮箱设置里开启 SMTP 并使用<strong class="text-gray-500">授权码</strong>作为密码。端口 <span class="font-mono text-gray-500">465</span> 一般勾选 SSL；<span class="font-mono text-gray-500">587</span> 不勾选（STARTTLS）。</p>
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                        <label class="block text-[11px] text-gray-500 mb-1.5">SMTP 服务器</label>
+                        <input type="text" id="smtp-host-input" class="input-premium font-mono text-sm" placeholder="smtp.qq.com" autocomplete="off">
+                    </div>
+                    <div>
+                        <label class="block text-[11px] text-gray-500 mb-1.5">端口</label>
+                        <input type="number" id="smtp-port-input" class="input-premium font-mono text-sm" placeholder="587" min="1" max="65535" autocomplete="off">
+                    </div>
+                    <div>
+                        <label class="block text-[11px] text-gray-500 mb-1.5">用户名</label>
+                        <input type="text" id="smtp-user-input" class="input-premium font-mono text-sm" placeholder="邮箱账号" autocomplete="off">
+                    </div>
+                    <div>
+                        <label class="block text-[11px] text-gray-500 mb-1.5">密码 / 授权码</label>
+                        <input type="password" id="smtp-password-input" class="input-premium font-mono text-sm" placeholder="修改时请重新填写" autocomplete="off">
+                    </div>
+                    <div>
+                        <label class="block text-[11px] text-gray-500 mb-1.5">发件人（可空，默认同用户名）</label>
+                        <input type="text" id="smtp-from-input" class="input-premium font-mono text-sm" placeholder="name@qq.com" autocomplete="off">
+                    </div>
+                    <div>
+                        <label class="block text-[11px] text-gray-500 mb-1.5">收件人（多个用英文逗号）</label>
+                        <input type="text" id="mail-to-input" class="input-premium font-mono text-sm" placeholder="a@qq.com,b@163.com" autocomplete="off">
+                    </div>
+                </div>
+                <label class="mt-4 flex items-center gap-2 cursor-pointer text-sm text-gray-400 select-none">
+                    <input type="checkbox" id="smtp-ssl-input" class="rounded border-white/20 bg-white/5 text-indigo-500 focus:ring-indigo-500/40">
+                    使用 SSL（SMTPS，常见于端口 465）
+                </label>
             </div>
         </section>
 
@@ -394,8 +428,33 @@
                     if (data.default_serverchan_sendkey) {
                         document.getElementById('serverchan-input').value = data.default_serverchan_sendkey;
                     }
+                    if (data.smtp_host !== undefined) {
+                        document.getElementById('smtp-host-input').value = data.smtp_host || '';
+                    }
+                    if (data.smtp_port != null) {
+                        document.getElementById('smtp-port-input').value = String(data.smtp_port);
+                    }
+                    if (data.smtp_user !== undefined) {
+                        document.getElementById('smtp-user-input').value = data.smtp_user || '';
+                    }
+                    if (data.smtp_from !== undefined) {
+                        document.getElementById('smtp-from-input').value = data.smtp_from || '';
+                    }
+                    if (data.mail_to !== undefined) {
+                        document.getElementById('mail-to-input').value = data.mail_to || '';
+                    }
+                    if (data.smtp_ssl !== undefined) {
+                        document.getElementById('smtp-ssl-input').checked = !!data.smtp_ssl;
+                    }
+                    if (!document.getElementById('smtp-port-input').value) {
+                        document.getElementById('smtp-port-input').value = '587';
+                    }
                 })
-                .catch(function () {});
+                .catch(function () {
+                    if (!document.getElementById('smtp-port-input').value) {
+                        document.getElementById('smtp-port-input').value = '587';
+                    }
+                });
 
             bindEvents();
         });
@@ -467,6 +526,12 @@
             const date = document.getElementById('date-input').value.trim();
             const apiKey = document.getElementById('api-key-input').value.trim();
             const serverchanSendkey = document.getElementById('serverchan-input').value.trim();
+            const smtpPortRaw = document.getElementById('smtp-port-input').value.trim();
+            const smtpPort = smtpPortRaw ? parseInt(smtpPortRaw, 10) : 587;
+            if (smtpPortRaw && (isNaN(smtpPort) || smtpPort < 1 || smtpPort > 65535)) {
+                showToast('SMTP 端口应为 1～65535', 'error');
+                return;
+            }
 
             if (!date || date.length !== 8) {
                 showToast('日期格式应为 YYYYMMDD，如 20260309', 'error');
@@ -496,7 +561,18 @@
             fetch('/api/start_replay', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ date: date, api_key: apiKey, serverchan_sendkey: serverchanSendkey })
+                body: JSON.stringify({
+                    date: date,
+                    api_key: apiKey,
+                    serverchan_sendkey: serverchanSendkey,
+                    smtp_host: document.getElementById('smtp-host-input').value.trim(),
+                    smtp_port: smtpPort,
+                    smtp_user: document.getElementById('smtp-user-input').value.trim(),
+                    smtp_password: document.getElementById('smtp-password-input').value,
+                    smtp_from: document.getElementById('smtp-from-input').value.trim(),
+                    mail_to: document.getElementById('mail-to-input').value.trim(),
+                    smtp_ssl: document.getElementById('smtp-ssl-input').checked
+                })
             })
                 .then(function (response) {
                     if (response.status === 409) {

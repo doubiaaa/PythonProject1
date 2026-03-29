@@ -4,6 +4,9 @@
 #   SERVERCHAN_SENDKEY  Server酱 SendKey；多人推送可在同一 Secret 内用英文逗号写多个：SCTxxx,SCTyyy
 # 可选：
 #   SERVERCHAN_SENDKEY_FRIEND  朋友的 SendKey（单独 Secret，与上面叠加推送）
+# 邮件（与微信可同时配置；至少一种通知渠道即可）：
+#   SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASSWORD SMTP_FROM MAIL_TO
+#   SMTP_SSL  填 true / 1 表示 SMTPS（465）；留空则默认 STARTTLS（587）
 #
 # 说明：cron 使用 UTC。北京时间 21:00 = UTC 13:00。GitHub 可能对定时任务有几分钟抖动。
 # 仅默认分支会按计划执行；并发组避免定时与手动同时跑两套任务。
@@ -49,6 +52,13 @@ jobs:
           ZHIPU_API_KEY: ${{ secrets.ZHIPU_API_KEY }}
           SERVERCHAN_SENDKEY: ${{ secrets.SERVERCHAN_SENDKEY }}
           SERVERCHAN_SENDKEY_2: ${{ secrets.SERVERCHAN_SENDKEY_FRIEND }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+          SMTP_SSL: ${{ secrets.SMTP_SSL }}
         run: |
           set -e
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then

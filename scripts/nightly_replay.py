@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-定时复盘入口：拉取数据 → 智谱生成报告 → Server酱 推送微信。
+定时复盘入口：拉取数据 → 智谱生成报告 → Server酱 / SMTP 邮件通知（可并存）。
 
 默认使用「北京时间当日」作为复盘日；若该日不是 A 股交易日，则**不执行**复盘（退出码 0，不发微信），
 适用于定时任务在周末/节假日自动跳过。
@@ -9,8 +9,9 @@
   python scripts/nightly_replay.py
   python scripts/nightly_replay.py --date 20260328
 
-密钥优先级：环境变量 ZHIPU_API_KEY、SERVERCHAN_SENDKEY（可多 key）> replay_config.json
-多个 Server酱：同一变量内用英文逗号分隔，或使用 SERVERCHAN_SENDKEY_2 / _3
+密钥优先级：环境变量 > replay_config.json
+通知：至少配置 Server酱 或 SMTP 邮件其一；可同时配置。
+SMTP：SMTP_HOST、MAIL_TO 等见 app/services/email_notify.py
 """
 
 from __future__ import annotations
@@ -95,12 +96,16 @@ def main() -> int:
         )
         return 1
 
+    from app.services.email_notify import has_email_config, resolve_email_config
     from app.services.serverchan_notify import has_serverchan_keys
 
-    if not has_serverchan_keys(serverchan_sendkey or None):
+    email_cfg = resolve_email_config(cm)
+    if not has_serverchan_keys(
+        serverchan_sendkey or None
+    ) and not has_email_config(email_cfg):
         print(
-            "未配置 Server酱：环境变量 SERVERCHAN_SENDKEY / SERVERCHAN_SENDKEY_2、"
-            "或 replay_config.json 中 serverchan_sendkey（可填多个 key，英文逗号分隔）",
+            "未配置任何通知渠道：请配置 Server酱（SERVERCHAN_SENDKEY 等）"
+            "或 SMTP 邮件（SMTP_HOST + MAIL_TO 等），见 replay_config / GitHub Secrets",
             file=sys.stderr,
         )
         return 1
@@ -109,7 +114,13 @@ def main() -> int:
 
     task = ReplayTask()
     print(f"[nightly] 交易日={date_str}（北京时间自然日对应 A 股交易日）", flush=True)
-    task.run(date_str, api_key, fetcher, serverchan_sendkey=serverchan_sendkey)
+    task.run(
+        date_str,
+        api_key,
+        fetcher,
+        serverchan_sendkey=serverchan_sendkey,
+        email_cfg=email_cfg,
+    )
 
     if task.status == "error":
         print(task.result or "unknown error", file=sys.stderr)
