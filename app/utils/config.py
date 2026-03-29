@@ -46,6 +46,24 @@ DEFAULT_CONFIG = {
     "strategy_weight_smoothing": 0.3,
     "strategy_weight_max_single": 0.55,
     "strategy_weight_min_each": 0.08,
+    # 某风格桶样本数不足则不单独跟数据走（单周模式）
+    "min_trades_per_style_for_weight": 3,
+    # 多周衰减：最近 multi_week_lookback 周，越近权重越高
+    "use_multi_week_decay_for_strategy": True,
+    "multi_week_lookback": 4,
+    "strategy_week_decay_factor": 0.75,
+    # 多周合计每桶至少几条才参与该桶数据更新
+    "min_total_trades_per_bucket_multiweek": 3,
+    "strategy_max_change_per_week": 0.25,
+    "strategy_shift_pullback": 0.5,
+    # 每日复盘前轻量探测市场风格是否切换（多一次智谱调用）
+    "enable_style_stability_probe": True,
+    # 周报权重更新后异常时额外发一封提醒邮件
+    "enable_weekly_weight_anomaly_email": True,
+    # 模拟账户：按程序龙头池与收盘价撮合（data/simulated_account.json）
+    "enable_simulated_account": False,
+    "simulated_account_path": "data/simulated_account.json",
+    "simulated_config_path": "data/simulated_config.json",
 }
 
 

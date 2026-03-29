@@ -6,7 +6,12 @@ import requests
 
 from app.services.email_notify import has_email_config, send_report_email
 from app.services.serverchan_notify import send_serverchan
-from app.services.strategy_preference import build_prompt_addon
+from app.services.strategy_preference import (
+    build_prompt_addon,
+    effective_weights_from_stability,
+    load_strategy_preference,
+    probe_style_stability,
+)
 from app.services.watchlist_store import append_daily_top_pool
 from app.utils.config import ConfigManager
 
@@ -78,8 +83,19 @@ class ReplayTask:
                 "progress": self.progress,
             }
 
-    def build_prompt(self, date, market_data):
+    def build_prompt(
+        self,
+        date,
+        market_data,
+        *,
+        effective_weights=None,
+        stability_hint: str = "",
+    ):
         """单一模式：次日竞价半路；市场数据中已含程序化选股与 AI 提示块。"""
+        addon = build_prompt_addon(
+            effective_weights=effective_weights,
+            stability_hint=stability_hint or "",
+        )
         return f"""
 你是专注 **{MODE_NAME}** 的 A 股短线策略分析师。模式含义：**收盘后**完成程序选股，**次日集合竞价至早盘**结合分时强弱考虑**半路介入**，非盲目顶板。
 
@@ -128,7 +144,7 @@ class ReplayTask:
 > **免责声明**：以上分析基于公开数据与程序规则，仅供参考，不构成投资建议。股市有风险，投资需谨慎。
 
 ---
-{build_prompt_addon()}
+{addon}
 ## 今日市场数据（程序选股 + 基础指标 + AI 提示）
 {market_data}
 """
@@ -179,7 +195,24 @@ class ReplayTask:
 
             self.progress = 95
             self.log("数据获取完成，正在调用AI…")
-            prompt = self.build_prompt(actual_date, market_data)
+            eff_w = None
+            stab_hint = ""
+            _cm2 = ConfigManager()
+            if _cm2.get("enable_style_stability_probe", True):
+                try:
+                    stab = probe_style_stability(api_key, market_data)
+                    stab_hint = stab
+                    base = load_strategy_preference().get("strategy_weights") or {}
+                    eff_w = effective_weights_from_stability(stab, dict(base))
+                    self.log(f"风格稳定性探测：{stab}")
+                except Exception as ex:
+                    self.log(f"风格稳定性探测失败（沿用文件权重）：{ex}")
+            prompt = self.build_prompt(
+                actual_date,
+                market_data,
+                effective_weights=eff_w,
+                stability_hint=stab_hint,
+            )
             result = self.call_zhipu(api_key, prompt)
             result = _ensure_summary_line(result)
             self.log("报告首行已校验（必要时已补全摘要行）")
@@ -211,6 +244,43 @@ class ReplayTask:
                         self.log("风格指数已入库（data/market_style_indices.json）")
                 except Exception as ex:
                     self.log(f"风格指数入库失败：{ex}")
+            if _cm.get("enable_simulated_account", False) and ah_meta.get(
+                "program_completed"
+            ) and ah_meta.get("top_pool"):
+                try:
+                    from app.services.simulated_account import (
+                        SimulatedAccount,
+                        price_from_map,
+                        price_map_from_top_pool,
+                        recommendations_from_top_pool,
+                    )
+                    from app.services.strategy_preference import tag_to_bucket
+
+                    tp = ah_meta["top_pool"]
+                    pmap = price_map_from_top_pool(tp)
+                    recs = recommendations_from_top_pool(
+                        tp, tag_to_bucket_func=tag_to_bucket
+                    )
+                    acc = SimulatedAccount(
+                        account_path=_cm.get(
+                            "simulated_account_path", "data/simulated_account.json"
+                        ),
+                        config_path=_cm.get(
+                            "simulated_config_path", "data/simulated_config.json"
+                        ),
+                    )
+                    acc.update_prices(pmap)
+                    acc.execute_daily_trades(
+                        recs,
+                        actual_date,
+                        lambda s: price_from_map(pmap, s),
+                    )
+                    plan = acc.generate_daily_plan(actual_date)
+                    result = result + "\n\n---\n\n" + plan
+                    self.result = result
+                    self.log("模拟账户已更新（见文末操作备忘）")
+                except Exception as ex:
+                    self.log(f"模拟账户更新失败：{ex}")
             sc_title = (
                 f"✅ {sum_line} · {actual_date}"
                 if sum_line

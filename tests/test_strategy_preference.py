@@ -6,6 +6,8 @@ from app.services.strategy_preference import (
     _suggested_weights_from_rows,
     tag_to_bucket,
 )
+
+_OLD = {k: 0.2 for k in BUCKETS}
 from app.services.weekly_performance import SignalReturnRow
 
 
@@ -40,7 +42,9 @@ def test_suggested_weights():
             tag="活口核心",
         ),
     ]
-    w = _suggested_weights_from_rows(rows)
+    w, _counts = _suggested_weights_from_rows(
+        rows, _OLD, min_trades_per_style=1
+    )
     assert abs(sum(w[k] for k in BUCKETS) - 1.0) < 0.01
     assert w["龙头"] != w["低吸"]
 

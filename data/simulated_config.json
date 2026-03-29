@@ -1,0 +1,10 @@
+{
+  "buy_rule": "close_of_recommendation_day",
+  "sell_rule": "stop_loss_profit_or_5_days",
+  "stop_loss": -0.05,
+  "stop_profit": 0.15,
+  "max_holding_days": 5,
+  "max_positions": 5,
+  "position_size_pct": 0.2,
+  "min_cash_reserve": 500
+}

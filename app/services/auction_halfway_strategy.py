@@ -185,10 +185,16 @@ def _merge_spot_by_codes(codes: list[str], fetcher=None) -> dict[str, dict]:
             mv = float(pd.to_numeric(r.get("流通市值"), errors="coerce") or 0)
         elif "总市值" in sub.columns:
             mv = float(pd.to_numeric(r.get("总市值"), errors="coerce") or 0)
+        lp = 0.0
+        for col in ("最新价", "现价"):
+            if col in sub.columns:
+                lp = float(pd.to_numeric(r.get(col), errors="coerce") or 0)
+                break
         out[c] = {
             "流通市值": mv,
             "涨跌幅": float(pd.to_numeric(r.get("涨跌幅"), errors="coerce") or 0),
             "换手率": float(pd.to_numeric(r.get("换手率"), errors="coerce") or 0),
+            "close": lp,
         }
     return out
 
@@ -599,6 +605,9 @@ def build_auction_halfway_report(
             "sector": r["sector"],
             "tag": r["tag"],
             "s1_main": int(r.get("s1", 0)),
+            "close": round(
+                float(spot_full.get(r["code"], {}).get("close") or 0.0), 4
+            ),
         }
         for r in top
     ]

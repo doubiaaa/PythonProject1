@@ -6,5 +6,6 @@ __pycache__/
 .mypy_cache/
 replay_config.json
 data/strategy_evolution_log.jsonl
+data/simulated_account.json
 .env
 .env.*
