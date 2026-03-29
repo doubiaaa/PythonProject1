@@ -1,12 +1,16 @@
-"""SMTP 邮件通知（标准库，无额外依赖）"""
+"""SMTP 邮件：HTML（Markdown 渲染）+ 纯文本备选，提升邮箱可读性"""
 
 from __future__ import annotations
 
 import os
+import re
 import smtplib
+from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.utils import formataddr
 from typing import Any, Optional
+
+import markdown
 
 # 单封正文上限（字符），避免部分 SMTP 拒信
 MAX_BODY_CHARS = 200_000
@@ -83,6 +87,114 @@ def resolve_email_config(cm) -> Optional[dict[str, Any]]:
     }
 
 
+def _markdown_to_plain(text: str) -> str:
+    """将 Markdown 转为易读纯文本（无 **、## 等符号）。"""
+    if not text:
+        return ""
+    s = text
+    s = re.sub(r"^#{1,6}\s+(.+)$", r"\n\1\n", s, flags=re.MULTILINE)
+    s = re.sub(r"\*\*([^*]+)\*\*", r"\1", s)
+    s = re.sub(r"__(.+?)__", r"\1", s)
+    s = re.sub(r"(?<!\*)\*([^*]+)\*(?!\*)", r"\1", s)
+    s = re.sub(r"`([^`]+)`", r"\1", s)
+    s = re.sub(r"^\s*[-*+]\s+", "• ", s, flags=re.MULTILINE)
+    s = re.sub(r"^\s*(\d+)\.\s+", r"\1. ", s, flags=re.MULTILINE)
+    s = re.sub(r"\n{3,}", "\n\n", s)
+    return s.strip()
+
+
+def _markdown_to_html_fragment(md: str) -> str:
+    return markdown.markdown(
+        md,
+        extensions=[
+            "markdown.extensions.nl2br",
+            "markdown.extensions.fenced_code",
+            "markdown.extensions.tables",
+        ],
+        output_format="html5",
+    )
+
+
+def _wrap_email_html(fragment: str) -> str:
+    """移动端邮箱友好的 HTML 外壳与排版。"""
+    return f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+body {{
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", sans-serif;
+  font-size: 16px;
+  line-height: 1.7;
+  color: #1f2937;
+  background: #f9fafb;
+  margin: 0;
+  padding: 12px;
+}}
+.wrap {{
+  max-width: 720px;
+  margin: 0 auto;
+  background: #fff;
+  border-radius: 12px;
+  padding: 20px 18px 28px;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+}}
+h1 {{ font-size: 1.35rem; margin: 0 0 16px; color: #111827; border-bottom: 1px solid #e5e7eb; padding-bottom: 10px; }}
+h2 {{ font-size: 1.15rem; margin: 1.35em 0 0.5em; color: #374151; }}
+h3 {{ font-size: 1.05rem; margin: 1.15em 0 0.45em; color: #4b5563; }}
+h4, h5, h6 {{ font-size: 1rem; margin: 1em 0 0.35em; color: #4b5563; }}
+p {{ margin: 0.55em 0; }}
+ul, ol {{ padding-left: 1.35rem; margin: 0.5em 0; }}
+li {{ margin: 0.25em 0; }}
+strong {{ color: #111827; font-weight: 600; }}
+code {{
+  background: #f3f4f6;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.9em;
+}}
+pre {{
+  background: #f9fafb;
+  border: 1px solid #e5e7eb;
+  padding: 12px 14px;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 0.88em;
+}}
+pre code {{ background: none; padding: 0; }}
+blockquote {{
+  border-left: 4px solid #6366f1;
+  margin: 0.75em 0;
+  padding: 6px 0 6px 14px;
+  color: #6b7280;
+  background: #f5f5ff;
+  border-radius: 0 8px 8px 0;
+}}
+table {{
+  border-collapse: collapse;
+  width: 100%;
+  margin: 0.75em 0;
+  font-size: 0.95em;
+}}
+th, td {{
+  border: 1px solid #e5e7eb;
+  padding: 8px 10px;
+  text-align: left;
+}}
+th {{ background: #f3f4f6; }}
+hr {{ border: none; border-top: 1px solid #e5e7eb; margin: 1.25em 0; }}
+</style>
+</head>
+<body>
+<div class="wrap">
+{fragment}
+</div>
+</body>
+</html>"""
+
+
 def send_report_email(
     cfg: dict[str, Any],
     subject: str,
@@ -91,7 +203,8 @@ def send_report_email(
     timeout: float = 45.0,
 ) -> tuple[bool, str]:
     """
-    发送纯文本邮件。cfg 由 resolve_email_config 生成。
+    发送 multipart/alternative：HTML（Markdown 渲染）+ 纯文本备选。
+    cfg 由 resolve_email_config 生成。
     """
     if not has_email_config(cfg):
         return True, "skipped"
@@ -104,12 +217,21 @@ def send_report_email(
     use_ssl = bool(cfg.get("smtp_ssl"))
     if len(subject) > 200:
         subject = subject[:197] + "..."
-    if body and len(body) > MAX_BODY_CHARS:
-        body = body[: MAX_BODY_CHARS - 80] + "\n\n…（正文过长已截断）"
-    msg = MIMEText(body or " ", "plain", "utf-8")
+    raw = body or " "
+    if len(raw) > MAX_BODY_CHARS:
+        raw = raw[: MAX_BODY_CHARS - 80] + "\n\n…（正文过长已截断）"
+
+    plain_part = _markdown_to_plain(raw)
+    html_fragment = _markdown_to_html_fragment(raw)
+    html_part = _wrap_email_html(html_fragment)
+
+    msg = MIMEMultipart("alternative")
     msg["Subject"] = subject
     msg["From"] = formataddr(("复盘报告", mail_from)) if mail_from else ""
     msg["To"] = ", ".join(to_list)
+    msg.attach(MIMEText(plain_part, "plain", "utf-8"))
+    msg.attach(MIMEText(html_part, "html", "utf-8"))
+
     try:
         if use_ssl:
             with smtplib.SMTP_SSL(host, port, timeout=timeout) as smtp:
