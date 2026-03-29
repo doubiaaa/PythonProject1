@@ -11,7 +11,7 @@ from app.services.replay_task import ReplayTask
 config_mgr = ConfigManager()
 data_fetcher = DataFetcher(
     cache_expire=config_mgr.get("cache_expire", 3600),
-    retry_times=config_mgr.get("retry_times", 1)
+    retry_times=config_mgr.get("retry_times", 2),
 )
 
 # 全局任务实例

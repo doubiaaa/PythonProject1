@@ -25,6 +25,19 @@ def _extract_summary_line(text: str) -> Optional[str]:
     return None
 
 
+def _ensure_summary_line(text: str) -> str:
+    """模型未输出规范【摘要】首行时补一行，便于推送解析与阅读。"""
+    if not text or not str(text).strip():
+        return text
+    first = str(text).strip().split("\n")[0].strip()
+    if first.startswith("【摘要】"):
+        return text
+    return (
+        "【摘要】市场阶段：震荡期｜适宜度：中｜置信度：低（系统补全：模型未输出规范首行摘要）\n\n"
+        + text
+    )
+
+
 class ReplayTask:
     def __init__(self):
         self._lock = threading.RLock()
@@ -70,7 +83,8 @@ class ReplayTask:
 ## 硬性规则（违反则视为不合格输出）
 1. **必须与程序数据对齐**：程序给出的主线板块名称、龙头池标的（代码/名称/综合分排序）须优先采信；若你不认可，须**单独用一小段写清理由**，不得静默忽略。
 2. **须响应「【AI 提示】」块**：其中提到的数据缺失、置信度、冲突标的（技术面 vs 主线强度）须在正文中**逐条回应**，可合并叙述，不可省略。
-3. **全文须为 Markdown**；下列章节标题、顺序不得删改（可在节内增删，但总篇幅不宜过长）。
+3. 若市场数据中含 **【财经要闻·与程序观察标的】**：择要在「市场阶段」或「主线与程序选股」中呼应**与主线/龙头池相关**的外围信息，勿逐条复述快讯全文。
+4. **全文须为 Markdown**；下列章节标题、顺序不得删改（可在节内增删，但总篇幅不宜过长）。
 
 ## 输出结构（按顺序）
 
@@ -91,6 +105,13 @@ class ReplayTask:
 ### 3. 次日竞价半路预案
 **观察清单**须用 **Markdown 表格**，列至少包含：| 优先级 | 代码 | 名称 | 标签 | 简要理由 |
 （行数与程序龙头池对应，按综合分排序；可少于等于 5 行。）
+
+**表格示例（内容须替换为真实标的，勿照抄示例）：**
+
+| 优先级 | 代码 | 名称 | 标签 | 简要理由 |
+|--------|------|------|------|----------|
+| 1 | 600000 | 示例股份 | 人气龙头 | 程序综合分第一且与主线一致 |
+| 2 | 000001 | 示例控股 | 活口核心 | 承接与换手健康 |
 
 然后分条写：竞价关注（高开、量比、封单/抛压定性）、分时介入条件、价格与逻辑止损。
 
@@ -156,12 +177,18 @@ class ReplayTask:
             self.log("数据获取完成，正在调用AI…")
             prompt = self.build_prompt(actual_date, market_data)
             result = self.call_zhipu(api_key, prompt)
+            result = _ensure_summary_line(result)
+            self.log("报告首行已校验（必要时已补全摘要行）")
+            sum_line = _extract_summary_line(result)
+            news_pre = (getattr(data_fetcher, "_last_news_push_prefix", None) or "").strip()
+            if news_pre:
+                result = news_pre + result
+                self.log("已附加财经要闻摘要（推送与正文顶部）")
 
             self.progress = 100
             self.result = result
             self.log("分析完成")
             self.status = "completed"
-            sum_line = _extract_summary_line(result)
             sc_title = (
                 f"✅ {sum_line} · {actual_date}"
                 if sum_line

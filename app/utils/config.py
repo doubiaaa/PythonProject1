@@ -19,7 +19,17 @@ DEFAULT_CONFIG = {
     "mail_to": "",  # 收件人，多个英文逗号分隔
     "smtp_ssl": False,  # True 时用 SMTPS（如 465）
     "cache_expire": 3600,  # 缓存过期时间（秒）
-    "retry_times": 1,  # 网络请求重试次数
+    "retry_times": 2,  # AKShare 等网络请求重试次数（含首次）
+    # 策略权重（须约等于 1.0）；异常时程序回退默认
+    "w_main": 0.22,
+    "w_dragon": 0.18,
+    "w_kline": 0.18,
+    "w_liq": 0.14,
+    "w_tech": 0.28,
+    "tech_eval_topn": 12,  # 技术面精算队列长度（3～48）
+    "enable_tech_momentum": True,
+    # 财联社等公开要闻：拉取摘要并与龙头池/主线做关键词关联；关闭则不请求、不推送要闻块
+    "enable_finance_news": True,
 }
 
 

@@ -69,3 +69,9 @@ jobs:
             fi
           fi
           python scripts/nightly_replay.py
+
+      - name: Failure notify (Server酱)
+        if: failure()
+        env:
+          SERVERCHAN_SENDKEY: ${{ secrets.SERVERCHAN_SENDKEY }}
+        run: python scripts/notify_failure.py

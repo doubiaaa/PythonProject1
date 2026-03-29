@@ -34,12 +34,53 @@ MCAP_MIN = 30e8  # 30 亿
 ENABLE_TECH_MOMENTUM = True
 TECH_EVAL_TOPN = 12
 
-# 权重：主线 / 龙头地位 / 次日K线预期 / 流动性 / 趋势动量（和为 1）
+# 权重默认值（可被 replay_config.json 覆盖，见 _load_strategy_params）
 W_MAIN = 0.22
 W_DRAGON = 0.18
 W_KLINE = 0.18
 W_LIQ = 0.14
 W_TECH = 0.28
+
+
+def _load_strategy_params() -> dict:
+    """从 ConfigManager 读权重与技术面开关；权重和须≈1，否则回退默认。"""
+    from app.utils.config import ConfigManager
+
+    cm = ConfigManager()
+
+    def gf(key: str, default: float) -> float:
+        try:
+            return float(cm.get(key, default))
+        except (TypeError, ValueError):
+            return default
+
+    w_main = gf("w_main", W_MAIN)
+    w_dragon = gf("w_dragon", W_DRAGON)
+    w_kline = gf("w_kline", W_KLINE)
+    w_liq = gf("w_liq", W_LIQ)
+    w_tech = gf("w_tech", W_TECH)
+    s = w_main + w_dragon + w_kline + w_liq + w_tech
+    if abs(s - 1.0) > 0.02:
+        w_main, w_dragon, w_kline, w_liq, w_tech = W_MAIN, W_DRAGON, W_KLINE, W_LIQ, W_TECH
+    try:
+        topn = int(cm.get("tech_eval_topn", TECH_EVAL_TOPN))
+    except (TypeError, ValueError):
+        topn = TECH_EVAL_TOPN
+    topn = max(3, min(48, topn))
+    en = cm.get("enable_tech_momentum", ENABLE_TECH_MOMENTUM)
+    if isinstance(en, str):
+        enable_tech = en.strip().lower() in ("1", "true", "yes")
+    else:
+        enable_tech = bool(en)
+    return {
+        "w_main": w_main,
+        "w_dragon": w_dragon,
+        "w_kline": w_kline,
+        "w_liq": w_liq,
+        "w_tech": w_tech,
+        "tech_eval_topn": topn,
+        "enable_tech": enable_tech,
+    }
 
 
 def _log(fetcher, msg: str) -> None:
@@ -222,6 +263,14 @@ def build_auction_halfway_report(
         "program_completed": False,
         "abort_reason": None,
     }
+    P = _load_strategy_params()
+    W_MAIN = P["w_main"]
+    W_DRAGON = P["w_dragon"]
+    W_KLINE = P["w_kline"]
+    W_LIQ = P["w_liq"]
+    W_TECH = P["w_tech"]
+    TECH_EVAL_TOPN = P["tech_eval_topn"]
+    ENABLE_TECH_MOMENTUM = P["enable_tech"]
     lines = [f"## 【{MODE_NAME}】程序化选股结果\n"]
     lines.append(
         "- 数据来源：东方财富行业板块行情 + 成份股；与申万/同花顺分类存在差异，仅供参考。\n"

@@ -13,6 +13,90 @@ SECTOR_LIVE_CACHE_KEY = "sector_fund_flow_rank_live"
 YEST_PREMIUM_HIST_MAX_CODES = 100
 # 同一请求内可能多次拉全市场行情，短 TTL 复用
 SPOT_EM_CACHE_TTL_SEC = 90
+# 财联社要闻接口为「最新」列表，短缓存减轻重复请求
+FINANCE_NEWS_CACHE_KEY = "finance_news_main_cx"
+FINANCE_NEWS_CACHE_TTL_SEC = 600
+
+
+def _finance_news_enabled() -> bool:
+    try:
+        from app.utils.config import ConfigManager
+
+        return bool(ConfigManager().get("enable_finance_news", True))
+    except Exception:
+        return True
+
+
+def _expand_stock_name_keywords(name: str) -> list[str]:
+    """名称及去常见后缀后的简称，用于新闻文本匹配。"""
+    name = str(name).strip()
+    if not name:
+        return []
+    out = [name]
+    for suf in (
+        "股份有限公司",
+        "有限公司",
+        "股份",
+        "集团",
+        "控股",
+        "科技",
+        "技术",
+        "电子",
+        "药业",
+        "银行",
+    ):
+        if name.endswith(suf) and len(name) > len(suf) + 1:
+            out.append(name[: -len(suf)])
+    return list(dict.fromkeys(out))
+
+
+def _news_keywords_from_meta(ah_meta: dict) -> tuple[set[str], list[str]]:
+    codes: set[str] = set()
+    names: list[str] = []
+    for p in ah_meta.get("top_pool") or []:
+        c = str(p.get("code") or "").strip()
+        if c:
+            codes.add(c.zfill(6)[:6])
+            if c.isdigit():
+                codes.add(str(int(c)))
+        nm = str(p.get("name") or "").strip()
+        if nm:
+            names.extend(_expand_stock_name_keywords(nm))
+    for sec in ah_meta.get("main_sectors") or []:
+        s = str(sec).strip()
+        if len(s) >= 2:
+            names.append(s)
+    seen: set[str] = set()
+    uniq_names: list[str] = []
+    for n in names:
+        if n not in seen:
+            seen.add(n)
+            uniq_names.append(n)
+    return codes, uniq_names
+
+
+def _truncate_news_line(s: str, n: int) -> str:
+    s = str(s).strip().replace("\n", " ")
+    if len(s) <= n:
+        return s
+    return s[: n - 1] + "…"
+
+
+def _news_row_matches(
+    summary: str, codes: set[str], names: list[str]
+) -> tuple[bool, str]:
+    if not summary:
+        return False, ""
+    matched: list[str] = []
+    for c in codes:
+        if c in summary:
+            matched.append(c)
+    for n in names:
+        if len(n) >= 2 and n in summary:
+            matched.append(n[:12])
+    if not matched:
+        return False, ""
+    return True, "、".join(dict.fromkeys(matched))
 
 
 def _append_ai_context(
@@ -24,7 +108,8 @@ def _append_ai_context(
     premium: float,
     premium_note: str,
     sector_empty: bool,
-    north_money: float,
+    north_value: float,
+    north_status: str,
 ) -> str:
     """根据程序 meta 与当日基础指标，追加给大模型的「须回应」提示块。"""
     lines = ["\n## 【AI 提示】数据质量、程序状态与须回应点\n"]
@@ -46,9 +131,17 @@ def _append_ai_context(
         bullets.append(f"炸板数 **{zb_count}** 较多，须强调分歧与模式风险。")
     if sector_empty:
         bullets.append("板块资金流向块缺失，**主线叙事须以程序选股第一节为准**。")
-    if north_money == 0.0:
+    if north_status == "fetch_failed":
         bullets.append(
-            "北向资金为 0 或获取失败，**勿单独依赖北向**作核心依据。"
+            "北向资金接口**获取失败**，**勿将北向作为核心依据**。"
+        )
+    elif north_status == "empty_df":
+        bullets.append(
+            "北向资金返回**空表**，北向相关表述须标注**置信度低**。"
+        )
+    elif north_status == "ok_zero":
+        bullets.append(
+            "北向资金净流入为 **0**（接口口径），须结合其它维度判断，**勿单独依赖**。"
         )
     ar = meta.get("abort_reason")
     if ar:
@@ -89,6 +182,8 @@ class DataFetcher:
         self.current_task = None
         self._spot_em_cache_ts: float = 0.0
         self._spot_em_df = None
+        # get_market_summary 内写入，供复盘任务在推送/邮件正文顶部附加要闻摘要
+        self._last_news_push_prefix: str = ""
 
     def _is_cache_valid(self, key):
         if key in self.cache:
@@ -439,26 +534,161 @@ class DataFetcher:
             print(f"计算溢价异常: {e}")
             return -99.0, f"异常:{str(e)[:20]}"
 
-    def get_north_money(self, date):
-        """获取北向资金数据"""
+    def get_north_money(self, date) -> tuple[float, str]:
+        """
+        北向净流入（亿元）与状态。
+        状态：ok / ok_zero / empty_df / fetch_failed
+        """
         try:
-            # 尝试使用正确的接口获取北向资金数据
-            # 先尝试 stock_hsgt_north_net_flow_sina 接口
             df = ak.stock_hsgt_north_net_flow_sina(date=date)
-            if not df.empty:
-                # 检查列名是否存在
-                if '北向资金净流入' in df.columns:
-                    net_flow = df['北向资金净流入'].iloc[0]
-                    return round(net_flow / 1e8, 2)  # 转为亿元
-                elif '净流入' in df.columns:
-                    net_flow = df['净流入'].iloc[0]
-                    return round(net_flow / 1e8, 2)  # 转为亿元
+            if df is None or df.empty:
+                return 0.0, "empty_df"
+            if "北向资金净流入" in df.columns:
+                net_flow = df["北向资金净流入"].iloc[0]
+            elif "净流入" in df.columns:
+                net_flow = df["净流入"].iloc[0]
+            else:
+                return 0.0, "empty_df"
+            val = round(float(net_flow) / 1e8, 2)
+            if val == 0.0:
+                return 0.0, "ok_zero"
+            return val, "ok"
         except Exception as e:
             print(f"获取北向资金数据失败: {e}")
-        return 0.0
+            return 0.0, "fetch_failed"
+
+    def get_lhb_snippet_for_codes(self, date: str, codes: list[str]) -> str:
+        """新浪龙虎榜日表与龙头池代码交集，失败则返回说明行。"""
+        if not codes:
+            return ""
+        cache_key = f"lhb_daily_{date}"
+        if self._is_cache_valid(cache_key):
+            df = self._get_cache(cache_key)
+        else:
+            try:
+                df = self.fetch_with_retry(ak.stock_lhb_detail_daily_sina, date=date)
+                if df is None:
+                    df = pd.DataFrame()
+            except Exception as e:
+                print(f"龙虎榜日表获取失败: {e}")
+                df = pd.DataFrame()
+            self._set_cache(cache_key, df)
+        if df is None or df.empty:
+            return (
+                "\n## （可选）龙虎榜\n"
+                "- 当日龙虎榜明细**未获取到或为空**（网络/接口原因），勿臆测上榜情况。\n\n"
+            )
+        want = {str(c).zfill(6)[:6] for c in codes}
+        if "股票代码" not in df.columns:
+            return "\n## （可选）龙虎榜\n- 返回表结构异常，已跳过。\n\n"
+        df = df.copy()
+        df["股票代码"] = df["股票代码"].astype(str).str.zfill(6).str[:6]
+        sub = df[df["股票代码"].isin(want)]
+        if sub.empty:
+            return (
+                "\n## （可选）龙虎榜\n"
+                "- 龙头池标的在**当日龙虎榜明细中未出现**（或未覆盖），不代表优劣，仅作资金关注度参考。\n\n"
+            )
+        lines = ["\n## （可选）龙虎榜·与龙头池交集\n"]
+        lines.append(
+            "- 数据来源：新浪财经日表；与东财口径可能不一致，**仅供参考**。\n"
+        )
+        for _, row in sub.head(12).iterrows():
+            nm = row.get("股票名称", "")
+            cd = row.get("股票代码", "")
+            ind = row.get("指标", "")
+            lines.append(f"- {nm}（{cd}）{ind}\n")
+        lines.append("\n")
+        return "".join(lines)
+
+    def get_finance_news_bundle(self, date: str, ah_meta: dict) -> tuple[str, str]:
+        """
+        财联社等公开要闻：与龙头池代码/名称、主线板块做关键词匹配。
+        返回 (写入市场摘要的 Markdown 块, 推送/报告顶部用的短文本)。
+        """
+        if not _finance_news_enabled():
+            return "", ""
+        df = None
+        if FINANCE_NEWS_CACHE_KEY in self.cache:
+            ts, data = self.cache[FINANCE_NEWS_CACHE_KEY]
+            if time.time() - ts < FINANCE_NEWS_CACHE_TTL_SEC:
+                df = data
+        if df is None:
+            try:
+                df = self.fetch_with_retry(ak.stock_news_main_cx)
+            except Exception as e:
+                print(f"财经要闻获取失败: {e}")
+                df = pd.DataFrame()
+            self._set_cache(FINANCE_NEWS_CACHE_KEY, df)
+        if df is None or df.empty:
+            line = (
+                "\n## 【财经要闻·与程序观察标的】\n"
+                "- 要闻接口暂不可用或为空，今日不复述外围消息。\n\n"
+            )
+            return line, ""
+
+        codes, names = _news_keywords_from_meta(ah_meta or {})
+        related: list[tuple[str, str, str]] = []
+        general: list[tuple[str, str]] = []
+        for _, row in df.head(100).iterrows():
+            tag = str(row.get("tag") or "").strip()
+            summary = str(row.get("summary") or "").strip()
+            if not summary:
+                continue
+            ok, hint = _news_row_matches(summary, codes, names)
+            if ok:
+                related.append((tag, summary, hint))
+            else:
+                general.append((tag, summary))
+
+        lines = ["\n## 【财经要闻·与程序观察标的】\n"]
+        lines.append(
+            "> **说明**：摘要来自公开财经快讯；**个股/板块关联**为名称、代码关键词匹配，"
+            "可能存在误判或遗漏，仅供参考。\n\n"
+        )
+        push_lines: list[str] = [
+            f"📰 要闻速览（交易日 {date}）",
+            "（以下为快讯摘要，完整复盘见下文）",
+            "",
+        ]
+
+        if related:
+            lines.append("### 与龙头池 / 主线可能相关\n")
+            for tag, summary, hint in related[:10]:
+                ts = _truncate_news_line(summary, 160)
+                lines.append(f"- **〔{hint}〕** {tag}：{ts}\n")
+                if len(push_lines) < 22:
+                    push_lines.append(
+                        f"【关联·{hint}】{_truncate_news_line(summary, 100)}"
+                    )
+            lines.append("\n")
+
+        if general:
+            lines.append("### 宏观与市场要闻（摘录）\n")
+            for tag, summary in general[:8]:
+                ts = _truncate_news_line(summary, 160)
+                lines.append(f"- {tag}：{ts}\n")
+                if len(push_lines) < 22:
+                    push_lines.append(
+                        f"【要闻】{_truncate_news_line(summary, 100)}"
+                    )
+            lines.append("\n")
+
+        block = "".join(lines)
+        push_text = "\n".join(push_lines).strip()
+        if len(push_text) > 2400:
+            push_text = push_text[:2380] + "\n…（要闻已截断）"
+        if not related and not general:
+            block = (
+                "\n## 【财经要闻·与程序观察标的】\n"
+                "- 今日未解析到有效要闻条目。\n\n"
+            )
+            return block, ""
+        return block, push_text + "\n\n---\n\n"
 
     def get_market_summary(self, date):
         """获取完整市场摘要（文本形式）"""
+        self._last_news_push_prefix = ""
         summary = ""
         trade_days = self.get_trade_cal()
         if not trade_days:
@@ -475,7 +705,7 @@ class DataFetcher:
         df_zb = self.get_zb_pool(date)
         df_sector = self.get_sector_rank(date)
         premium, premium_note = self.get_yest_zt_premium(date, trade_days)
-        north_money = self.get_north_money(date)
+        north_money, north_status = self.get_north_money(date)
 
         zt_count = len(df_zt)
         dt_count = len(df_dt)
@@ -527,14 +757,27 @@ class DataFetcher:
         summary += f"- 炸板数：{zb_count}\n"
         summary += f"- 炸板率：{zhaban_rate}%\n"
         summary += f"- 昨日涨停溢价：{premium if premium != -99 else premium_note}\n"
-        summary += f"- 北向资金净流入：{north_money}亿\n"
+        if north_status == "fetch_failed":
+            summary += "- 北向资金净流入：**获取失败**（网络或接口原因，勿作为核心依据）\n"
+        elif north_status == "empty_df":
+            summary += "- 北向资金：**返回空表**（可信度低）\n"
+        elif north_status == "ok_zero":
+            summary += (
+                "- 北向资金净流入：**0 亿**（接口口径；可能为当日无成交或统计为零，请结合其它指标）\n"
+            )
+        else:
+            summary += f"- 北向资金净流入：{north_money}亿\n"
         summary += f"- 情绪温度：{sentiment_temp}°C\n"
         summary += f"- 市场阶段：{market_phase}\n"
         summary += f"- 建议仓位：{position_suggestion}\n\n"
 
         # 板块排名
         if not df_sector.empty:
-            summary += f"## 板块资金流向排名（前五，当前接口为行业资金流实时快照）\n"
+            summary += "## 板块资金流向排名（前五）\n"
+            summary += (
+                f"> **口径说明**：以下为东财等行业资金流相关接口的快照，与复盘日 **{date}** "
+                "的严格对齐可能存在偏差，仅作板块强弱结构参考。\n\n"
+            )
             for _, row in df_sector.iterrows():
                 summary += f"- {row['sector']}：涨幅 {row['pct']}%，主力净流入 {row['money']:.2f}亿\n"
             summary += "\n"
@@ -573,6 +816,14 @@ class DataFetcher:
 
             ah_text, ah_meta = build_auction_halfway_report(date, trade_days, self, df_zt)
             summary += ah_text
+            tp = ah_meta.get("top_pool") or []
+            if tp:
+                summary += self.get_lhb_snippet_for_codes(
+                    date, [p["code"] for p in tp[:5]]
+                )
+            nb_block, nb_push = self.get_finance_news_bundle(date, ah_meta)
+            summary += nb_block
+            self._last_news_push_prefix = nb_push
             summary += _append_ai_context(
                 ah_meta,
                 zt_count=zt_count,
@@ -581,9 +832,11 @@ class DataFetcher:
                 premium=premium,
                 premium_note=str(premium_note),
                 sector_empty=df_sector.empty,
-                north_money=north_money,
+                north_value=north_money,
+                north_status=north_status,
             )
         except Exception as e:
             summary += f"\n## 【次日竞价半路模式】选股\n- 执行异常：{e!s}\n\n"
+            self._last_news_push_prefix = ""
 
         return summary, date  # 返回可能调整后的日期

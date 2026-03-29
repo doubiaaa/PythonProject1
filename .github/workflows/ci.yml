@@ -33,3 +33,6 @@ jobs:
 
       - name: Smoke test (import Flask app)
         run: python -c "from app import app; assert app is not None"
+
+      - name: Run pytest
+        run: pytest tests/ -q
