@@ -1,0 +1,15 @@
+/**
+ * 与 app/templates/email_base.html 内联样式保持一致，供本地预览或文档引用。
+ * 实际 SMTP 邮件以模板内 <style> 与关键内联属性为准。
+ */
+
+.email-root { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; }
+.email-card { max-width: 600px; margin: 0 auto; background: #fff; border-radius: 12px; border: 1px solid #e2e8f0; }
+.email-header { background: linear-gradient(135deg, #0f172a, #1e3a5f, #0c4a6e); color: #f8fafc; padding: 22px 24px; }
+.email-body .content table { border-collapse: collapse; width: 100%; }
+.email-body .content th, .email-body .content td { border: 1px solid #cbd5e1; padding: 8px 12px; }
+.badge-buy { background: #dcfce7; color: #166534; }
+.badge-sell { background: #fee2e2; color: #991b1b; }
+.alert-info { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; padding: 12px 14px; border-radius: 8px; }
+.alert-warn { background: #fffbeb; border: 1px solid #fde68a; color: #92400e; padding: 12px 14px; border-radius: 8px; }
+.chart-wrap img { max-width: 100%; height: auto; display: block; margin: 12px auto; }

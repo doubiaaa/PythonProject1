@@ -18,6 +18,11 @@ DEFAULT_CONFIG = {
     "smtp_from": "",
     "mail_to": "",  # 收件人，多个英文逗号分隔
     "smtp_ssl": False,  # True 时用 SMTPS（如 465）
+    # 邮件正文是否套统一 HTML 模板（false 时退回旧版简单 HTML 外壳 + 纯文本备选）
+    "email_html_template_enabled": True,
+    "email_app_version": "1.0",
+    # 周报邮件是否尝试内嵌项目根目录下的权重/净值图（需先生成 png）
+    "weekly_email_attach_charts": True,
     "cache_expire": 3600,  # 缓存过期时间（秒）
     "retry_times": 2,  # AKShare 等网络请求重试次数（含首次）
     # 策略权重（须约等于 1.0）；异常时程序回退默认

@@ -222,7 +222,11 @@ class SimulatedAccount:
                 from app.services.email_notify import (
                     has_email_config,
                     resolve_email_config,
-                    send_simple_email,
+                    send_report_email,
+                )
+                from app.utils.email_template import (
+                    build_simulated_trade_html,
+                    holdings_to_html_rows,
                 )
 
                 ecfg = resolve_email_config(cm)
@@ -230,27 +234,53 @@ class SimulatedAccount:
                     return
                 op = "买入" if side == "buy" else "卖出"
                 subj = (
-                    f"【模拟账户{op}】{symbol} {name} {shares}股@{price:.2f}"
+                    f"【复盘】【模拟账户{op}】{symbol} {name} {shares}股@{price:.2f}"
                 )
                 tv = float(self._state.get("total_value") or 0)
                 cash = float(self._state.get("cash") or 0)
                 n_hold = len(self._state.get("holdings") or [])
-                body = (
-                    f"## 模拟账户 · {op}\n\n"
-                    f"- **操作类型**：{op}\n"
-                    f"- **代码**：{symbol} ；**名称**：{name}\n"
-                    f"- **成交数量**：{shares} 股\n"
-                    f"- **成交价格**：{price:.4f} 元\n"
-                    f"- **理由**：{reason}\n"
-                    f"- **成交日**：{trade_date}\n"
-                    f"- **操作后总资产**：{tv:,.2f} 元\n"
-                    f"- **操作后现金**：{cash:,.2f} 元\n\n"
-                    f"### 持仓概览\n\n"
-                    f"- **持仓只数**：{n_hold}\n"
-                    f"- **前三大持仓**（按市值近似）：\n\n"
-                    f"{self._holdings_top_summary(3)}\n"
+                hmv = max(0.0, tv - cash)
+                ic = float(self._state.get("initial_capital") or 0) or 10000.0
+                day_ret: Optional[float] = None
+                ds = self._state.get("daily_series") or []
+                if isinstance(ds, list) and len(ds) >= 2:
+                    try:
+                        v0 = float(ds[-2].get("total_value") or 0)
+                        v1 = float(ds[-1].get("total_value") or 0)
+                        if v0 > 0:
+                            day_ret = (v1 / v0 - 1.0) * 100.0
+                    except Exception:
+                        pass
+                rows = holdings_to_html_rows(
+                    list(self._state.get("holdings") or []), limit=3
                 )
-                ok, msg = send_simple_email(subj, body, ecfg)
+                html_frag, plain = build_simulated_trade_html(
+                    side=side,
+                    symbol=str(symbol),
+                    name=str(name),
+                    shares=int(shares),
+                    price=float(price),
+                    amount=float(shares) * float(price),
+                    reason=str(reason),
+                    trade_date=str(trade_date),
+                    total_value=tv,
+                    cash=cash,
+                    holding_market_value=hmv,
+                    n_positions=n_hold,
+                    top_holdings_html_rows=rows,
+                    initial_capital=ic,
+                    day_return_pct=day_ret,
+                )
+                ok, msg = send_report_email(
+                    ecfg,
+                    subj,
+                    plain,
+                    html_fragment=html_frag,
+                    extra_vars={
+                        "header_date": f"成交日 {trade_date}",
+                        "title": subj,
+                    },
+                )
                 if not ok and msg != "skipped":
                     _logger.warning("模拟账户成交邮件发送失败：%s", msg)
             except Exception as ex:

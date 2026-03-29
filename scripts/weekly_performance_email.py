@@ -260,10 +260,20 @@ def main() -> int:
                     ecfg = resolve_email_config(cm)
                     if has_email_config(ecfg):
                         subj_a = (
-                            f"⚠️ 策略权重异常 · {iso_year}-W{iso_week:02d} · {anchor}"
+                            f"【复盘】⚠️ 策略权重异常 · {iso_year}-W{iso_week:02d} · {anchor}"
                         )
-                        body_a = "\n".join(f"- {a}" for a in alerts)
-                        ok_a, msg_a = send_report_email(ecfg, subj_a, body_a)
+                        body_a = "## 策略权重异常\n\n" + "\n".join(
+                            f"- {x}" for x in alerts
+                        )
+                        ok_a, msg_a = send_report_email(
+                            ecfg,
+                            subj_a,
+                            body_a,
+                            extra_vars={
+                                "header_date": f"{iso_year} 年第 {iso_week} 周",
+                                "title": subj_a,
+                            },
+                        )
                         if ok_a:
                             print("已发送权重异常提醒邮件。", flush=True)
                         else:
@@ -304,8 +314,38 @@ def main() -> int:
             print("未配置 SMTP，无法发邮件（可用 --dry-run 查看正文）", file=sys.stderr)
             return 1
 
-        subj = f"📊 龙头池周度表现 · {iso_year}年第{iso_week}周 · 锚点{anchor}"
-        ok, msg = send_report_email(email_cfg, subj, md)
+        if cm.get("weekly_email_attach_charts", True):
+            _maybe_plot_weights()
+            if cm.get("enable_simulated_account", False):
+                _maybe_plot_sim_equity(cm)
+
+        from app.utils.email_template import embed_image_cid, markdown_to_html
+
+        html_frag = markdown_to_html(md)
+        inline_images: list[tuple[str, str]] = []
+        for cid, fname in (
+            ("wchart", "weights_trend.png"),
+            ("eqchart", "simulated_equity.png"),
+        ):
+            p = os.path.join(_ROOT, fname)
+            if os.path.isfile(p):
+                html_frag = embed_image_cid(html_frag, p, cid)
+                inline_images.append((cid, p))
+
+        subj = (
+            f"【复盘】📊 龙头池周度表现 · {iso_year}年第{iso_week}周 · 锚点{anchor}"
+        )
+        ok, msg = send_report_email(
+            email_cfg,
+            subj,
+            md,
+            html_fragment=html_frag,
+            inline_images=inline_images or None,
+            extra_vars={
+                "header_date": f"{iso_year}年第{iso_week}周 · 锚点 {anchor}",
+                "title": subj,
+            },
+        )
         if not ok:
             print(f"发送失败：{msg}", file=sys.stderr)
             return 1

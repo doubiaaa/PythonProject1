@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="X-UA-Compatible" content="IE=edge">
+  <title>{{ title | e }}</title>
+  <!--[if mso]>
+  <noscript>
+    <xml>
+      <o:OfficeDocumentSettings><o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings>
+    </xml>
+  </noscript>
+  <![endif]-->
+  <style type="text/css">
+    /* 基础：多数客户端保留 <style>；关键布局辅以内联 */
+    body { margin:0; padding:0; width:100% !important; -webkit-text-size-adjust:100%; -ms-text-size-adjust:100%; }
+    .email-root { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif; font-size:16px; line-height:1.65; color:#1e293b; background:#e8edf3; }
+    .email-shell { max-width:600px; margin:0 auto; padding:20px 12px 32px; }
+    .email-card { background:#ffffff; border-radius:12px; overflow:hidden; box-shadow:0 4px 24px rgba(15, 23, 42, 0.08); border:1px solid #e2e8f0; }
+    .email-header { background:linear-gradient(135deg, #0f172a 0%, #1e3a5f 45%, #0c4a6e 100%); color:#f8fafc; padding:22px 24px 20px; }
+    .email-header h1 { margin:0 0 6px; font-size:18px; font-weight:600; letter-spacing:0.02em; }
+    .email-header .sub { margin:0; font-size:13px; opacity:0.88; font-weight:400; }
+    .email-body { padding:24px 22px 28px; color:#334155; }
+    .email-body .content { font-size:15px; }
+    .email-body .content h1 { font-size:1.35em; color:#0f172a; border-bottom:1px solid #e2e8f0; padding-bottom:8px; margin:0 0 16px; }
+    .email-body .content h2 { font-size:1.15em; color:#1e293b; margin:1.25em 0 0.5em; }
+    .email-body .content h3 { font-size:1.05em; color:#334155; margin:1em 0 0.45em; }
+    .email-body .content p { margin:0.6em 0; }
+    .email-body .content table { border-collapse:collapse; width:100%; margin:12px 0; font-size:14px; }
+    .email-body .content th, .email-body .content td { border:1px solid #cbd5e1; padding:10px 12px; text-align:left; }
+    .email-body .content thead th { background:#f1f5f9; color:#0f172a; font-weight:600; }
+    .email-body .content tbody tr:nth-child(even) { background:#f8fafc; }
+    .email-body .content blockquote { border-left:4px solid #2563eb; margin:12px 0; padding:8px 14px; background:#eff6ff; color:#475569; border-radius:0 8px 8px 0; }
+    .email-body .content pre { background:#0f172a; color:#e2e8f0; padding:14px 16px; border-radius:8px; overflow-x:auto; font-size:13px; }
+    .email-body .content pre code { background:transparent; color:inherit; padding:0; }
+    .email-body .content code { background:#f1f5f9; padding:2px 6px; border-radius:4px; font-size:0.9em; color:#0f172a; }
+    .email-body .content ul, .email-body .content ol { padding-left:1.35em; margin:0.5em 0; }
+    .email-body .content hr { border:none; border-top:1px solid #e2e8f0; margin:1.25em 0; }
+    .email-body .content img { max-width:100% !important; height:auto !important; display:block; margin:12px auto; border-radius:8px; }
+    .email-footer { padding:18px 22px 22px; background:#f8fafc; border-top:1px solid #e2e8f0; font-size:12px; color:#64748b; line-height:1.6; }
+    .email-footer .disclaimer { margin:0 0 10px; padding:10px 12px; background:#fffbeb; border:1px solid #fde68a; border-radius:8px; color:#92400e; }
+    .email-footer .meta { margin:0; }
+    .badge { display:inline-block; padding:4px 12px; border-radius:999px; font-size:12px; font-weight:600; letter-spacing:0.03em; }
+    .badge-buy { background:#dcfce7; color:#166534; }
+    .badge-sell { background:#fee2e2; color:#991b1b; }
+    .alert-info { padding:12px 14px; border-radius:8px; background:#eff6ff; border:1px solid #bfdbfe; color:#1e40af; margin:12px 0; font-size:14px; }
+    .alert-warn { padding:12px 14px; border-radius:8px; background:#fffbeb; border:1px solid #fde68a; color:#92400e; margin:12px 0; font-size:14px; }
+    @media (prefers-color-scheme: dark) {
+      .email-root { background:#0f172a !important; color:#e2e8f0 !important; }
+      .email-card { background:#1e293b !important; border-color:#334155 !important; }
+      .email-body { color:#cbd5e1 !important; }
+      .email-body .content { color:#cbd5e1 !important; }
+      .email-body .content h1, .email-body .content h2 { color:#f1f5f9 !important; }
+      .email-body .content th, .email-body .content td { border-color:#475569 !important; }
+      .email-body .content thead th { background:#334155 !important; color:#f8fafc !important; }
+      .email-body .content tbody tr:nth-child(even) { background:#0f172a !important; }
+      .email-footer { background:#0f172a !important; border-color:#334155 !important; color:#94a3b8 !important; }
+    }
+    @media only screen and (max-width: 480px) {
+      .email-shell { padding:12px 8px 24px !important; }
+      .email-header { padding:18px 16px !important; }
+      .email-body { padding:18px 16px 22px !important; }
+    }
+  </style>
+</head>
+<body class="email-root" style="margin:0;padding:0;background:#e8edf3;">
+  <div class="email-shell" style="max-width:600px;margin:0 auto;padding:20px 12px 32px;">
+    <div class="email-card" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 4px 24px rgba(15,23,42,0.08);border:1px solid #e2e8f0;">
+      <div class="email-header" style="background:linear-gradient(135deg,#0f172a 0%,#1e3a5f 45%,#0c4a6e 100%);color:#f8fafc;padding:22px 24px 20px;">
+        <h1 style="margin:0 0 6px;font-size:18px;font-weight:600;letter-spacing:0.02em;">{{ system_name | e }}</h1>
+        <p class="sub" style="margin:0;font-size:13px;opacity:0.88;">{{ header_date | e }}</p>
+      </div>
+      <div class="email-body" style="padding:24px 22px 28px;color:#334155;">
+        <div class="content">{{ content_html | safe }}</div>
+      </div>
+      <div class="email-footer" style="padding:18px 22px 22px;background:#f8fafc;border-top:1px solid #e2e8f0;font-size:12px;color:#64748b;line-height:1.6;">
+        <p class="disclaimer" style="margin:0 0 10px;padding:10px 12px;background:#fffbeb;border:1px solid #fde68a;border-radius:8px;color:#92400e;">
+          {{ disclaimer | e }}
+        </p>
+        <p class="meta" style="margin:0;">
+          {{ footer_line | e }}
+        </p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>

@@ -304,11 +304,19 @@ class ReplayTask:
                 self.log(f"微信通知发送失败：{msg}")
             if email_cfg and has_email_config(email_cfg):
                 subj = (
-                    f"✅ {sum_line} · {actual_date}"
+                    f"【复盘】✅ {sum_line} · {actual_date}"
                     if sum_line
-                    else f"✅ 复盘完成 · {MODE_NAME} · {actual_date}"
+                    else f"【复盘】✅ 复盘完成 · {MODE_NAME} · {actual_date}"
                 )
-                eok, emsg = send_report_email(email_cfg, subj, result)
+                eok, emsg = send_report_email(
+                    email_cfg,
+                    subj,
+                    result,
+                    extra_vars={
+                        "header_date": f"交易日 {actual_date}",
+                        "title": subj,
+                    },
+                )
                 if eok and emsg != "skipped":
                     self.log("邮件通知已发送")
                 elif not eok:
@@ -328,8 +336,16 @@ class ReplayTask:
             elif not ok:
                 self.log(f"微信通知发送失败：{msg}")
             if email_cfg and has_email_config(email_cfg):
-                subj = f"❌ 复盘失败 · {MODE_NAME} · {actual_date}"
-                eok, emsg = send_report_email(email_cfg, subj, error_msg)
+                subj = f"【复盘】❌ 复盘失败 · {MODE_NAME} · {actual_date}"
+                eok, emsg = send_report_email(
+                    email_cfg,
+                    subj,
+                    error_msg,
+                    extra_vars={
+                        "header_date": f"交易日 {actual_date}",
+                        "title": subj,
+                    },
+                )
                 if eok and emsg != "skipped":
                     self.log("失败通知邮件已发送")
                 elif not eok:

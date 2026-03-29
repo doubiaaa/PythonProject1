@@ -1,109 +1,355 @@
-# 项目架构说明
+# 架构与技术说明
 
-本文描述「次日竞价半路」系统的模块职责、数据流与数据文件关系，便于维护与扩展。
+**文档性质**：本仓库「次日竞价半路」复盘系统的**逻辑架构、模块边界、数据契约与运维要点**。  
+**读者**：维护者、二次开发者；实现细节以源码为准，本文作导航与约定。  
+**时效**：与主分支实现同步更新；若行为与文档冲突，以代码与单元测试为准。
 
 ---
 
-## 1. 定位与分工
+## 目录
 
-本仓库是一个 **B/S 架构** 的 A 股 **收盘后复盘 → 次日竞价预案** 工具：程序侧拉行情、选股与指标，将结构化「市场摘要 + 龙头池」交给 **智谱 GLM** 生成长文报告。
+1. [一句话与核心原则](#1-一句话与核心原则)  
+2. [系统目标与非目标](#2-系统目标与非目标)  
+3. [技术栈与运行时](#3-技术栈与运行时)  
+4. [逻辑架构总览](#4-逻辑架构总览)  
+5. [模块与目录映射](#5-模块与目录映射)  
+6. [配置体系](#6-配置体系)  
+7. [单次复盘流水线](#7-单次复盘流水线)  
+8. [策略偏好与周度闭环](#8-策略偏好与周度闭环)  
+9. [模拟账户](#9-模拟账户)  
+10. [HTTP API](#10-http-api)  
+11. [数据文件与契约](#11-数据文件与契约)  
+12. [脚本与定时任务](#12-脚本与定时任务)  
+13. [CI 与质量保障](#13-ci-与质量保障)  
+14. [安全、密钥与合规提示](#14-安全密钥与合规提示)  
+15. [排错与常见情况](#15-排错与常见情况)  
+16. [术语表](#16-术语表)  
+17. [已知局限与路线图](#17-已知局限与路线图)  
+18. [附录：环境变量（节选）](#18-附录环境变量节选)  
+19. [文档维护约定](#19-文档维护约定)
 
-核心分工可以概括为：
+---
+
+## 1. 一句话与核心原则
 
 > **程序算清量，模型写得像。**
 
-量化与规则在 `DataFetcher`、策略模块与持久化中完成；大模型负责按固定结构输出可读、可推送的复盘文案。
+- **程序侧**：交易日历、行情与规则、龙头池打分与标签、持久化、（可选）模拟撮合与权重更新。  
+- **模型侧**：在固定章节结构下生成可读 Markdown，不替代程序数据与风控责任。  
+- **时间口径**：业务日期若无特殊说明，均为 **A 股交易日**；脚本中的「北京时间」用于定时任务说明。
 
 ---
 
-## 2. 运行时入口
+## 2. 系统目标与非目标
 
-| 入口 | 说明 |
+### 2.1 目标
+
+| 能力 | 说明 |
 |------|------|
-| `run.py` | 启动 Flask（默认 `0.0.0.0:5000`），提供网页与 `/api/*`。 |
-| `scripts/nightly_replay.py` | 定时任务：指定日或「北京时间当日」为交易日时执行完整复盘，再走 Server酱 / 邮件。 |
-| `scripts/weekly_performance_email.py` | 周末：周表现邮件、可选智谱周评、策略权重更新、异常提醒、`--plot` 权重图。 |
-| `scripts/backtest_weights.py` | 占位：离线回测权重参数（待扩展）。 |
+| 收盘复盘 | 拉取数据，生成结构化市场摘要与龙头池，调用智谱 GLM 输出长文。 |
+| 档案沉淀 | 将**程序产出的**龙头池写入本地，与 AI 正文解耦。 |
+| 周度统计 | 按自然周与约定收益口径计算区间表现与标签归因。 |
+| 策略反馈 | 用历史收益更新「五桶」风格权重，供下一交易日 prompt 侧重。 |
+| 可选能力 | 模拟账户、风格指数持久化、周报邮件、权重演进图、CI 校验等。 |
 
-配置通过 `replay_config.json`（`ConfigManager`）与环境变量（如 `ZHIPU_API_KEY`）；密钥优先级一般为 **环境变量 > 配置文件**。
+### 2.2 非目标（边界）
 
----
-
-## 3. Web 交互流程
-
-1. 用户访问 `templates/index.html`，提交复盘日、智谱 Key 等，POST **`/api/start_replay`**（`app/routes/main.py`）。
-2. 校验参数、`ReplayTask.try_begin()` 防并发，后台线程执行 **`ReplayTask.run`**。
-3. 前端轮询 **`/api/task_status`**；可选 SMTP / Server酱 在任务结束时推送或发信。
-
-核心任务类：`app/services/replay_task.py`。
+- 不提供实盘下单接口，不保证收益；不构成投资建议。  
+- 不对第三方数据源（如 akshare）的准确性、实时性作担保。  
+- **GitHub Actions 托管 Runner** 不持久化仓库内 `data/` 下的状态文件；依赖本地状态的定时任务（如模拟盘次日买入）应在**本机、NAS 或自托管 Runner** 上运行。
 
 ---
 
-## 4. 单次复盘流水线
+## 3. 技术栈与运行时
 
-### 4.1 数据与程序选股（`DataFetcher`）
+- **语言**：Python 3（CI 使用 3.11，本地建议 3.10+）。  
+- **Web**：Flask，入口 `run.py`。  
+- **数据**：pandas、akshare（行情与交易日历）。  
+- **模型**：智谱 OpenAPI（HTTP，`requests`）。  
+- **邮件**：SMTP，`markdown` 渲染 HTML 正文。  
+- **测试**：`pytest`；**校验**：`scripts/validate.py`。
 
-- `app/services/data_fetcher.py`：通过 akshare 等获取交易日历、行情、涨停/跌停/炸板、板块资金、北向、溢价等。
-- 结合 `auction_halfway_strategy`、`trend_momentum_strategy` 等产出 **主线板块** 与 **龙头池 `top_pool`**（代码、名称、标签、技术分等），拼成 Markdown 形态的「今日市场数据」。
-- 可选：财联社要闻等，按龙头关键词摘要后附在报告前（受配置控制）。
-- 程序未完成或异常时，meta 中可带 `abort_reason`，prompt 要求模型降置信度说明。
-
-### 4.2 策略偏好（闭环权重）
-
-- `app/services/strategy_preference.py` 维护 `data/strategy_preference.json`：五桶（打板 / 低吸 / 趋势 / 龙头 / 其他）**动态权重**，由周度收益反馈更新。
-- `build_prompt_addon` 将当前有效权重与写作侧重写入 prompt，引导模型在结构上偏向某类风格（仍须覆盖程序给出的龙头池）。
-
-### 4.3 可选：风格稳定性探测
-
-- 配置开启时，在主线智谱调用前增加轻量调用：`probe_style_stability` → `effective_weights_from_stability`，用于在风格拐点附近折中或均匀化权重。
-
-### 4.4 主模型与输出
-
-- `ReplayTask.build_prompt`：固定输出结构（摘要、主线、表格、竞价预案、风险、免责声明等）+ 策略 addon + 市场数据。
-- `call_zhipu` 调用智谱 API；对返回做摘要行等校验，便于推送标题解析。
-
-### 4.5 持久化与通知
-
-- 成功时将当日程序 `top_pool` 写入 **`data/watchlist_records.json`**（`watchlist_store.append_daily_top_pool`），供周度统计与权重更新；与 AI 正文解耦。
-- `serverchan_notify` / `email_notify`：推送与 HTML 邮件。
+**依赖清单**：见项目根 `requirements.txt`。
 
 ---
 
-## 5. 周度与闭环
+## 4. 逻辑架构总览
 
-- `app/services/weekly_performance.py`：按自然周与锚点交易日，对 `watchlist_records` 计算区间收益与标签归因，生成周报 Markdown。
-- `scripts/weekly_performance_email.py`：在开启 `enable_strategy_feedback_loop` 时调用 `update_from_recent_returns`（多周衰减、样本门槛、平滑与上下限、大幅变动惩罚等），写回 `strategy_preference.json` 并追加 `strategy_evolution_log.jsonl`；可选异常邮件与权重趋势图。
-- `weekly_market_snapshot.py`、`market_style_indices.py`：为周报提供市场快照与风格指数等辅助内容。
+下图从**入口**到**输出**展示主要依赖关系（周报、模拟开盘脚本为并行入口，不经过单次 Web 复盘）。
+
+```mermaid
+flowchart LR
+    subgraph in["入口"]
+        W[Flask Web]
+        N[nightly_replay]
+        P[weekly_performance_email]
+        M[simulated_morning_buy]
+        V[validate.py]
+    end
+
+    subgraph core["核心"]
+        DF[DataFetcher + 竞价半路策略]
+        RT[ReplayTask]
+        GLM[智谱 GLM]
+        SP[strategy_preference]
+        WL[watchlist_store]
+    end
+
+    subgraph opt["可选"]
+        SIM[SimulatedAccount]
+        MSI[market_style_indices]
+        WP[weekly_performance]
+    end
+
+    subgraph out["输出"]
+        SC[Server酱]
+        EM[SMTP 邮件]
+    end
+
+    W --> RT
+    N --> RT
+    RT --> DF
+    DF --> RT
+    RT --> GLM
+    RT --> WL
+    RT --> SP
+    RT --> SIM
+    RT --> SC
+    RT --> EM
+    P --> WP
+    P --> SP
+    M --> SIM
+    V -.-> SP
+```
 
 ---
 
-## 6. 数据文件关系
+## 5. 模块与目录映射
 
-| 文件 | 作用 |
+| 位置 | 职责摘要 |
+|------|----------|
+| `app/__init__.py` | Flask 应用、安全响应头、模板目录。 |
+| `app/routes/main.py` | 页面与复盘相关 REST API。 |
+| `app/services/data_fetcher.py` | 行情/日历/板块等；组装 `get_market_summary`，写入 `_last_auction_meta`。 |
+| `app/services/auction_halfway_strategy.py` | 主线与龙头池逻辑；`meta.top_pool` 含 `close` 等字段。 |
+| `app/services/replay_task.py` | 单次复盘编排：prompt、智谱、存档、风格探测、模拟盘、通知。 |
+| `app/services/strategy_preference.py` | 五桶权重、周度更新、evolution 日志、稳定性探测、绘图、异常检测。 |
+| `app/services/watchlist_store.py` | `watchlist_records.json` 线程安全读写。 |
+| `app/services/weekly_performance.py` | 区间收益、周报 Markdown、自然月段落。 |
+| `app/services/weekly_market_snapshot.py` | 周报市场快照数据与格式化。 |
+| `app/services/market_style_indices.py` | 打板/趋势/低吸等指数计算与 JSON 持久化。 |
+| `app/services/simulated_account.py` | 模拟盘状态机、买卖、pending、成交通知。 |
+| `app/services/email_notify.py` | `resolve_email_config`、`send_report_email`、`send_simple_email`。 |
+| `app/services/serverchan_notify.py` | Server酱推送封装。 |
+| `app/utils/config.py` | `DEFAULT_CONFIG` 与 `replay_config.json` 合并（`ConfigManager`）。 |
+| `scripts/` | 夜间复盘、周报、次日开盘买入、校验、失败通知、回测占位。 |
+| `tests/` | 单元测试与回归。 |
+| `.github/workflows/` | CI、定时任务、部署等。 |
+| `data/` | 运行时数据目录（部分文件建议不入库）。 |
+
+---
+
+## 6. 配置体系
+
+### 6.1 加载规则
+
+1. 默认：`app/utils/config.py` 中 **`DEFAULT_CONFIG`**。  
+2. 若存在 **`replay_config.json`**（项目根），与用户 JSON **浅合并**（用户键覆盖默认键）。  
+3. **环境变量**：智谱 Key、SMTP、收件人等常以环境变量覆盖配置文件，具体见 `resolve_email_config` 与各脚本。
+
+### 6.2 与业务强相关的键（节选）
+
+完整列表以 `DEFAULT_CONFIG` 为准；下表为阅读文档时常用项。
+
+| 键 | 含义 |
+|----|------|
+| `enable_finance_news` | 是否拉取并拼接财联社要闻摘要。 |
+| `enable_style_stability_probe` | 主报告前是否增加一次智谱「风格稳定性」轻量调用。 |
+| `enable_daily_style_indices_persist` | 复盘成功后是否写入 `market_style_indices.json`。 |
+| `enable_simulated_account` | 是否执行模拟账户逻辑。 |
+| `simulated_buy_price_type` | `close_of_recommendation_day` 或 `next_day_open`。 |
+| `simulated_account_path` / `simulated_config_path` | 模拟账户状态与规则文件路径。 |
+| `enable_simulated_trade_notification` | 模拟买卖成交是否发邮件（共用 SMTP）。 |
+| `enable_strategy_feedback_loop` | 周末脚本是否调用 `update_from_recent_returns`。 |
+| `enable_weekly_performance_email` | 是否发送周报邮件。 |
+| `enable_weekly_ai_insight` | 周报是否调用智谱写「风格诊断」。 |
+| `enable_weekly_weight_anomaly_email` | 权重异常是否单独发信。 |
+| `use_multi_week_decay_for_strategy` 等 | 多周衰减、平滑、单桶上下限、周间变动惩罚等（策略偏好）。 |
+
+---
+
+## 7. 单次复盘流水线
+
+对应 **`ReplayTask.run()`** 成功路径；异常时见同文件 `except`（失败文案亦可能推送/发信）。
+
+| 步骤 | 动作 |
 |------|------|
-| `data/watchlist_records.json` | 每日程序龙头池快照 → 周度收益与归因的输入。 |
-| `data/strategy_preference.json` | 五桶权重与生效说明 → 次日复盘 prompt 的动态侧重。 |
-| `data/strategy_evolution_log.jsonl` | 权重演进审计日志 → 可视化与未来回测。 |
+| 1 | `get_market_summary(date)` → 得到 `actual_date`、Markdown 市场正文、`_last_auction_meta`（含 `top_pool`、`program_completed`、`abort_reason`）。 |
+| 2 | （可选）`probe_style_stability` → `effective_weights_from_stability`，供 prompt 侧重。 |
+| 3 | `build_prompt`：固定章节 + `build_prompt_addon` + 市场数据。 |
+| 4 | `call_zhipu`；`_ensure_summary_line` 规范首行【摘要】。 |
+| 5 | （可选）拼接 `_last_news_push_prefix`。 |
+| 6 | 设置 `result`、`status=completed`。 |
+| 7 | `append_daily_top_pool` → `watchlist_records.json`（程序池，非 AI 表格解析）。 |
+| 8 | （可选）`persist_daily_indices` → `market_style_indices.json`。 |
+| 9 | （可选）`SimulatedAccount`：`execute_daily_trades`（传入交易日历以计算持有期等）；收盘价模式当日撮合，次日开盘模式写 `pending_buys_*`；`generate_daily_plan`；成交通知线程。 |
+| 10 | `send_serverchan`、`send_report_email` 发送完整报告。 |
 
 ---
 
-## 7. 测试与脚本
+## 8. 策略偏好与周度闭环
 
-- `tests/`：周报归因、策略偏好、风格指数、新闻摘要等。
-- `scripts/notify_failure.py` 等：运维辅助。
+- **风格桶**：打板、低吸、趋势、龙头、其他；标签映射见 `tag_to_bucket`。  
+- **`strategy_preference.json`**：持久化权重与生效说明。  
+- **`strategy_evolution_log.jsonl`**：每周一条审计记录；`plot_evolution_log` 可生成 `weights_trend.png`。  
+- **`update_from_recent_returns`**（由 `weekly_performance_email.py` 触发）：多周衰减、样本门槛、平滑与上下限、大幅变动惩罚等；返回 **`weight_alerts`** 可触发异常邮件，**不**写入 preference 文件。  
+- **周报正文**：`build_weekly_report_markdown_auto` = 周统计 + 近四周 + **`build_monthly_section`**（自然月汇总，脚注说明按信号日归属、未拆分跨月持仓）。  
+- **`--plot`**：权重图；若启用模拟账户则尝试净值曲线 `simulated_equity.png`。
 
----
-
-## 8. 后续优化方向（讨论备忘）
-
-以下方向与「持续迭代、控制风险」相关，尚未全部实现；落地时可拆成独立任务（配置项 + 函数签名 + 单测）。
-
-1. **周内风格再校准**：在周中增加轻量统计，将「周内调整因子」与文件权重混合，仅作用于当日/次日 prompt，不写入 `strategy_preference.json`，以缓解「权重仅周更」带来的滞后。
-2. **稳定性探测的成本与触发**：对 `probe_style_stability` 增加缓存与规则触发（如炸板率、连板高度等突变再探测）；稳定性除影响权重外，可进一步调节 prompt 中「侧重强度」与风险提示篇幅。
-3. **标签仲裁**：当程序侧存在多标签冲突时，按优先级归入单一风格桶，并在存档中保留原始标签与最终桶，提高收益归因信噪比。
-4. **未完结信号处理**：周度归因时对「当周末尾才发出、持仓不足一周」的信号标记 `incomplete` 或滚动至下周，避免区间与推荐滞后错配。
-5. **离线回测**：在 `backtest_weights.py` 中基于 `strategy_evolution_log.jsonl` 与历史收益网格搜索平滑系数等参数。
+**收益口径**（程序统计）：信号日**次一交易日开盘价（前复权）** → 该信号买入日所在自然周**最后一个交易日收盘价（前复权）**；详见 `weekly_performance.py` 模块注释。
 
 ---
 
-*文档版本随代码演进更新；核心流水线以 `replay_task.py`、`data_fetcher.py`、`strategy_preference.py`、`weekly_performance.py` 为准。*
+## 9. 模拟账户
+
+### 9.1 状态与规则文件
+
+- **`simulated_account.json`**：现金、持仓、成交、日净值序列等。  
+- **`simulated_config.json`**：与代码内 `DEFAULT_CONFIG` 合并，含止盈止损、`max_positions`、`position_size_pct` 等。
+
+### 9.2 买入价格模式
+
+| `simulated_buy_price_type` | 行为 |
+|----------------------------|------|
+| `close_of_recommendation_day` | T 日复盘使用 `top_pool.close`，在 `execute_daily_trades` 内**先卖后买**。 |
+| `next_day_open` | T 日仅写入 **`data/pending_buys_{YYYYMMDD}.json`**；下一交易日由 **`simulated_morning_buy.py`** 按**开盘价**执行 `execute_pending_buys`（需本地持久化账户文件）。 |
+
+### 9.3 卖出信号优先级
+
+`check_sell_signals`：**止盈 → 止损 → 持有天数**；若传入 `trade_days`，持有期为**交易日**计数，否则为自然日差近似。
+
+### 9.4 成交通知
+
+`enable_simulated_trade_notification` 为真时，`buy`/`sell` 成功后以**守护线程**发 `send_simple_email`，失败只记录日志，不阻断成交。
+
+---
+
+## 10. HTTP API
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/` | 复盘首页模板。 |
+| POST | `/api/start_replay` | JSON：`date`、`api_key`；可选 SMTP/Server酱；异步执行 `ReplayTask.run`。 |
+| GET | `/api/task_status` | `status`、`result`、`logs`、`progress`。 |
+| GET | `/api/get_defaults` | 默认日期、已保存配置片段等。 |
+
+**并发**：`ReplayTask.try_begin()` 保证同时仅一个复盘任务。
+
+---
+
+## 11. 数据文件与契约
+
+| 路径 | 用途 | 备注 |
+|------|------|------|
+| `replay_config.json` | 用户配置 | 可不入库；与默认合并。 |
+| `data/watchlist_records.json` | 每日程序龙头池 | 周度收益输入。 |
+| `data/strategy_preference.json` | 五桶权重 | 供 `build_prompt_addon`。 |
+| `data/strategy_evolution_log.jsonl` | 权重演进 | 一行一 JSON。 |
+| `data/market_style_indices.json` | 风格指数 | 可选持久化。 |
+| `data/simulated_account.json` | 模拟账户 | 常 gitignore。 |
+| `data/simulated_config.json` | 模拟规则模板 | 可入库模板。 |
+| `data/pending_buys_*.json` | 待开盘买入队列 | 仅 `next_day_open` 模式。 |
+
+---
+
+## 12. 脚本与定时任务
+
+| 脚本 | 作用 |
+|------|------|
+| `nightly_replay.py` | 夜间自动复盘；非交易日退出码 0 且不执行。 |
+| `weekly_performance_email.py` | 周报、策略更新、可选智谱周评、`--plot`。 |
+| `simulated_morning_buy.py` | 处理 pending、开盘价买入（需配置与交易日）。 |
+| `validate.py` | 依赖与数据校验（CI）。 |
+| `backtest_weights.py` | 占位。 |
+| `notify_failure.py` | 工作流失败通知。 |
+
+**GitHub Actions**：`ci.yml`（推送/PR）；`scheduled-nightly.yml`（夜间复盘）；`scheduled-morning-buy.yml`（早盘 pending，注意状态持久化）；其余以仓库内 YAML 为准。
+
+---
+
+## 13. CI 与质量保障
+
+1. 安装 `requirements.txt`。  
+2. 导入自检：`from app import app`。  
+3. `pytest tests/ -q`。  
+4. `python scripts/validate.py`。
+
+---
+
+## 14. 安全、密钥与合规提示
+
+- **密钥**：优先环境变量或 CI Secrets；勿将含密码的 `replay_config.json` 提交公开仓库。  
+- **邮件/推送**：收件人与 SendKey 属敏感信息，注意仓库与 fork 权限。  
+- **合规**：本系统输出仅供研究或自用记录；对外展示须遵守当地证券法规与平台规则。
+
+---
+
+## 15. 排错与常见情况
+
+| 现象 | 可能原因与处理 |
+|------|----------------|
+| 复盘无龙头池 / `abort_reason` | 数据或筛选条件导致；检查当日行情与策略阈值。 |
+| 周报无邮件 | `watchlist_records` 为空或 `enable_weekly_performance_email` 关闭；SMTP 未配置。 |
+| 模拟盘次日未买入 | 未跑 `simulated_morning_buy.py`；`pending` 被删或开盘价获取失败；账户文件未持久化。 |
+| CI 中 validate 跳过部分检查 | 默认对缺失文件较宽容；`VALIDATE_STRICT=1` 可收紧（见 `validate.py`）。 |
+| 推送标题异常 | 确保报告首行【摘要】格式；`_ensure_summary_line` 会补全。 |
+
+---
+
+## 16. 术语表
+
+| 术语 | 含义 |
+|------|------|
+| 龙头池 / top_pool | 程序按规则筛选的观察列表，非投资建议。 |
+| 信号日 | 写入 `watchlist_records` 的 `signal_date`（复盘成功日）。 |
+| 五桶权重 | 打板、低吸、趋势、龙头、其他；用于 prompt 侧重。 |
+| 自然周 | ISO 周或脚本约定的周切片，以代码为准。 |
+| pending | `next_day_open` 模式下 T 日生成的待买 JSON，T+1 开盘撮合。 |
+
+---
+
+## 17. 已知局限与路线图
+
+1. **周内再校准**：仅调 prompt、不写回 `strategy_preference`，缓解周更滞后。  
+2. **稳定性探测节流**：按规则触发以减少智谱调用次数。  
+3. **标签仲裁**：多标签时单一桶归因，提高统计信噪比。  
+4. **未完结信号**：跨周滚动或 `incomplete` 标记。  
+5. **离线回测**：扩展 `backtest_weights.py` 对接 `evolution_log`。
+
+---
+
+## 18. 附录：环境变量（节选）
+
+| 变量 | 用途 |
+|------|------|
+| `ZHIPU_API_KEY` | 智谱 API Key。 |
+| `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` | SMTP。 |
+| `SMTP_FROM` / `MAIL_TO` | 发件人与收件人（可多地址逗号分隔）。 |
+| `SERVERCHAN_SENDKEY` | Server酱。 |
+| `ENABLE_SIMULATED_ACCOUNT` / `SIMULATED_BUY_PRICE_TYPE` | 可覆盖 `simulated_morning_buy.py` 行为（见脚本内说明）。 |
+| `VALIDATE_STRICT` | `validate.py` 是否对缺失文件更严格。 |
+
+完整映射以 `resolve_email_config` 与各脚本为准。
+
+---
+
+## 19. 文档维护约定
+
+1. **行为变更**：同步更新本文与相关模块 docstring。  
+2. **新增数据文件**：在本章「数据文件与契约」增加一行。  
+3. **新增配置键**：在 `DEFAULT_CONFIG` 与本文 **§6** 补充说明。  
+4. **核心源码锚点**：`replay_task.py`、`data_fetcher.py`、`auction_halfway_strategy.py`、`strategy_preference.py`、`weekly_performance.py`、`simulated_account.py`。
+
+---
+
+*文档与主分支实现保持一致。*
