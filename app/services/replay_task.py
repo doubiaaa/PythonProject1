@@ -1,5 +1,7 @@
 from datetime import datetime
 import threading
+from typing import Optional
+
 import requests
 
 from app.services.email_notify import has_email_config, send_report_email
@@ -10,6 +12,17 @@ MODEL_NAME = "glm-4-flash"  # 智谱免费模型
 MAX_LOG_ENTRIES = 200
 
 MODE_NAME = "次日竞价半路模式"
+
+
+def _extract_summary_line(text: str) -> Optional[str]:
+    """解析报告首行【摘要】…，用于推送标题。"""
+    if not text:
+        return None
+    for line in text.strip().split("\n"):
+        s = line.strip()
+        if s.startswith("【摘要】"):
+            return s[:220]
+    return None
 
 
 class ReplayTask:
@@ -50,48 +63,52 @@ class ReplayTask:
             }
 
     def build_prompt(self, date, market_data):
-        """单一模式：次日竞价半路；市场数据中已含程序化选股结果。"""
+        """单一模式：次日竞价半路；市场数据中已含程序化选股与 AI 提示块。"""
         return f"""
-你是一位专注 **{MODE_NAME}** 的 A 股短线策略分析师。该模式含义：在 **收盘后完成选股**，次日以 **集合竞价至早盘** 的强弱与承接为信号，在 **分时确认** 后考虑 **半路（追涨）** 介入，而非盲目顶板。
+你是专注 **{MODE_NAME}** 的 A 股短线策略分析师。模式含义：**收盘后**完成程序选股，**次日集合竞价至早盘**结合分时强弱考虑**半路介入**，非盲目顶板。
 
-【策略要点（须与下方程序输出对照）】
-1. **主线板块**：近 5 个交易日行业涨幅多次位居前列、成交额居前、板块内有强势龙头。
-2. **龙头池**：区分人气龙头（高连板+换手）、趋势中军（大市值+均线多头）、活口核心（强于板块指数+放量）。
-3. **评分**：主线强度、龙头地位、次日预期 K 线/涨幅结构、流动性（换手健康度）四维度加权。
-4. **次日执行**：重视竞价量能、高开/低开后的分时弱转强；不追高无承接品种。
+## 硬性规则（违反则视为不合格输出）
+1. **必须与程序数据对齐**：程序给出的主线板块名称、龙头池标的（代码/名称/综合分排序）须优先采信；若你不认可，须**单独用一小段写清理由**，不得静默忽略。
+2. **须响应「【AI 提示】」块**：其中提到的数据缺失、置信度、冲突标的（技术面 vs 主线强度）须在正文中**逐条回应**，可合并叙述，不可省略。
+3. **全文须为 Markdown**；下列章节标题、顺序不得删改（可在节内增删，但总篇幅不宜过长）。
 
-请严格依据用户提供的「市场数据」中的 **{MODE_NAME}** 程序化结果，结合基础情绪指标，输出 Markdown 报告。
+## 输出结构（按顺序）
 
-## 1. 市场阶段判断
-- 当前市场阶段：（主升期/震荡期/退潮期）
-- 判断依据：（情绪温度、涨停溢价、炸板率、北向等）
-- 建议仓位：（百分比区间）
-- 对「次日竞价半路」的适宜度：（高/中/低及理由）
+### 报告首行（单独一行，勿加其它前缀）
+`【摘要】市场阶段：主升期/震荡期/退潮期｜适宜度：高/中/低｜置信度：高/中/低`
+（「置信度」须综合数据完整性、程序是否跑完龙头池、上述冲突提示。）
 
-## 2. 主线与程序选股结果解读
-- 是否认可程序筛出的主线板块（1～2 个）及理由
-- 对龙头池标的逐一简评：是否符合该模式（人气/中军/活口）
-- 程序得分靠前标的中，谁更值得关注次日竞价
+### 1. 市场阶段与情绪（≤220 字）
+- 阶段判断（三选一）+ **两条**量化依据（引用市场数据中的涨停/跌停/炸板率/溢价/北向等）。
+- 建议仓位区间（百分比）。
+- 本模式**适宜度**（高/中/低）一句话理由。
 
-## 3. 次日竞价半路预案
-- 观察清单：（代码+名称，按优先级排序）
-- 竞价关注点：（高开幅度、量比、封单/抛压等，定性即可）
-- 分时介入条件：（例如：回踩分时均线不破、放量突破开盘高点等）
-- 止损纪律：（价格或逻辑止损）
+### 2. 主线与程序选股（≤500 字）
+- **程序主线板块**：逐条表态是否认可（名称须与数据一致）。
+- **龙头池前 3 名**（按程序综合分）：每只固定四行——**结论一句**；**逻辑**（人气/中军/活口与模式匹配度）；**风险一句**；**次日竞价关注点一句**。
+- 若存在「【AI 提示】」中的**冲突标的**，须单独加一小段写清**参与或不参与**及条件。
 
-## 4. 风险预警
-- 个股风险
-- 市场风险
-- 该模式特有风险（冲高回落、主线一日游等）
+### 3. 次日竞价半路预案
+**观察清单**须用 **Markdown 表格**，列至少包含：| 优先级 | 代码 | 名称 | 标签 | 简要理由 |
+（行数与程序龙头池对应，按综合分排序；可少于等于 5 行。）
+
+然后分条写：竞价关注（高开、量比、封单/抛压定性）、分时介入条件、价格与逻辑止损。
+
+### 4. 风险与不适用场景（≤280 字）
+- 个股 / 市场 / 模式特有风险（冲高回落、主线一日游等）。
+- **不适用场景**：至少列出两类（如：系统性急跌、程序未完整产出龙头池、数据源异常日），并说明今日是否命中。
 
 ---
-今日市场数据（含程序选股输出）：
-{market_data}
 
-**免责声明**：以上分析基于公开数据与程序规则，仅供参考，不构成投资建议。股市有风险，投资需谨慎。
+### 免责声明（单独一节，勿与上文混排）
+> **免责声明**：以上分析基于公开数据与程序规则，仅供参考，不构成投资建议。股市有风险，投资需谨慎。
+
+---
+## 今日市场数据（程序选股 + 基础指标 + AI 提示）
+{market_data}
 """
 
-    def call_zhipu(self, api_key, prompt, temperature=0.7, max_tokens=4000):
+    def call_zhipu(self, api_key, prompt, temperature=0.42, max_tokens=6144):
         """调用智谱API"""
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -144,9 +161,15 @@ class ReplayTask:
             self.result = result
             self.log("分析完成")
             self.status = "completed"
+            sum_line = _extract_summary_line(result)
+            sc_title = (
+                f"✅ {sum_line} · {actual_date}"
+                if sum_line
+                else f"✅ 复盘完成 · {MODE_NAME} · {actual_date}"
+            )
             ok, msg = send_serverchan(
                 serverchan_sendkey,
-                f"✅ 复盘完成 · {MODE_NAME} · {actual_date}",
+                sc_title,
                 result,
             )
             if ok and msg != "skipped":
@@ -154,7 +177,11 @@ class ReplayTask:
             elif not ok:
                 self.log(f"微信通知发送失败：{msg}")
             if email_cfg and has_email_config(email_cfg):
-                subj = f"✅ 复盘完成 · {MODE_NAME} · {actual_date}"
+                subj = (
+                    f"✅ {sum_line} · {actual_date}"
+                    if sum_line
+                    else f"✅ 复盘完成 · {MODE_NAME} · {actual_date}"
+                )
                 eok, emsg = send_report_email(email_cfg, subj, result)
                 if eok and emsg != "skipped":
                     self.log("邮件通知已发送")

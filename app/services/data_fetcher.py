@@ -15,6 +15,69 @@ YEST_PREMIUM_HIST_MAX_CODES = 100
 SPOT_EM_CACHE_TTL_SEC = 90
 
 
+def _append_ai_context(
+    meta: dict,
+    *,
+    zt_count: int,
+    dt_count: int,
+    zb_count: int,
+    premium: float,
+    premium_note: str,
+    sector_empty: bool,
+    north_money: float,
+) -> str:
+    """根据程序 meta 与当日基础指标，追加给大模型的「须回应」提示块。"""
+    lines = ["\n## 【AI 提示】数据质量、程序状态与须回应点\n"]
+    bullets: list[str] = []
+    prem_bad = premium == -99.0 or ("非交易日" in str(premium_note))
+    if prem_bad:
+        bullets.append(
+            "昨日涨停溢价**不可用或异常**，涉及溢价的结论须标注**置信度低**。"
+        )
+    if zt_count < 10:
+        bullets.append(
+            f"涨停家数仅 **{zt_count}**，情绪指标参考价值下降，结论须谨慎。"
+        )
+    if dt_count > 25:
+        bullets.append(
+            f"跌停家数 **{dt_count}** 偏高，须强调退潮风险与仓位克制。"
+        )
+    if zb_count > 80:
+        bullets.append(f"炸板数 **{zb_count}** 较多，须强调分歧与模式风险。")
+    if sector_empty:
+        bullets.append("板块资金流向块缺失，**主线叙事须以程序选股第一节为准**。")
+    if north_money == 0.0:
+        bullets.append(
+            "北向资金为 0 或获取失败，**勿单独依赖北向**作核心依据。"
+        )
+    ar = meta.get("abort_reason")
+    if ar:
+        bullets.append(
+            f"程序选股**未完整产出龙头池**：{ar}。报告须说明今日无法按完整池展开，并降低置信度。"
+        )
+    mss = meta.get("main_sectors") or []
+    if meta.get("program_completed") and mss:
+        bullets.append(
+            "程序认定的主线板块（**分析必须与下列名称对齐或解释为何不采纳**）：**"
+            + "、".join(mss[:3])
+            + "**"
+        )
+    for p in meta.get("top_pool") or []:
+        ts = float(p.get("tech_score") or 0)
+        s1 = int(p.get("s1_main") or 0)
+        if ts >= 4.0 and s1 <= 2:
+            bullets.append(
+                f"**冲突须单独回应**：{p['name']}（{p['code']}）技术面 **{ts:.1f}/5** 较高，"
+                f"但主线强度分 **s1={s1}**（板块成交额排名偏弱）。须写清是否仍参与次日竞价。"
+            )
+    if not bullets:
+        bullets.append("未发现额外异常标记；仍须遵守用户要求中的输出结构、字数与表格格式。")
+    for b in bullets:
+        lines.append(f"- {b}\n")
+    lines.append("\n")
+    return "".join(lines)
+
+
 class DataFetcher:
     """数据获取类（含冗余、重试、缓存）"""
 
@@ -508,7 +571,18 @@ class DataFetcher:
         try:
             from app.services.auction_halfway_strategy import build_auction_halfway_report
 
-            summary += build_auction_halfway_report(date, trade_days, self, df_zt)
+            ah_text, ah_meta = build_auction_halfway_report(date, trade_days, self, df_zt)
+            summary += ah_text
+            summary += _append_ai_context(
+                ah_meta,
+                zt_count=zt_count,
+                dt_count=dt_count,
+                zb_count=zb_count,
+                premium=premium,
+                premium_note=str(premium_note),
+                sector_empty=df_sector.empty,
+                north_money=north_money,
+            )
         except Exception as e:
             summary += f"\n## 【次日竞价半路模式】选股\n- 执行异常：{e!s}\n\n"
 

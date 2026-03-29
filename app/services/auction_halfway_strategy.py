@@ -211,11 +211,17 @@ def build_auction_halfway_report(
     trade_days: list[str],
     fetcher,
     df_zt: pd.DataFrame,
-) -> str:
+) -> tuple[str, dict]:
     """
     收盘后选股：主线板块 -> 龙头池 -> 评分。
-    返回 Markdown 文本，追加到市场摘要。
+    返回 (Markdown 文本, meta)。meta 供上层生成「数据质量 / 冲突提示」。
     """
+    meta: dict = {
+        "main_sectors": [],
+        "top_pool": [],
+        "program_completed": False,
+        "abort_reason": None,
+    }
     lines = [f"## 【{MODE_NAME}】程序化选股结果\n"]
     lines.append(
         "- 数据来源：东方财富行业板块行情 + 成份股；与申万/同花顺分类存在差异，仅供参考。\n"
@@ -223,17 +229,20 @@ def build_auction_halfway_report(
 
     if not trade_days or date not in trade_days:
         lines.append("- 跳过：非交易日或交易日历缺失。\n\n")
-        return "".join(lines)
+        meta["abort_reason"] = "非交易日或交易日历缺失"
+        return "".join(lines), meta
 
     last5 = _last_n_trade_days(trade_days, date, TOP_N_DAYS)
     if len(last5) < TOP_N_DAYS:
         lines.append("- 跳过：历史交易日不足 5 日。\n\n")
-        return "".join(lines)
+        meta["abort_reason"] = "历史交易日不足5日"
+        return "".join(lines), meta
 
     universe = _pick_sector_universe()
     if not universe:
         lines.append("- 无法获取行业列表，跳过选股。\n\n")
-        return "".join(lines)
+        meta["abort_reason"] = "无法获取行业列表"
+        return "".join(lines), meta
 
     _log(fetcher, "次日竞价半路：扫描行业板块行情…")
     _prog(fetcher, 22)
@@ -270,7 +279,8 @@ def build_auction_halfway_report(
 
     if not sector_daily:
         lines.append("- 行业板块历史行情获取失败，跳过。\n\n")
-        return "".join(lines)
+        meta["abort_reason"] = "行业板块历史行情获取失败"
+        return "".join(lines), meta
 
     _prog(fetcher, 38)
     # 每日涨幅榜 Top10 次数
@@ -309,7 +319,8 @@ def build_auction_halfway_report(
     )
     if not main_sectors:
         lines.append("- 未筛出符合主线条件的板块（可能市场平淡或数据不完整）。\n\n")
-        return "".join(lines)
+        meta["abort_reason"] = "未筛出主线板块"
+        return "".join(lines), meta
 
     for n in main_sectors:
         lines.append(
@@ -366,7 +377,9 @@ def build_auction_halfway_report(
     if not raw_rows:
         lines.append("### 第二步：龙头池\n")
         lines.append("- 主线板块成份股为空。\n\n")
-        return "".join(lines)
+        meta["main_sectors"] = list(main_sectors)
+        meta["abort_reason"] = "主线成份股为空"
+        return "".join(lines), meta
 
     spot_map = _merge_spot_by_codes(list({r["code"] for r in raw_rows}), fetcher)
 
@@ -402,7 +415,9 @@ def build_auction_halfway_report(
     if not pool_rows:
         lines.append("### 第二步：龙头池\n")
         lines.append("- 未筛出符合分类标签的标的（可提高阈值或检查数据）。\n\n")
-        return "".join(lines)
+        meta["main_sectors"] = list(main_sectors)
+        meta["abort_reason"] = "未筛出符合分类标签的标的"
+        return "".join(lines), meta
 
     spot_full = spot_map
     by_sec: dict[str, list] = defaultdict(list)
@@ -525,4 +540,19 @@ def build_auction_halfway_report(
         "- 龙虎榜席位、分时五档等需盘中实时数据，本工具未接入。\n\n"
     )
 
-    return "".join(lines)
+    meta["main_sectors"] = list(main_sectors)
+    meta["top_pool"] = [
+        {
+            "code": r["code"],
+            "name": r["name"],
+            "score": round(float(r["score"]), 2),
+            "tech_score": round(float(r["tech_score"]), 2),
+            "sector": r["sector"],
+            "tag": r["tag"],
+            "s1_main": int(r.get("s1", 0)),
+        }
+        for r in top
+    ]
+    meta["program_completed"] = True
+    meta["abort_reason"] = None
+    return "".join(lines), meta
