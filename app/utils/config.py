@@ -36,6 +36,11 @@ DEFAULT_CONFIG = {
     "enable_weekly_ai_insight": True,
     # 周报中是否拉取本周交易日市场快照（涨停家数、溢价、锚点日涨幅前20市值等）
     "enable_weekly_market_snapshot": True,
+    # 复盘成功后将打板/趋势/低吸三指数写入 data/market_style_indices.json
+    "enable_daily_style_indices_persist": True,
+    # 周报是否计算「自然周」严格涨幅前 20（全市场抽样，较慢）
+    "enable_strict_weekly_top20": True,
+    "weekly_strict_top20_max_universe": 2800,
 }
 
 

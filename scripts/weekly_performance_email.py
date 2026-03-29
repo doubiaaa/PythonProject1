@@ -37,7 +37,8 @@ def _call_zhipu_weekly_style(api_key: str, md: str) -> str:
     url = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
     prompt = (
         "你是一位 A 股短线交易风格分析师。请根据下列「本周周报」全文（Markdown，"
-        "含市场快照、龙头池区间收益、按标签的策略归因、近四周与月度汇总），"
+        "含市场快照、**风格指数近日走势**（打板/趋势/低吸）、**严格周涨幅前 20**、"
+        "龙头池区间收益、按标签的策略归因、近四周与月度汇总），"
         "完成**归纳与判断**，不要逐条复述表格中的数字。\n\n"
         "【请按以下结构用 Markdown 输出】\n"
         "### 风格诊断\n"

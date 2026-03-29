@@ -131,6 +131,38 @@ def collect_week_snapshot(
             pass
     cur_avg_prem = round(sum(cur_premiums) / len(cur_premiums), 2) if cur_premiums else None
 
+    indices_md = ""
+    strict_profile: dict[str, Any] = {}
+    try:
+        from app.utils.config import ConfigManager
+
+        cm = ConfigManager()
+        if cm.get("enable_weekly_market_snapshot", True):
+            from app.services.market_style_indices import (
+                compute_strict_week_top20_profile,
+                format_indices_trend_md,
+            )
+
+            ai = trade_days.index(anchor_date) if anchor_date in trade_days else -1
+            idx_dates: list[str] = []
+            if ai >= 0:
+                for j in range(5):
+                    if ai - j >= 0:
+                        idx_dates.insert(0, trade_days[ai - j])
+            indices_md = format_indices_trend_md(idx_dates)
+            if cm.get("enable_strict_weekly_top20", True):
+                mu = int(cm.get("weekly_strict_top20_max_universe", 2800))
+                strict_profile = compute_strict_week_top20_profile(
+                    fetcher,
+                    trade_days,
+                    iso_year,
+                    iso_week,
+                    anchor_date,
+                    max_universe=mu,
+                ) or {}
+    except Exception as e:
+        strict_profile = {"error": str(e)[:160]}
+
     return {
         "iso_year": iso_year,
         "iso_week": iso_week,
@@ -141,6 +173,8 @@ def collect_week_snapshot(
         "anchor_top20_avg_turnover_pct": turn20,
         "week_avg_yesterday_zt_premium": cur_avg_prem,
         "prev_week_avg_yesterday_zt_premium": prev_avg_prem,
+        "indices_md": indices_md,
+        "strict_profile": strict_profile,
     }
 
 
@@ -149,8 +183,8 @@ def format_snapshot_markdown(snap: Optional[dict[str, Any]]) -> str:
         return ""
     lines = [
         "### 本周市场快照（程序统计）\n\n",
-        "> 用于风格归纳：涨停家数、炸板率、溢价、连板高度、涨停行业分布；"
-        "「锚点日涨幅前 20」的市值与换手为**当日截面**，近似反映当周资金偏好的体量与活跃。\n\n",
+        "> 用于风格归纳：涨停家数、炸板率、溢价、连板高度、涨停行业分布。"
+        "**锚点日涨幅前 20** 为**当日截面**；**严格周涨幅前 20** 见下文（自然周首尾价，与截面可对照）。\n\n",
     ]
     for row in snap.get("daily") or []:
         if row.get("error"):
@@ -168,10 +202,12 @@ def format_snapshot_markdown(snap: Optional[dict[str, Any]]) -> str:
         if row.get("top3_zt_industry"):
             lines.append(f"  - 涨停行业 TOP3：{row['top3_zt_industry']}\n")
     lines.append("\n")
+    if snap.get("indices_md"):
+        lines.append(snap["indices_md"])
     ad = snap.get("anchor_date") or (snap.get("trade_days") or [""])[-1]
     if snap.get("anchor_top20_avg_mcap_yi") is not None:
         lines.append(
-            f"- **锚点日 {ad}** 全市场涨幅前 20：平均流通市值约 **{snap['anchor_top20_avg_mcap_yi']} 亿**、"
+            f"- **锚点日 {ad}·截面近似** 当日涨幅前 20：平均流通市值约 **{snap['anchor_top20_avg_mcap_yi']} 亿**、"
             f"平均换手率约 **{snap['anchor_top20_avg_turnover_pct']}%**\n\n"
         )
     if snap.get("week_avg_yesterday_zt_premium") is not None:
@@ -183,4 +219,9 @@ def format_snapshot_markdown(snap: Optional[dict[str, Any]]) -> str:
                 f"；**上周**同口径约 **{snap['prev_week_avg_yesterday_zt_premium']}%**（可对比情绪变化）"
             )
         lines.append("\n\n")
+    sp = snap.get("strict_profile")
+    if sp:
+        from app.services.market_style_indices import format_strict_week_top20_md
+
+        lines.append(format_strict_week_top20_md(sp))
     return "".join(lines)

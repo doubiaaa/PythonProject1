@@ -7,6 +7,7 @@ import requests
 from app.services.email_notify import has_email_config, send_report_email
 from app.services.serverchan_notify import send_serverchan
 from app.services.watchlist_store import append_daily_top_pool
+from app.utils.config import ConfigManager
 
 ZHIPU_API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
 MODEL_NAME = "glm-4-flash"  # 智谱免费模型
@@ -197,6 +198,17 @@ class ReplayTask:
                     self.log("龙头池已记入周度统计档案（data/watchlist_records.json）")
                 except Exception as ex:
                     self.log(f"龙头池存档失败：{ex}")
+            _cm = ConfigManager()
+            if _cm.get("enable_daily_style_indices_persist", True):
+                try:
+                    from app.services.market_style_indices import persist_daily_indices
+
+                    _td = data_fetcher.get_trade_cal()
+                    if _td:
+                        persist_daily_indices(data_fetcher, actual_date, _td)
+                        self.log("风格指数已入库（data/market_style_indices.json）")
+                except Exception as ex:
+                    self.log(f"风格指数入库失败：{ex}")
             sc_title = (
                 f"✅ {sum_line} · {actual_date}"
                 if sum_line
