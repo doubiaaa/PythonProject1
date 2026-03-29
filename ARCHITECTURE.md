@@ -242,6 +242,7 @@ flowchart LR
 | POST | `/api/start_replay` | JSON：`date`、`api_key`；可选 SMTP/Server酱；异步执行 `ReplayTask.run`。 |
 | GET | `/api/task_status` | `status`、`result`、`logs`、`progress`。 |
 | GET | `/api/get_defaults` | 默认日期、已保存配置片段等。 |
+| POST | `/api/send_result_email` | JSON：可选 `date`、与复盘相同的 SMTP 字段；将**内存中最近一次成功复盘**的 Markdown 以 HTML 邮件发出（用于预览邮件样式）。 |
 
 **并发**：`ReplayTask.try_begin()` 保证同时仅一个复盘任务。
 

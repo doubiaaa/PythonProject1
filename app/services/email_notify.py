@@ -14,8 +14,12 @@ from typing import Any, Optional
 import markdown
 
 from app.utils.email_template import (
+    build_email_content_prefix,
+    build_plain_text_email_header,
     markdown_to_html as _md_to_html_ext,
     render_email_template,
+    should_skip_rich_email_prefix,
+    strip_first_summary_line,
 )
 
 # 单封正文上限（字符），避免部分 SMTP 拒信
@@ -92,6 +96,7 @@ def resolve_email_config(cm) -> Optional[dict[str, Any]]:
         "smtp_ssl": use_ssl,
         "email_html_template_enabled": bool(cm.get("email_html_template_enabled", True)),
         "email_app_version": str(cm.get("email_app_version", "1.0")),
+        "email_content_prefix": bool(cm.get("email_content_prefix", True)),
     }
 
 
@@ -219,10 +224,24 @@ def send_report_email(
         "footer_line",
         f"© 次日竞价半路复盘系统 · 版本 {cfg.get('email_app_version', '1.0')}",
     )
+    if cfg.get("email_content_prefix") is False:
+        ev["email_content_prefix"] = "none"
+
+    # 统一 Markdown 模板信：正文前缀 HTML + 去重摘要后的 MD 源码（HTML 与纯文本共用）
+    content_prefix_html = ""
+    md_src = raw_body
+    if not html_document and not html_fragment and use_template:
+        ev_mail = dict(ev)
+        content_prefix_html = build_email_content_prefix(raw_body, ev_mail)
+        if content_prefix_html and "EXECUTIVE SUMMARY" in content_prefix_html:
+            md_src = strip_first_summary_line(raw_body)
 
     # 纯文本部分
     if raw_body.strip():
-        plain_part = _markdown_to_plain(raw_body)
+        if not html_document and not html_fragment and use_template:
+            plain_part = _markdown_to_plain(md_src)
+        else:
+            plain_part = _markdown_to_plain(raw_body)
     else:
         plain_part = ""
 
@@ -239,11 +258,21 @@ def send_report_email(
             final_html = _wrap_email_html_legacy(html_fragment)
     else:
         if use_template:
-            inner = _md_to_html_ext(raw_body)
-            final_html = render_email_template(inner, subject, ev)
+            ev_mail = dict(ev)
+            ev_mail["content_prefix_html"] = content_prefix_html
+            inner = _md_to_html_ext(md_src)
+            final_html = render_email_template(inner, subject, ev_mail)
         else:
             inner = _markdown_to_html_fragment_legacy(raw_body)
             final_html = _wrap_email_html_legacy(inner)
+
+    if (
+        raw_body.strip()
+        and not html_document
+        and ev.get("email_content_prefix") != "none"
+        and not should_skip_rich_email_prefix(raw_body)
+    ):
+        plain_part = build_plain_text_email_header(ev) + plain_part
 
     if not plain_part.strip():
         plain_part = _html_to_plain_fallback(final_html) or "（请使用支持 HTML 的邮箱客户端查看）"

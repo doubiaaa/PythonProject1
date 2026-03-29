@@ -20,6 +20,8 @@ DEFAULT_CONFIG = {
     "smtp_ssl": False,  # True 时用 SMTPS（如 465）
     # 邮件正文是否套统一 HTML 模板（false 时退回旧版简单 HTML 外壳 + 纯文本备选）
     "email_html_template_enabled": True,
+    # 长文邮件是否增加「报告标题区 + 摘要高亮 + 报告说明」前缀（false 则仅渲染裸 Markdown）
+    "email_content_prefix": True,
     "email_app_version": "1.0",
     # 周报邮件是否尝试内嵌项目根目录下的权重/净值图（需先生成 png）
     "weekly_email_attach_charts": True,

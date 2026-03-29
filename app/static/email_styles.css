@@ -1,13 +1,22 @@
 /**
- * 与 app/templates/email_base.html 内联样式保持一致，供本地预览或文档引用。
- * 实际 SMTP 邮件以模板内 <style> 与关键内联属性为准。
+ * 与 app/templates/email_base.html 内 <style> 对齐，供本地预览或文档引用。
+ * SMTP 实际以模板内嵌为准（邮件客户端裁剪 CSS 较多）。
  */
 
-.email-root { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; }
-.email-card { max-width: 600px; margin: 0 auto; background: #fff; border-radius: 12px; border: 1px solid #e2e8f0; }
-.email-header { background: linear-gradient(135deg, #0f172a, #1e3a5f, #0c4a6e); color: #f8fafc; padding: 22px 24px; }
+.email-root { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif; background: #e8edf3; }
+.email-card { max-width: 600px; margin: 0 auto; background: #fff; border-radius: 12px; border: 1px solid #e2e8f0; box-shadow: 0 4px 24px rgba(15, 23, 42, 0.08); }
+.email-header { background: linear-gradient(135deg, #0f172a, #1a365d, #0c4a6e); color: #f8fafc; padding: 18px 20px; }
+.intel-badge { display: inline-block; padding: 6px 14px; border-radius: 999px; font-size: 10px; font-weight: 700; letter-spacing: 0.08em; background: #dcfce7; color: #166534; text-transform: uppercase; }
+.email-body .content h1 { font-size: 1.45em; font-weight: 700; color: #0f172a; border-bottom: 1px solid #e2e8f0; padding-bottom: 10px; }
+.email-body .content h2 { font-size: 1.12em; padding: 10px 12px; background: linear-gradient(90deg, #eff6ff 0%, rgba(239, 246, 255, 0.35) 55%, transparent 100%); border-left: 4px solid #3b82f6; border-radius: 0 8px 8px 0; font-weight: 600; }
 .email-body .content table { border-collapse: collapse; width: 100%; }
-.email-body .content th, .email-body .content td { border: 1px solid #cbd5e1; padding: 8px 12px; }
+.email-body .content thead th { background: #f1f5f9; font-size: 12px; letter-spacing: 0.04em; text-transform: uppercase; }
+.email-body .content th, .email-body .content td { border: 1px solid #cbd5e1; padding: 10px 12px; }
+.email-body .content blockquote { border-left: 4px solid #2563eb; background: #fff; font-style: italic; box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06); }
+.email-body .content pre { background: #0f172a; color: #e2e8f0; border-radius: 8px; font-family: ui-monospace, Consolas, monospace; }
+.email-body .content pre code { color: #bae6fd; }
+.email-watermark { text-align: center; font-size: 42px; font-weight: 800; letter-spacing: 0.15em; color: #0f172a; opacity: 0.04; }
+.email-footer .footer-nav { text-align: center; font-size: 10px; letter-spacing: 0.06em; color: #94a3b8; text-transform: uppercase; }
 .badge-buy { background: #dcfce7; color: #166534; }
 .badge-sell { background: #fee2e2; color: #991b1b; }
 .alert-info { background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af; padding: 12px 14px; border-radius: 8px; }

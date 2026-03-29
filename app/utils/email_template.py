@@ -8,6 +8,7 @@ from __future__ import annotations
 import html
 import os
 import re
+from datetime import datetime
 from typing import Any, Optional
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
@@ -63,6 +64,112 @@ def markdown_to_html(md_text: str) -> str:
     )
 
 
+def strip_first_summary_line(md: str) -> str:
+    """去掉正文里首条【摘要】行，避免与邮件顶部「核心摘要」框重复。"""
+    lines = (md or "").split("\n")
+    i = 0
+    while i < len(lines) and not lines[i].strip():
+        i += 1
+    if i < len(lines) and lines[i].strip().startswith("【摘要】"):
+        new_lines = lines[:i] + lines[i + 1 :]
+        return "\n".join(new_lines).lstrip("\n")
+    return md or ""
+
+
+def should_skip_rich_email_prefix(raw_md: str) -> bool:
+    """极短失败栈或错误提示不套长篇说明，避免版式突兀。"""
+    rs = (raw_md or "").strip()
+    if len(rs) < 12:
+        return True
+    if len(rs) < 500 and (
+        "复盘失败" in rs[:600]
+        or "❌" in rs[:120]
+        or rs.startswith("Traceback")
+    ):
+        return True
+    return False
+
+
+def build_email_content_prefix(
+    raw_md: str,
+    extra_vars: Optional[dict[str, Any]] = None,
+) -> str:
+    """
+    在 Markdown 转 HTML 正文前追加：报告主标题区、【摘要】高亮、报告说明段。
+    使系统邮件信息层级更接近「摘要报表」原型，而非裸 Markdown。
+    """
+    ev = extra_vars or {}
+    if ev.get("email_content_prefix") == "none":
+        return ""
+    if should_skip_rich_email_prefix(raw_md):
+        return ""
+
+    title = html.escape(str(ev.get("report_banner_title") or "市场竞价深度复盘报告"))
+    sub = html.escape(str(ev.get("header_date") or "").strip() or "（见页头日期）")
+    parts: list[str] = [
+        '<div style="margin:0 0 18px;padding:18px 20px;border-radius:10px;border:1px solid #e2e8f0;'
+        'background:linear-gradient(165deg,#f1f5f9 0%,#ffffff 60%);">'
+        '<div style="font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:#64748b;margin-bottom:8px;">'
+        "Market review · 系统生成</div>"
+        f'<div style="font-size:20px;font-weight:700;color:#0f172a;line-height:1.25;letter-spacing:-0.02em;">{title}</div>'
+        f'<div style="font-size:13px;color:#64748b;margin-top:10px;">{sub}</div>'
+        "</div>"
+    ]
+
+    for line in (raw_md or "").split("\n"):
+        s = line.strip()
+        if s.startswith("【摘要】"):
+            esc = html.escape(s)
+            parts.append(
+                '<div style="margin:0 0 16px;padding:14px 16px;border-radius:8px;border:1px solid #93c5fd;'
+                'background:linear-gradient(135deg,#eff6ff 0%,#f0f9ff 100%);">'
+                '<div style="font-size:11px;font-weight:700;color:#1d4ed8;letter-spacing:0.05em;margin-bottom:8px;">'
+                "核心摘要 · EXECUTIVE SUMMARY</div>"
+                f'<div style="font-size:14px;color:#1e293b;line-height:1.6;">{esc}</div>'
+                "</div>"
+            )
+            break
+
+    parts.append(
+        '<p style="margin:0 0 20px;font-size:13px;color:#475569;line-height:1.65;border-left:4px solid #94a3b8;'
+        'padding:12px 14px;background:#f8fafc;border-radius:0 8px 8px 0;">'
+        "<strong style=\"color:#0f172a;\">报告说明</strong>：正文由<strong>程序侧数据</strong>（交易日历、行情与规则、龙头池与标签等）"
+        "与<strong>智谱模型</strong>在固定章节结构下共同生成，通常依次包含：<strong>市场阶段与情绪</strong>、"
+        "<strong>主线与程序选股</strong>、<strong>次日竞价预案</strong>、<strong>风险与不适用场景</strong>等。"
+        "文中表格、列表与代码块仅用于展示数据与逻辑，<strong>不构成投资建议</strong>；请结合自身情况独立决策。"
+        "</p>"
+    )
+    return "\n".join(parts)
+
+
+def build_plain_text_email_header(extra_vars: Optional[dict[str, Any]] = None) -> str:
+    """纯文本邮件顶部补充系统说明（与 HTML 前缀信息对齐）。"""
+    ev = extra_vars or {}
+    if ev.get("email_content_prefix") == "none":
+        return ""
+    lines = [
+        "══════════════════════════════════════",
+        " 次日竞价半路复盘系统 · 自动报告",
+        "══════════════════════════════════════",
+    ]
+    hd = (ev.get("header_date") or "").strip()
+    if hd:
+        lines.append(f"日期 / 场景：{hd}")
+    lines.extend(
+        [
+            "",
+            "【报告说明】",
+            "· 数据：程序拉取公开行情、交易日历，并按规则生成龙头池等；",
+            "· 正文：智谱模型按固定章节输出，为 Markdown 结构；",
+            "· 用途：个人研究与记录，不构成投资建议，股市有风险。",
+            "",
+            "────────── 正文（纯文本）──────────",
+            "",
+        ]
+    )
+    return "\n".join(lines)
+
+
 def render_email_template(
     content_html: str,
     subject: str,
@@ -73,6 +180,7 @@ def render_email_template(
     content_html 应为已转义安全的片段（来自 markdown 或受控模板）。
     """
     ev = extra_vars or {}
+    _yr = datetime.now().year
     ctx = {
         "title": ev.get("title") or subject or "复盘系统通知",
         "system_name": ev.get("system_name") or "次日竞价半路复盘系统",
@@ -84,8 +192,16 @@ def render_email_template(
         ),
         "footer_line": ev.get(
             "footer_line",
-            f"© 复盘系统 · 版本 {ev.get('app_version', '1.0')}",
+            f"© 次日竞价半路复盘系统 · 版本 {ev.get('email_app_version', ev.get('app_version', '1.0'))}",
         ),
+        "footer_line_secondary": ev.get(
+            "footer_line_secondary",
+            f"© {_yr} NEXT-DAY BIDDING SYSTEM | INTERNAL INTELLIGENCE REPORT",
+        ),
+        "show_intel_badge": ev.get("show_intel_badge", True),
+        "intel_badge_text": ev.get("intel_badge_text", "INTERNAL INTELLIGENCE REPORT"),
+        "footer_show_nav": ev.get("footer_show_nav", True),
+        "content_prefix_html": ev.get("content_prefix_html", ""),
     }
     ctx.update({k: v for k, v in ev.items() if k not in ctx})
     tpl = _env.get_template("email_base.html")

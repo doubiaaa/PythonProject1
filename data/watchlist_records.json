@@ -1,4 +1,50 @@
 {
   "version": 1,
-  "records": []
+  "records": [
+    {
+      "signal_date": "20260327",
+      "code": "000695",
+      "name": "滨海能源",
+      "rank": 2,
+      "score": 3.38,
+      "sector": "电池化学品",
+      "tag": "活口核心"
+    },
+    {
+      "signal_date": "20260327",
+      "code": "300390",
+      "name": "天华新能",
+      "rank": 4,
+      "score": 3.24,
+      "sector": "电池化学品",
+      "tag": "活口核心"
+    },
+    {
+      "signal_date": "20260327",
+      "code": "300769",
+      "name": "德方纳米",
+      "rank": 5,
+      "score": 3.2,
+      "sector": "电池化学品",
+      "tag": "趋势中军"
+    },
+    {
+      "signal_date": "20260327",
+      "code": "603026",
+      "name": "石大胜华",
+      "rank": 1,
+      "score": 4.14,
+      "sector": "电池化学品",
+      "tag": "活口核心"
+    },
+    {
+      "signal_date": "20260327",
+      "code": "688353",
+      "name": "华盛锂电",
+      "rank": 3,
+      "score": 3.38,
+      "sector": "电池化学品",
+      "tag": "活口核心"
+    }
+  ]
 }

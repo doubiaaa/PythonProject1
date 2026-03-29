@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>次日竞价半路模式 · 智能复盘</title>
+    <title>次日竞价半路复盘系统</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+SC:wght@400;500;600;700&family=Outfit:wght@500;600;700&display=swap" rel="stylesheet">
@@ -150,107 +150,137 @@
         .report-md hr { border-color: rgba(255,255,255,0.08); margin: 1.25rem 0; }
         @keyframes toast-in { from { opacity: 0; transform: translateY(-10px) scale(0.98); } to { opacity: 1; transform: translateY(0) scale(1); } }
         .toast-item { animation: toast-in 0.28s cubic-bezier(0.16, 1, 0.3, 1); }
+        .nav-top {
+            background: linear-gradient(180deg, rgba(7, 7, 12, 0.92) 0%, rgba(7, 7, 12, 0.78) 100%);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+            backdrop-filter: blur(16px);
+            -webkit-backdrop-filter: blur(16px);
+        }
+        .nav-top a { transition: color 0.15s, background 0.15s; }
     </style>
 </head>
 <body class="mesh-bg text-fg min-h-screen font-sans antialiased selection:bg-indigo-500/30">
     <div class="fixed inset-0 grid-bg pointer-events-none -z-10"></div>
 
-    <div class="container mx-auto px-4 sm:px-6 py-10 sm:py-14 max-w-5xl">
-        <!-- Hero -->
-        <header class="text-center mb-12 sm:mb-16 relative">
-            <div class="inline-flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.04] px-4 py-1.5 text-xs font-medium tracking-wide text-indigo-200/90 mb-6 backdrop-blur-sm">
-                <span class="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_8px_rgba(52,211,153,0.8)]"></span>
-                量化复盘 · 单一策略引擎
+    <!-- 顶栏（对齐高保真原型：仪表盘 / 配置 / 日志 / 报告） -->
+    <header class="nav-top sticky top-0 z-50">
+        <div class="container mx-auto max-w-6xl px-4 sm:px-6">
+            <div class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 py-3 sm:py-0 sm:h-14">
+                <div class="flex items-center justify-between gap-3">
+                    <span class="font-display font-semibold text-white text-sm sm:text-base tracking-tight truncate">次日竞价半路复盘系统</span>
+                    <div class="flex items-center gap-1 sm:hidden">
+                        <a href="#section-config" class="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/[0.06]" title="配置"><i class="fa fa-cog"></i></a>
+                        <span class="p-2 text-gray-600"><i class="fa fa-user-circle text-lg"></i></span>
+                    </div>
+                </div>
+                <nav class="flex flex-wrap items-center justify-center gap-1 sm:gap-0 text-xs sm:text-sm text-gray-400" aria-label="页面导航">
+                    <a href="#section-dashboard" class="px-2.5 py-1.5 rounded-lg hover:text-white hover:bg-white/[0.06]">仪表盘</a>
+                    <a href="#section-config" class="px-2.5 py-1.5 rounded-lg hover:text-white hover:bg-white/[0.06]">配置</a>
+                    <a href="#section-logs" class="px-2.5 py-1.5 rounded-lg hover:text-white hover:bg-white/[0.06]">日志</a>
+                    <a href="#result-section" class="px-2.5 py-1.5 rounded-lg hover:text-white hover:bg-white/[0.06]">报告</a>
+                </nav>
+                <div class="hidden sm:flex items-center justify-end gap-1 shrink-0">
+                    <a href="#section-config" class="p-2 rounded-lg text-gray-400 hover:text-white hover:bg-white/[0.06]" title="配置"><i class="fa fa-cog"></i></a>
+                    <span class="p-2 text-gray-600" title="本地会话"><i class="fa fa-user-circle text-lg"></i></span>
+                </div>
             </div>
-            <h1 class="font-display text-4xl sm:text-5xl md:text-[3.25rem] font-bold tracking-tight title-gradient leading-tight">
-                次日竞价半路模式
-            </h1>
-            <p class="mt-5 text-base sm:text-lg text-gray-400 max-w-2xl mx-auto leading-relaxed font-light">
-                收盘后<strong class="text-gray-300 font-medium">主线筛选 → 龙头池 → 多维评分</strong>，结合智谱 GLM 生成<strong class="text-gray-300 font-medium">次日竞价预案</strong>
-            </p>
-            <p class="mt-3 text-xs sm:text-sm text-gray-600 max-w-xl mx-auto">
-                数据以东财行业板块为主 · 与申万/同花顺分类存在差异 · 仅供研究参考
-            </p>
-        </header>
+        </div>
+    </header>
 
-        <!-- 配置 -->
-        <section class="glass-panel rounded-2xl sm:rounded-3xl p-6 sm:p-8 mb-8">
-            <div class="flex items-start gap-4 mb-8">
-                <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-indigo-500/30 to-cyan-500/20 border border-white/10 shadow-glow">
-                    <i class="fa fa-sliders text-lg text-indigo-200"></i>
-                </div>
-                <div>
-                    <h2 class="font-display text-xl font-semibold text-white tracking-tight">配置</h2>
-                    <p class="text-sm text-gray-500 mt-1">复盘日期、智谱 API Key；可选 Server酱 与 SMTP 邮件</p>
-                </div>
-            </div>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-                <div>
-                    <label class="block text-xs font-medium uppercase tracking-wider text-gray-500 mb-2">复盘日期</label>
-                    <div class="flex flex-wrap items-stretch gap-2">
-                        <input type="text" id="date-input" class="input-premium font-mono text-sm flex-1 min-w-[140px]" placeholder="YYYYMMDD" autocomplete="off">
-                        <button type="button" id="today-btn" class="btn-secondary shrink-0">今日</button>
-                        <button type="button" id="yesterday-btn" class="btn-secondary shrink-0">昨日</button>
+    <div class="container mx-auto px-4 sm:px-6 py-8 sm:py-10 max-w-6xl">
+        <p class="text-center text-sm text-gray-500 mb-8 max-w-2xl mx-auto leading-relaxed">
+            收盘后<strong class="text-gray-400 font-medium">主线筛选 → 龙头池 → 多维评分</strong>，智谱 GLM 生成次日竞价预案 · 数据以东财行业板块为主 · 仅供研究参考
+        </p>
+
+        <!-- 配置：双卡片（基础 / SMTP） -->
+        <section id="section-config" class="mb-8 scroll-mt-28">
+            <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                <div class="glass-panel rounded-2xl sm:rounded-3xl p-6 sm:p-8">
+                    <div class="flex items-start gap-4 mb-6">
+                        <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-500/30 to-cyan-500/20 border border-white/10">
+                            <i class="fa fa-sliders text-indigo-200"></i>
+                        </div>
+                        <div>
+                            <h2 class="font-display text-lg font-semibold text-white tracking-tight">基础配置</h2>
+                            <p class="text-xs text-gray-500 mt-1">复盘日期、智谱 API Key、Server酱（可选）</p>
+                        </div>
+                    </div>
+                    <div class="space-y-6">
+                        <div>
+                            <label class="block text-xs font-medium uppercase tracking-wider text-gray-500 mb-2">复盘日期</label>
+                            <div class="flex flex-wrap items-stretch gap-2">
+                                <input type="text" id="date-input" class="input-premium font-mono text-sm flex-1 min-w-[140px]" placeholder="YYYYMMDD" autocomplete="off">
+                                <button type="button" id="today-btn" class="btn-secondary shrink-0">今日</button>
+                                <button type="button" id="yesterday-btn" class="btn-secondary shrink-0">昨日</button>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium uppercase tracking-wider text-gray-500 mb-2">智谱 API Key</label>
+                            <div class="flex gap-2">
+                                <input type="password" id="api-key-input" class="input-premium flex-1" placeholder="sk-..." autocomplete="off">
+                                <button type="button" id="toggle-key-btn" class="btn-secondary px-4" title="显示/隐藏">
+                                    <i class="fa fa-eye-slash"></i>
+                                </button>
+                            </div>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium uppercase tracking-wider text-gray-500 mb-2">Server酱 SendKey（可选）</label>
+                            <p class="text-xs text-gray-600 mb-2">在 <a href="https://sct.ftqq.com/" target="_blank" rel="noopener noreferrer" class="text-indigo-400/90 hover:text-cyan-400/90 underline underline-offset-2">sct.ftqq.com</a> 获取；多 Key 用英文逗号分隔</p>
+                            <div class="flex gap-2">
+                                <input type="password" id="serverchan-input" class="input-premium flex-1 font-mono text-sm" placeholder="SCT… 或 SCTxxx,SCTyyy" autocomplete="off">
+                                <button type="button" id="toggle-sct-btn" class="btn-secondary px-4 shrink-0" title="显示/隐藏">
+                                    <i class="fa fa-eye-slash"></i>
+                                </button>
+                            </div>
+                        </div>
                     </div>
                 </div>
-                <div>
-                    <label class="block text-xs font-medium uppercase tracking-wider text-gray-500 mb-2">智谱 API Key</label>
-                    <div class="flex gap-2">
-                        <input type="password" id="api-key-input" class="input-premium flex-1" placeholder="sk-..." autocomplete="off">
-                        <button type="button" id="toggle-key-btn" class="btn-secondary px-4" title="显示/隐藏">
-                            <i class="fa fa-eye-slash"></i>
-                        </button>
+                <div class="glass-panel rounded-2xl sm:rounded-3xl p-6 sm:p-8">
+                    <div class="flex items-start gap-4 mb-6">
+                        <div class="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-sky-500/25 to-indigo-500/20 border border-white/10">
+                            <i class="fa fa-envelope-o text-sky-200"></i>
+                        </div>
+                        <div>
+                            <h2 class="font-display text-lg font-semibold text-white tracking-tight">SMTP 邮件</h2>
+                            <p class="text-xs text-gray-500 mt-1">与微信可同时开启；465 常选 SSL，587 多为 STARTTLS</p>
+                        </div>
                     </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div class="sm:col-span-2">
+                            <label class="block text-[11px] text-gray-500 mb-1.5">SMTP 服务器</label>
+                            <input type="text" id="smtp-host-input" class="input-premium font-mono text-sm" placeholder="smtp.qq.com" autocomplete="off">
+                        </div>
+                        <div>
+                            <label class="block text-[11px] text-gray-500 mb-1.5">端口</label>
+                            <input type="number" id="smtp-port-input" class="input-premium font-mono text-sm" placeholder="587" min="1" max="65535" autocomplete="off">
+                        </div>
+                        <div>
+                            <label class="block text-[11px] text-gray-500 mb-1.5">用户名</label>
+                            <input type="text" id="smtp-user-input" class="input-premium font-mono text-sm" placeholder="邮箱账号" autocomplete="off">
+                        </div>
+                        <div>
+                            <label class="block text-[11px] text-gray-500 mb-1.5">密码 / 授权码</label>
+                            <input type="password" id="smtp-password-input" class="input-premium font-mono text-sm" placeholder="修改时请重新填写" autocomplete="off">
+                        </div>
+                        <div>
+                            <label class="block text-[11px] text-gray-500 mb-1.5">发件人（可空）</label>
+                            <input type="text" id="smtp-from-input" class="input-premium font-mono text-sm" placeholder="name@qq.com" autocomplete="off">
+                        </div>
+                        <div class="sm:col-span-2">
+                            <label class="block text-[11px] text-gray-500 mb-1.5">收件人（多个用英文逗号）</label>
+                            <input type="text" id="mail-to-input" class="input-premium font-mono text-sm" placeholder="a@qq.com,b@163.com" autocomplete="off">
+                        </div>
+                    </div>
+                    <label class="mt-4 flex items-center gap-2 cursor-pointer text-sm text-gray-400 select-none">
+                        <input type="checkbox" id="smtp-ssl-input" class="rounded border-white/20 bg-white/5 text-indigo-500 focus:ring-indigo-500/40">
+                        启用 SSL 加密（SMTPS，常见于端口 465）
+                    </label>
                 </div>
-            </div>
-            <div class="mt-8 pt-8 border-t border-white/[0.06]">
-                <label class="block text-xs font-medium uppercase tracking-wider text-gray-500 mb-2">Server酱 SendKey（可选）</label>
-                <p class="text-xs text-gray-600 mb-3">在 <a href="https://sct.ftqq.com/" target="_blank" rel="noopener noreferrer" class="text-indigo-400/90 hover:text-cyan-400/90 underline underline-offset-2">sct.ftqq.com</a> 获取 Turbo 版 SendKey（以 SCT 开头）。多人接收时用<strong class="text-gray-500">英文逗号</strong>分隔多个 Key；留空则不推送</p>
-                <div class="flex gap-2">
-                    <input type="password" id="serverchan-input" class="input-premium flex-1 font-mono text-sm" placeholder="SCT… 或 SCTxxx,SCTyyy" autocomplete="off">
-                    <button type="button" id="toggle-sct-btn" class="btn-secondary px-4 shrink-0" title="显示/隐藏">
-                        <i class="fa fa-eye-slash"></i>
-                    </button>
-                </div>
-            </div>
-            <div class="mt-8 pt-8 border-t border-white/[0.06]">
-                <label class="block text-xs font-medium uppercase tracking-wider text-gray-500 mb-2">邮件通知 SMTP（可选）</label>
-                <p class="text-xs text-gray-600 mb-4">与微信推送可同时开启。QQ/163 等需在邮箱设置里开启 SMTP 并使用<strong class="text-gray-500">授权码</strong>作为密码。端口 <span class="font-mono text-gray-500">465</span> 一般勾选 SSL；<span class="font-mono text-gray-500">587</span> 不勾选（STARTTLS）。</p>
-                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
-                        <label class="block text-[11px] text-gray-500 mb-1.5">SMTP 服务器</label>
-                        <input type="text" id="smtp-host-input" class="input-premium font-mono text-sm" placeholder="smtp.qq.com" autocomplete="off">
-                    </div>
-                    <div>
-                        <label class="block text-[11px] text-gray-500 mb-1.5">端口</label>
-                        <input type="number" id="smtp-port-input" class="input-premium font-mono text-sm" placeholder="587" min="1" max="65535" autocomplete="off">
-                    </div>
-                    <div>
-                        <label class="block text-[11px] text-gray-500 mb-1.5">用户名</label>
-                        <input type="text" id="smtp-user-input" class="input-premium font-mono text-sm" placeholder="邮箱账号" autocomplete="off">
-                    </div>
-                    <div>
-                        <label class="block text-[11px] text-gray-500 mb-1.5">密码 / 授权码</label>
-                        <input type="password" id="smtp-password-input" class="input-premium font-mono text-sm" placeholder="修改时请重新填写" autocomplete="off">
-                    </div>
-                    <div>
-                        <label class="block text-[11px] text-gray-500 mb-1.5">发件人（可空，默认同用户名）</label>
-                        <input type="text" id="smtp-from-input" class="input-premium font-mono text-sm" placeholder="name@qq.com" autocomplete="off">
-                    </div>
-                    <div>
-                        <label class="block text-[11px] text-gray-500 mb-1.5">收件人（多个用英文逗号）</label>
-                        <input type="text" id="mail-to-input" class="input-premium font-mono text-sm" placeholder="a@qq.com,b@163.com" autocomplete="off">
-                    </div>
-                </div>
-                <label class="mt-4 flex items-center gap-2 cursor-pointer text-sm text-gray-400 select-none">
-                    <input type="checkbox" id="smtp-ssl-input" class="rounded border-white/20 bg-white/5 text-indigo-500 focus:ring-indigo-500/40">
-                    使用 SSL（SMTPS，常见于端口 465）
-                </label>
             </div>
         </section>
 
         <!-- 仪表盘 -->
-        <section class="glass-panel rounded-2xl sm:rounded-3xl p-6 sm:p-8 mb-8">
+        <section id="section-dashboard" class="glass-panel rounded-2xl sm:rounded-3xl p-6 sm:p-8 mb-8 scroll-mt-28">
             <div class="flex items-start gap-4 mb-8">
                 <div class="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-gradient-to-br from-violet-500/25 to-fuchsia-500/15 border border-white/10">
                     <i class="fa fa-dashboard text-lg text-violet-200"></i>
@@ -269,6 +299,7 @@
                     <div class="mt-4 h-1.5 rounded-full bg-black/40 overflow-hidden ring-1 ring-white/5">
                         <div id="temperature-bar" class="h-full rounded-full bg-gradient-to-r from-indigo-500 to-cyan-400 transition-all duration-500" style="width: 0%"></div>
                     </div>
+                    <p id="emotion-mood-label" class="text-xs text-cyan-200/60 mt-2">--</p>
                 </div>
                 <div class="stat-tile">
                     <div class="text-[11px] font-semibold uppercase tracking-wider text-gray-500">市场阶段</div>
@@ -291,21 +322,21 @@
         </section>
 
         <!-- 主操作 -->
-        <section class="glass-panel rounded-2xl sm:rounded-3xl p-6 sm:p-8 mb-8 overflow-hidden relative">
+        <section id="section-run" class="glass-panel rounded-2xl sm:rounded-3xl p-6 sm:p-8 mb-8 overflow-hidden relative scroll-mt-28">
             <div class="absolute top-0 right-0 w-64 h-64 bg-indigo-500/10 rounded-full blur-3xl -translate-y-1/2 translate-x-1/2 pointer-events-none"></div>
             <div class="relative flex flex-col lg:flex-row lg:items-center gap-8">
                 <button type="button" id="replay-btn" aria-busy="false"
-                    class="group relative w-full lg:w-auto min-w-[260px] overflow-hidden rounded-2xl bg-gradient-to-r from-indigo-600 via-indigo-500 to-cyan-600 px-8 py-4 text-base font-semibold text-white shadow-lg shadow-indigo-500/25 transition-all hover:shadow-xl hover:shadow-indigo-500/35 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-55 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:shadow-lg">
+                    class="group relative w-full lg:w-auto min-w-[260px] overflow-hidden rounded-2xl bg-gradient-to-r from-sky-600 via-indigo-600 to-cyan-500 px-8 py-4 text-base font-semibold text-white shadow-lg shadow-cyan-500/20 transition-all hover:shadow-xl hover:shadow-cyan-500/30 hover:scale-[1.02] active:scale-[0.98] disabled:opacity-55 disabled:cursor-not-allowed disabled:hover:scale-100 disabled:hover:shadow-lg">
                     <span class="absolute inset-0 bg-gradient-to-r from-white/0 via-white/10 to-white/0 translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-700"></span>
                     <span class="relative flex items-center justify-center gap-2">
-                        <i class="fa fa-bolt" id="replay-btn-icon"></i><span id="replay-btn-label">生成复盘报告</span>
+                        <i class="fa fa-play" id="replay-btn-icon"></i><span id="replay-btn-label">开始复盘报告</span>
                     </span>
                 </button>
                 <div class="flex-1 flex flex-col sm:flex-row sm:items-center gap-4 min-w-0">
                     <div class="shrink-0">
                         <div class="text-xs uppercase tracking-wider text-gray-500">状态</div>
                         <div class="text-lg font-semibold text-white mt-0.5" id="status-text">就绪</div>
-                        <div id="elapsed-wrap" class="text-xs text-cyan-500/80 mt-1 hidden font-medium">已运行 <span id="elapsed-text">0</span> 秒</div>
+                        <div id="elapsed-wrap" class="text-xs text-cyan-500/80 mt-1 hidden font-medium">系统已运行 <span id="elapsed-text">0</span> 秒</div>
                     </div>
                     <div class="flex items-center gap-3 flex-1 min-w-0">
                         <div class="flex-1 h-2.5 rounded-full bg-black/50 overflow-hidden ring-1 ring-white/[0.06] min-w-[100px]">
@@ -323,7 +354,7 @@
         </section>
 
         <!-- 日志 -->
-        <section class="glass-panel rounded-2xl sm:rounded-3xl p-6 sm:p-8 mb-8">
+        <section id="section-logs" class="glass-panel rounded-2xl sm:rounded-3xl p-6 sm:p-8 mb-8 scroll-mt-28">
             <div class="flex justify-between items-center mb-6">
                 <div class="flex items-center gap-3">
                     <div class="h-10 w-10 rounded-xl bg-white/[0.06] flex items-center justify-center border border-white/[0.06]">
@@ -336,32 +367,38 @@
                 </div>
                 <button type="button" id="clear-log-btn" class="btn-ghost"><i class="fa fa-trash mr-1.5 opacity-70"></i>清空</button>
             </div>
-            <div id="log-container" class="rounded-2xl border border-white/[0.06] bg-black/30 p-4 h-52 sm:h-60 overflow-y-auto scrollbar-thin font-mono text-[13px] leading-relaxed text-gray-300" role="log" aria-live="polite"></div>
+            <div id="log-container" class="rounded-2xl border border-emerald-500/10 bg-[#050508] p-4 h-52 sm:h-60 overflow-y-auto scrollbar-thin font-mono text-[13px] leading-relaxed text-emerald-100/90" role="log" aria-live="polite"></div>
         </section>
 
-        <!-- 结果 -->
-        <section id="result-section" class="glass-panel rounded-2xl sm:rounded-3xl p-6 sm:p-8 mb-10 scroll-mt-8">
-            <div class="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-4 mb-6">
-                <div class="flex items-center gap-3">
-                    <div class="h-10 w-10 rounded-xl bg-gradient-to-br from-indigo-500/20 to-purple-500/20 flex items-center justify-center border border-white/[0.08]">
-                        <i class="fa fa-file-text-o text-indigo-300"></i>
-                    </div>
-                    <div>
-                        <h2 class="font-display text-lg font-semibold text-white">复盘结果</h2>
-                        <p class="text-xs text-gray-600">支持 Markdown 渲染与导出</p>
-                    </div>
+        <!-- 结果（报告区对齐原型：标题栏 + 元数据 + 工具条） -->
+        <section id="result-section" class="glass-panel rounded-2xl sm:rounded-3xl p-6 sm:p-8 mb-10 scroll-mt-28">
+            <div class="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-6 mb-6 pb-6 border-b border-white/[0.06]">
+                <div class="min-w-0">
+                    <h2 class="font-display text-xl sm:text-2xl font-semibold text-white tracking-tight">次日市场竞价深度复盘报告</h2>
+                    <p id="report-meta-line" class="text-xs text-gray-500 mt-2 font-mono">尚未生成报告 · 完成一次复盘后将显示编号与生成时间</p>
                 </div>
-                <div class="flex flex-wrap gap-2">
+                <div class="flex flex-wrap items-center gap-2 shrink-0">
                     <button type="button" id="copy-btn" class="btn-secondary text-sm disabled:opacity-40" disabled title="复制原始 Markdown">复制全文</button>
-                    <button type="button" id="save-btn" class="btn-secondary text-sm disabled:opacity-40" disabled>保存报告</button>
+                    <button type="button" id="save-btn" class="btn-secondary text-sm disabled:opacity-40" disabled>保存为 TXT</button>
+                    <button type="button" id="send-email-preview-btn" class="btn-secondary text-sm disabled:opacity-40" disabled title="使用下方 SMTP 将当前报告发到邮箱，预览 HTML 邮件样式">发邮件预览</button>
                     <button type="button" id="clear-result-btn" class="rounded-xl border border-white/[0.06] bg-transparent px-4 py-2.5 text-sm text-gray-400 hover:text-white hover:bg-white/[0.04] transition-colors">清空</button>
+                    <div class="flex rounded-lg border border-white/[0.08] p-0.5 text-xs ml-0 lg:ml-2" role="group" aria-label="界面语言">
+                        <button type="button" id="lang-zh-btn" class="px-2.5 py-1 rounded-md bg-indigo-500/35 text-white">中</button>
+                        <button type="button" id="lang-en-btn" class="px-2.5 py-1 rounded-md text-gray-500 hover:text-gray-300">EN</button>
+                    </div>
                 </div>
             </div>
+            <p class="text-xs text-gray-600 mb-4 leading-relaxed">「发邮件预览」使用配置区 <strong class="text-gray-500">SMTP 邮件</strong> 中的服务器与收件人，把<strong class="text-gray-500">当前内存里最近一次成功复盘</strong>的全文按系统邮件模板发出，便于在邮箱里查看版式（无需再跑复盘）。</p>
             <div id="result-container" class="rounded-2xl border border-white/[0.06] bg-black/25 min-h-[420px] max-h-[72vh] overflow-y-auto scrollbar-thin p-5 sm:p-8"></div>
         </section>
 
-        <footer class="text-center text-xs text-gray-600 pb-8">
-            <p>数据来源于公开接口 · 不构成投资建议</p>
+        <footer class="text-center text-xs text-gray-600 pb-10 pt-4 border-t border-white/[0.06]">
+            <p class="mb-3 text-gray-500">数据来源于公开接口 · 不构成投资建议</p>
+            <p class="flex flex-wrap justify-center gap-x-6 gap-y-2">
+                <span class="cursor-default" title="本页及报告仅供研究记录">免责声明</span>
+                <span class="cursor-default" title="本地运行，无上传">隐私说明</span>
+                <span class="text-indigo-400/80 cursor-help border-b border-dotted border-indigo-400/30" title="HTTP 接口见 ARCHITECTURE.md §10；完整说明见项目根目录 ARCHITECTURE.md">API 与架构说明</span>
+            </p>
         </footer>
     </div>
     <div id="toast-root" class="fixed top-4 right-4 z-[100] flex flex-col gap-2 pointer-events-none max-w-sm" aria-live="polite"></div>
@@ -394,6 +431,49 @@
             }, 3200);
         }
 
+        function setResultExportEnabled(enabled) {
+            document.getElementById('save-btn').disabled = !enabled;
+            document.getElementById('copy-btn').disabled = !enabled;
+            document.getElementById('send-email-preview-btn').disabled = !enabled;
+        }
+
+        function collectSmtpPayload() {
+            var smtpPortRaw = document.getElementById('smtp-port-input').value.trim();
+            var smtpPort = smtpPortRaw ? parseInt(smtpPortRaw, 10) : 587;
+            return {
+                date: document.getElementById('date-input').value.trim(),
+                smtp_host: document.getElementById('smtp-host-input').value.trim(),
+                smtp_port: smtpPort,
+                smtp_user: document.getElementById('smtp-user-input').value.trim(),
+                smtp_password: document.getElementById('smtp-password-input').value,
+                smtp_from: document.getElementById('smtp-from-input').value.trim(),
+                mail_to: document.getElementById('mail-to-input').value.trim(),
+                smtp_ssl: document.getElementById('smtp-ssl-input').checked
+            };
+        }
+
+        function sendEmailPreview() {
+            fetch('/api/send_result_email', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(collectSmtpPayload())
+            })
+                .then(function (response) {
+                    return response.json().then(function (data) {
+                        if (!response.ok) {
+                            throw new Error(data.error || ('请求失败 ' + response.status));
+                        }
+                        return data;
+                    });
+                })
+                .then(function () {
+                    showToast('已发送邮件，请到收件箱查看 HTML 样式', 'success');
+                })
+                .catch(function (err) {
+                    showToast(err.message || '发送失败', 'error');
+                });
+        }
+
         function setRunningState(running) {
             const btn = document.getElementById('replay-btn');
             const icon = document.getElementById('replay-btn-icon');
@@ -402,10 +482,10 @@
             btn.setAttribute('aria-busy', running ? 'true' : 'false');
             if (running) {
                 icon.className = 'fa fa-spinner fa-spin mr-2';
-                label.textContent = '生成中…';
+                label.textContent = '系统运行中…';
             } else {
-                icon.className = 'fa fa-bolt mr-2';
-                label.textContent = '生成复盘报告';
+                icon.className = 'fa fa-play mr-2';
+                label.textContent = '开始复盘报告';
             }
         }
 
@@ -457,6 +537,22 @@
                 });
 
             bindEvents();
+
+            var lz = document.getElementById('lang-zh-btn');
+            var le = document.getElementById('lang-en-btn');
+            if (lz && le) {
+                lz.addEventListener('click', function () {
+                    lz.className = 'px-2.5 py-1 rounded-md bg-indigo-500/35 text-white';
+                    le.className = 'px-2.5 py-1 rounded-md text-gray-500 hover:text-gray-300';
+                    document.documentElement.lang = 'zh-CN';
+                });
+                le.addEventListener('click', function () {
+                    le.className = 'px-2.5 py-1 rounded-md bg-indigo-500/35 text-white';
+                    lz.className = 'px-2.5 py-1 rounded-md text-gray-500 hover:text-gray-300';
+                    document.documentElement.lang = 'en';
+                    showToast('英文界面文案尚未全部接入，报告内容仍以中文模型输出为主', 'info');
+                });
+            }
         });
 
         function bindEvents() {
@@ -509,13 +605,17 @@
             document.getElementById('clear-result-btn').addEventListener('click', function () {
                 document.getElementById('result-container').innerHTML = '';
                 lastResultText = '';
-                document.getElementById('save-btn').disabled = true;
-                document.getElementById('copy-btn').disabled = true;
+                setResultExportEnabled(false);
                 document.getElementById('status-text').textContent = '已清空';
+                var rm = document.getElementById('report-meta-line');
+                if (rm) {
+                    rm.textContent = '尚未生成报告 · 完成一次复盘后将显示编号与生成时间';
+                }
             });
 
             document.getElementById('save-btn').addEventListener('click', saveReport);
             document.getElementById('copy-btn').addEventListener('click', copyReport);
+            document.getElementById('send-email-preview-btn').addEventListener('click', sendEmailPreview);
 
             document.getElementById('date-input').addEventListener('keydown', function (e) {
                 if (e.key === 'Enter') startReplay();
@@ -550,8 +650,7 @@
             lastLogCount = 0;
             document.getElementById('result-container').innerHTML = '';
             lastResultText = '';
-            document.getElementById('save-btn').disabled = true;
-            document.getElementById('copy-btn').disabled = true;
+            setResultExportEnabled(false);
             document.getElementById('status-text').textContent = '正在连接…';
             setProgressUI(0);
             document.getElementById('elapsed-wrap').classList.add('hidden');
@@ -640,8 +739,13 @@
                     if (data.status === 'completed') {
                         lastResultText = data.result || '';
                         document.getElementById('result-container').innerHTML = formatResult(data.result);
-                        document.getElementById('save-btn').disabled = false;
-                        document.getElementById('copy-btn').disabled = false;
+                        setResultExportEnabled(true);
+                        var rm = document.getElementById('report-meta-line');
+                        if (rm) {
+                            var dpart = document.getElementById('date-input').value.trim() || '--------';
+                            var rid = 'RPT-' + dpart + '-' + String(Date.now()).slice(-6);
+                            rm.textContent = '报告编号 ' + rid + ' · 生成时间 ' + new Date().toLocaleString('zh-CN');
+                        }
                         updateEmotionDashboard(data.result || '');
                         clearInterval(pollingInterval);
                         pollingInterval = null;
@@ -801,6 +905,13 @@
             const tempNum = parseInt(temp, 10) || 0;
             document.getElementById('emotion-temperature').innerHTML =
                 '<span class="mr-1">' + tempNum + '</span><span class="text-base font-normal text-gray-500">°C</span>';
+            var moodLb = document.getElementById('emotion-mood-label');
+            if (moodLb) {
+                if (tempNum >= 70) moodLb.textContent = '偏乐观';
+                else if (tempNum >= 40) moodLb.textContent = '中性';
+                else if (tempNum > 0) moodLb.textContent = '偏谨慎';
+                else moodLb.textContent = '--';
+            }
             document.getElementById('temperature-bar').style.width = tempNum + '%';
             // 根据温度设置颜色
             const tempBar = document.getElementById('temperature-bar');
