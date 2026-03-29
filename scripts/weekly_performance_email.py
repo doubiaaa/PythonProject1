@@ -150,7 +150,29 @@ def main() -> int:
 
     from app.services.watchlist_store import RECORDS_FILE, load_all_records
 
-    if not os.path.isfile(RECORDS_FILE) or not load_all_records():
+    has_recs = os.path.isfile(RECORDS_FILE) and bool(load_all_records())
+
+    if has_recs and cm.get("enable_strategy_feedback_loop", True):
+        try:
+            from app.services.strategy_preference import update_from_recent_returns
+
+            update_from_recent_returns(
+                trade_days,
+                anchor,
+                iso_year,
+                iso_week,
+                smoothing=float(cm.get("strategy_weight_smoothing", 0.3)),
+                max_single=float(cm.get("strategy_weight_max_single", 0.55)),
+                min_each=float(cm.get("strategy_weight_min_each", 0.08)),
+            )
+            print(
+                "策略偏好已更新（data/strategy_preference.json，供次日复盘动态侧重）",
+                flush=True,
+            )
+        except Exception as e:
+            print(f"策略偏好更新失败：{e}", file=sys.stderr)
+
+    if not has_recs:
         print(
             "无 data/watchlist_records.json 或内容为空，跳过发信。"
             "请在持久化环境跑复盘以积累龙头池存档。",

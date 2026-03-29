@@ -6,6 +6,7 @@ import requests
 
 from app.services.email_notify import has_email_config, send_report_email
 from app.services.serverchan_notify import send_serverchan
+from app.services.strategy_preference import build_prompt_addon
 from app.services.watchlist_store import append_daily_top_pool
 from app.utils.config import ConfigManager
 
@@ -127,6 +128,7 @@ class ReplayTask:
 > **免责声明**：以上分析基于公开数据与程序规则，仅供参考，不构成投资建议。股市有风险，投资需谨慎。
 
 ---
+{build_prompt_addon()}
 ## 今日市场数据（程序选股 + 基础指标 + AI 提示）
 {market_data}
 """

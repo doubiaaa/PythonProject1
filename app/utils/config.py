@@ -41,6 +41,11 @@ DEFAULT_CONFIG = {
     # 周报是否计算「自然周」严格涨幅前 20（全市场抽样，较慢）
     "enable_strict_weekly_top20": True,
     "weekly_strict_top20_max_universe": 2800,
+    # 周报后根据龙头池风格收益更新 strategy_preference.json，供次日复盘 prompt 侧重
+    "enable_strategy_feedback_loop": True,
+    "strategy_weight_smoothing": 0.3,
+    "strategy_weight_max_single": 0.55,
+    "strategy_weight_min_each": 0.08,
 }
 
 
