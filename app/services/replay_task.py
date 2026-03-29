@@ -6,6 +6,7 @@ import requests
 
 from app.services.email_notify import has_email_config, send_report_email
 from app.services.serverchan_notify import send_serverchan
+from app.services.watchlist_store import append_daily_top_pool
 
 ZHIPU_API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
 MODEL_NAME = "glm-4-flash"  # 智谱免费模型
@@ -189,6 +190,13 @@ class ReplayTask:
             self.result = result
             self.log("分析完成")
             self.status = "completed"
+            ah_meta = getattr(data_fetcher, "_last_auction_meta", None) or {}
+            if ah_meta.get("program_completed") and ah_meta.get("top_pool"):
+                try:
+                    append_daily_top_pool(actual_date, ah_meta["top_pool"])
+                    self.log("龙头池已记入周度统计档案（data/watchlist_records.json）")
+                except Exception as ex:
+                    self.log(f"龙头池存档失败：{ex}")
             sc_title = (
                 f"✅ {sum_line} · {actual_date}"
                 if sum_line

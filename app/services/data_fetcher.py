@@ -184,6 +184,8 @@ class DataFetcher:
         self._spot_em_df = None
         # get_market_summary 内写入，供复盘任务在推送/邮件正文顶部附加要闻摘要
         self._last_news_push_prefix: str = ""
+        # 程序选股 meta（龙头池等），供存档与周度统计
+        self._last_auction_meta: dict = {}
 
     def _is_cache_valid(self, key):
         if key in self.cache:
@@ -689,6 +691,7 @@ class DataFetcher:
     def get_market_summary(self, date):
         """获取完整市场摘要（文本形式）"""
         self._last_news_push_prefix = ""
+        self._last_auction_meta = {}
         summary = ""
         trade_days = self.get_trade_cal()
         if not trade_days:
@@ -815,6 +818,7 @@ class DataFetcher:
             from app.services.auction_halfway_strategy import build_auction_halfway_report
 
             ah_text, ah_meta = build_auction_halfway_report(date, trade_days, self, df_zt)
+            self._last_auction_meta = dict(ah_meta) if isinstance(ah_meta, dict) else {}
             summary += ah_text
             tp = ah_meta.get("top_pool") or []
             if tp:
@@ -838,5 +842,6 @@ class DataFetcher:
         except Exception as e:
             summary += f"\n## 【次日竞价半路模式】选股\n- 执行异常：{e!s}\n\n"
             self._last_news_push_prefix = ""
+            self._last_auction_meta = {}
 
         return summary, date  # 返回可能调整后的日期

@@ -1,0 +1,43 @@
+# 龙头池周度邮件：北京时间每周日 10:00（UTC 周日 02:00）。
+# 需存在 data/watchlist_records.json（自托管 runner / 本机定时任务，或取消 gitignore 后提交仓库快照）。
+# 若仓库内无该文件，脚本会跳过发信（exit 0）。
+name: Weekly watchlist performance
+
+on:
+  schedule:
+    - cron: "0 2 * * 0"
+  workflow_dispatch: {}
+
+concurrency:
+  group: weekly-report-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  weekly:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Weekly performance email
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+          SMTP_SSL: ${{ secrets.SMTP_SSL }}
+          ZHIPU_API_KEY: ${{ secrets.ZHIPU_API_KEY }}
+        run: python scripts/weekly_performance_email.py

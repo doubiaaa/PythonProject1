@@ -7,3 +7,4 @@ __pycache__/
 replay_config.json
 .env
 .env.*
+data/watchlist_records.json

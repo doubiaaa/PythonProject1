@@ -30,6 +30,10 @@ DEFAULT_CONFIG = {
     "enable_tech_momentum": True,
     # 财联社等公开要闻：拉取摘要并与龙头池/主线做关键词关联；关闭则不请求、不推送要闻块
     "enable_finance_news": True,
+    # 龙头池周度邮件：周末脚本汇总涨跌；关闭则只跑脚本不寄信（或手动 --dry-run）
+    "enable_weekly_performance_email": True,
+    # 周报复盘末尾是否调用智谱生成「短评」（需 ZHIPU_API_KEY）
+    "enable_weekly_ai_insight": False,
 }
 
 
