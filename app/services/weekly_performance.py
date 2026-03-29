@@ -416,6 +416,10 @@ def build_monthly_section(trade_days: list[str], anchor_trade: str) -> str:
         lines.append(f"；平均：**{agg['avg_pct']}%**\n\n")
     else:
         lines.append("\n\n")
+    lines.append(
+        "> *注：月度收益按信号触发日归属，未对跨月持仓进行收益拆分，"
+        "实际收益可能与月度区间存在偏差。*\n\n"
+    )
     return "".join(lines)
 
 

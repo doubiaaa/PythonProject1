@@ -6,11 +6,14 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import threading
 from copy import deepcopy
 from datetime import datetime
 from typing import Any, Callable, Optional
+
+_logger = logging.getLogger(__name__)
 
 _lock = threading.Lock()
 
@@ -21,6 +24,7 @@ _PROJECT_ROOT = os.path.abspath(
 DEFAULT_CONFIG: dict[str, Any] = {
     "buy_rule": "close_of_recommendation_day",
     "sell_rule": "stop_loss_profit_or_5_days",
+    "buy_price_type": "close_of_recommendation_day",
     "stop_loss": -0.05,
     "stop_profit": 0.15,
     "max_holding_days": 5,
@@ -49,6 +53,30 @@ def _norm_symbol(s: str) -> str:
     return "".join(c for c in str(s) if c.isdigit())[:6].zfill(6)
 
 
+def count_trade_days_held(
+    trade_days: Optional[list[str]], buy_date: str, market_date: str
+) -> int:
+    """
+    买入日之后至 market_date（含）之间的交易日数。
+    无交易日历时退回自然日差（与旧行为兼容）。
+    """
+    bd_s, md_s = buy_date[:8], market_date[:8]
+    if trade_days:
+        return sum(1 for d in trade_days if bd_s < d <= md_s)
+    try:
+        bd = datetime.strptime(bd_s, "%Y%m%d")
+        md = datetime.strptime(md_s, "%Y%m%d")
+        return max(0, (md - bd).days)
+    except Exception:
+        return 0
+
+
+def pending_buys_file(project_root: str, signal_date: str) -> str:
+    return os.path.join(
+        project_root, "data", f"pending_buys_{signal_date[:8]}.json"
+    )
+
+
 class SimulatedAccount:
     """模拟盘：先卖后买；价格默认用推荐日收盘价（由调用方传入 price_getter）。"""
 
@@ -58,15 +86,18 @@ class SimulatedAccount:
         config_path: str = "data/simulated_config.json",
         *,
         project_root: Optional[str] = None,
+        config_manager: Optional[Any] = None,
     ) -> None:
         self.project_root = project_root or _PROJECT_ROOT
         self.account_path = _abs_path(self.project_root, account_path)
         self.config_path = _abs_path(self.project_root, config_path)
+        self._config_manager = config_manager
         self._cfg: dict[str, Any] = {}
         self._state: dict[str, Any] = {}
         self._last_series_date: Optional[str] = None
         self._last_session_buys: list[dict[str, Any]] = []
         self._last_session_sells: list[dict[str, Any]] = []
+        self._last_pending_recs: list[dict[str, Any]] = []
         self.load_state()
 
     def _ensure_data_files(self) -> None:
@@ -151,6 +182,82 @@ class SimulatedAccount:
                 h["current_price"] = pmap[sym]
         self._state["total_value"] = float(self._state["cash"]) + self._holding_value()
 
+    def _holdings_top_summary(self, limit: int = 3) -> str:
+        """按持仓市值近似排序，取前若干只，用于邮件正文。"""
+        rows: list[tuple[float, str]] = []
+        for h in self._state.get("holdings") or []:
+            sh = int(h.get("shares") or 0)
+            px = float(h.get("current_price") or h.get("cost_price") or 0)
+            mv = sh * px
+            sym = str(h.get("symbol") or "")
+            nm = str(h.get("name") or "")
+            rows.append((mv, f"`{sym}` {nm} ×{sh} 股 ≈ {mv:,.2f} 元"))
+        rows.sort(key=lambda x: -x[0])
+        if not rows:
+            return "（无持仓）"
+        return "\n".join(f"- {t[1]}" for t in rows[:limit])
+
+    def _schedule_trade_notification(
+        self,
+        *,
+        side: str,
+        symbol: str,
+        name: str,
+        shares: int,
+        price: float,
+        reason: str,
+        trade_date: str,
+    ) -> None:
+        """后台线程发送邮件，失败仅记日志，不影响成交。"""
+
+        def _run() -> None:
+            try:
+                cm = self._config_manager
+                if cm is None:
+                    from app.utils.config import ConfigManager
+
+                    cm = ConfigManager()
+                if not cm.get("enable_simulated_trade_notification", False):
+                    return
+                from app.services.email_notify import (
+                    has_email_config,
+                    resolve_email_config,
+                    send_simple_email,
+                )
+
+                ecfg = resolve_email_config(cm)
+                if not has_email_config(ecfg):
+                    return
+                op = "买入" if side == "buy" else "卖出"
+                subj = (
+                    f"【模拟账户{op}】{symbol} {name} {shares}股@{price:.2f}"
+                )
+                tv = float(self._state.get("total_value") or 0)
+                cash = float(self._state.get("cash") or 0)
+                n_hold = len(self._state.get("holdings") or [])
+                body = (
+                    f"## 模拟账户 · {op}\n\n"
+                    f"- **操作类型**：{op}\n"
+                    f"- **代码**：{symbol} ；**名称**：{name}\n"
+                    f"- **成交数量**：{shares} 股\n"
+                    f"- **成交价格**：{price:.4f} 元\n"
+                    f"- **理由**：{reason}\n"
+                    f"- **成交日**：{trade_date}\n"
+                    f"- **操作后总资产**：{tv:,.2f} 元\n"
+                    f"- **操作后现金**：{cash:,.2f} 元\n\n"
+                    f"### 持仓概览\n\n"
+                    f"- **持仓只数**：{n_hold}\n"
+                    f"- **前三大持仓**（按市值近似）：\n\n"
+                    f"{self._holdings_top_summary(3)}\n"
+                )
+                ok, msg = send_simple_email(subj, body, ecfg)
+                if not ok and msg != "skipped":
+                    _logger.warning("模拟账户成交邮件发送失败：%s", msg)
+            except Exception as ex:
+                _logger.warning("模拟账户成交邮件异常：%s", ex, exc_info=False)
+
+        threading.Thread(target=_run, daemon=True).start()
+
     def buy(
         self,
         symbol: str,
@@ -193,6 +300,15 @@ class SimulatedAccount:
             }
         )
         self._state["total_value"] = float(self._state["cash"]) + self._holding_value()
+        self._schedule_trade_notification(
+            side="buy",
+            symbol=sym,
+            name=str(name or sym),
+            shares=shares,
+            price=float(price),
+            reason=reason,
+            trade_date=date,
+        )
         return True
 
     def sell(
@@ -226,18 +342,26 @@ class SimulatedAccount:
             }
         )
         self._state["total_value"] = float(self._state["cash"]) + self._holding_value()
+        self._schedule_trade_notification(
+            side="sell",
+            symbol=sym,
+            name=str(h.get("name") or sym),
+            shares=sh,
+            price=float(price),
+            reason=reason,
+            trade_date=date,
+        )
         return True
 
-    def _holding_days(self, buy_date: str, market_date: str) -> int:
-        try:
-            bd = datetime.strptime(buy_date[:8], "%Y%m%d")
-            md = datetime.strptime(market_date[:8], "%Y%m%d")
-            return max(0, (md - bd).days)
-        except Exception:
-            return 0
-
-    def check_sell_signals(self, market_date: str) -> list[dict[str, Any]]:
-        """止盈/止损/最长持有天数。"""
+    def check_sell_signals(
+        self,
+        market_date: str,
+        trade_days: Optional[list[str]] = None,
+    ) -> list[dict[str, Any]]:
+        """
+        卖出信号优先级：止盈 > 止损 > 持有天数上限。
+        持有天数：若提供 trade_days 则为其间交易日数，否则为自然日差。
+        """
         sl = float(self._cfg.get("stop_loss", -0.05))
         tp = float(self._cfg.get("stop_profit", 0.15))
         max_days = int(self._cfg.get("max_holding_days", 5))
@@ -250,30 +374,133 @@ class SimulatedAccount:
                 continue
             ret = cur / cost - 1.0
             bd = str(h.get("buy_date") or market_date)
-            hd = self._holding_days(bd, market_date)
+            hd = count_trade_days_held(trade_days, bd, market_date)
             reason = ""
-            if ret <= sl:
-                reason = f"止损 {ret*100:.1f}%（阈值 {sl*100:.0f}%）"
-            elif ret >= tp:
+            if ret >= tp:
                 reason = f"止盈 {ret*100:.1f}%（阈值 {tp*100:.0f}%）"
+            elif ret <= sl:
+                reason = f"止损 {ret*100:.1f}%（阈值 {sl*100:.0f}%）"
             elif hd >= max_days:
-                reason = f"持有满 {hd} 日（最长 {max_days} 日）"
+                unit = "交易日" if trade_days else "自然日"
+                reason = f"持有满 {hd} {unit}（最长 {max_days}）"
             if reason:
                 out.append({"symbol": sym, "reason": reason, "price": cur})
         return out
+
+    def write_pending_buys(
+        self, signal_date: str, recommendations: list[dict[str, Any]]
+    ) -> str:
+        """写入 T 日待买清单，买入价留空，由次日开盘脚本执行。"""
+        path = pending_buys_file(self.project_root, signal_date)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        payload = {
+            "signal_date": signal_date[:8],
+            "recommendations": recommendations,
+            "buy_prices": {},
+        }
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+        return path
+
+    def execute_pending_buys(
+        self,
+        execution_date: str,
+        signal_date: str,
+        price_getter_func: Callable[[str], float],
+        trade_days: Optional[list[str]] = None,
+    ) -> bool:
+        """
+        读取 pending_buys_{signal_date}.json，按开盘价（或 price_getter）执行买入，成功后删除文件。
+        """
+        path = pending_buys_file(self.project_root, signal_date)
+        if not os.path.isfile(path):
+            return False
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                payload = json.load(f)
+        except Exception:
+            return False
+        recs = list(payload.get("recommendations") or [])
+        if not recs:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            return False
+
+        self._last_session_buys = []
+        max_pos = int(self._cfg.get("max_positions", 5))
+        pct = float(self._cfg.get("position_size_pct", 0.2))
+        reserve = float(self._cfg.get("min_cash_reserve", 500))
+        held = {_norm_symbol(str(h.get("symbol"))) for h in self._state["holdings"]}
+
+        for rec in recs:
+            if len(self._state["holdings"]) >= max_pos:
+                break
+            sym = _norm_symbol(str(rec.get("symbol") or ""))
+            if not sym or sym in held:
+                continue
+            price = float(price_getter_func(sym))
+            if price <= 0:
+                continue
+            self.recalculate_total_value(execution_date)
+            tv = float(self._state["total_value"])
+            budget = tv * pct
+            if float(self._state["cash"]) - reserve < budget * 0.5:
+                budget = max(0.0, float(self._state["cash"]) - reserve)
+            raw_sh = int(budget / price)
+            shares = (raw_sh // 100) * 100
+            if shares < 100:
+                continue
+            cost = shares * price
+            if float(self._state["cash"]) - cost < reserve:
+                continue
+            name = str(rec.get("name") or sym)
+            reason = str(rec.get("buy_reason") or "次日开盘买入")
+            style = str(rec.get("style_bucket") or "")
+            if self.buy(sym, name, shares, price, reason, execution_date):
+                for h in self._state["holdings"]:
+                    if _norm_symbol(str(h.get("symbol"))) == sym:
+                        h["style_bucket"] = style
+                        break
+                held.add(sym)
+                self._last_session_buys.append(
+                    {
+                        "symbol": sym,
+                        "name": name,
+                        "shares": shares,
+                        "price": price,
+                        "reason": reason,
+                    }
+                )
+
+        self.recalculate_total_value(execution_date)
+        self.save_state()
+        if self._last_session_buys or not recs:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+        return bool(self._last_session_buys)
 
     def execute_daily_trades(
         self,
         recommendations: list[dict[str, Any]],
         market_date: str,
         price_getter_func: Callable[[str], float],
+        *,
+        trade_days: Optional[list[str]] = None,
     ) -> None:
         """
         recommendations: symbol, name, style_bucket, buy_reason
-        先卖后买；买入金额≈当前总资产 × position_size_pct（A 股 100 股一手）。
+        先卖后买；若 buy_price_type 为 next_day_open 则只写 pending，不在 T 日买入。
         """
+        mode = str(
+            self._cfg.get("buy_price_type") or "close_of_recommendation_day"
+        )
         self._last_session_buys = []
         self._last_session_sells = []
+        self._last_pending_recs = []
         syms: set[str] = set()
         for h in self._state["holdings"]:
             syms.add(_norm_symbol(str(h.get("symbol"))))
@@ -286,7 +513,7 @@ class SimulatedAccount:
         )
         self.recalculate_total_value(market_date)
 
-        for sig in self.check_sell_signals(market_date):
+        for sig in self.check_sell_signals(market_date, trade_days=trade_days):
             sym = sig["symbol"]
             px = float(sig.get("price") or price_getter_func(sym))
             if px <= 0:
@@ -296,6 +523,14 @@ class SimulatedAccount:
                 self._last_session_sells.append(
                     {"symbol": sym, "reason": rsn, "price": px}
                 )
+
+        if mode == "next_day_open":
+            if recommendations:
+                self.write_pending_buys(market_date, recommendations)
+                self._last_pending_recs = list(recommendations)
+            self.recalculate_total_value(market_date)
+            self.save_state()
+            return
 
         max_pos = int(self._cfg.get("max_positions", 5))
         pct = float(self._cfg.get("position_size_pct", 0.2))
@@ -348,6 +583,9 @@ class SimulatedAccount:
 
     def generate_daily_plan(self, market_date: str) -> str:
         """T 日收盘后模拟成交后的「明日可参考」说明（非投资建议）。"""
+        mode = str(
+            self._cfg.get("buy_price_type") or "close_of_recommendation_day"
+        )
         lines: list[str] = [
             "### 模拟账户 · 操作备忘（非投资建议）\n",
             f"- **复盘日**：{market_date}\n",
@@ -363,7 +601,19 @@ class SimulatedAccount:
         else:
             lines.append("- **今日模拟卖出**：无\n")
 
-        if self._last_session_buys:
+        if mode == "next_day_open" and self._last_pending_recs:
+            pfn = f"data/pending_buys_{market_date[:8]}.json"
+            lines.append(
+                "- **买入**：已写入 **次日开盘价** 队列（文件：**"
+                + pfn
+                + "**），将由定时任务或手动执行 `scripts/simulated_morning_buy.py` 撮合：\n"
+            )
+            for r in self._last_pending_recs:
+                sym = _norm_symbol(str(r.get("symbol") or ""))
+                lines.append(
+                    f"  - `{sym}` {r.get('name') or ''}（{r.get('buy_reason') or ''}）\n"
+                )
+        elif self._last_session_buys:
             lines.append(
                 "- **今日模拟已买入**（仅供观察；若参与实盘常见为 **次日开盘** 自行择价，非指令）：\n"
             )
@@ -373,7 +623,10 @@ class SimulatedAccount:
                     f"（{x['reason']}）\n"
                 )
         else:
-            lines.append("- **今日模拟买入**：无（可能已满仓、现金不足或缺少有效收盘价）\n")
+            lines.append(
+                "- **今日模拟买入**：无（可能已满仓、现金不足、缺少有效收盘价，"
+                "或已切换为次日开盘买入模式且未产生推荐）\n"
+            )
 
         if self._state["holdings"]:
             lines.append("- **当前模拟持仓**：\n")

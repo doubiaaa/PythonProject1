@@ -64,6 +64,10 @@ DEFAULT_CONFIG = {
     "enable_simulated_account": False,
     "simulated_account_path": "data/simulated_account.json",
     "simulated_config_path": "data/simulated_config.json",
+    # 模拟买入价格：close_of_recommendation_day=当日收盘撮合；next_day_open=仅写 pending，次日开盘脚本买入
+    "simulated_buy_price_type": "close_of_recommendation_day",
+    # 模拟账户每笔买卖成交通知（与复盘共用 SMTP / MAIL_TO）
+    "enable_simulated_trade_notification": False,
 }
 
 

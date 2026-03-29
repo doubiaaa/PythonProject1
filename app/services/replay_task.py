@@ -268,12 +268,19 @@ class ReplayTask:
                         config_path=_cm.get(
                             "simulated_config_path", "data/simulated_config.json"
                         ),
+                        config_manager=_cm,
+                    )
+                    acc._cfg["buy_price_type"] = _cm.get(
+                        "simulated_buy_price_type",
+                        acc._cfg.get("buy_price_type", "close_of_recommendation_day"),
                     )
                     acc.update_prices(pmap)
+                    _td = data_fetcher.get_trade_cal()
                     acc.execute_daily_trades(
                         recs,
                         actual_date,
                         lambda s: price_from_map(pmap, s),
+                        trade_days=_td,
                     )
                     plan = acc.generate_daily_plan(actual_date)
                     result = result + "\n\n---\n\n" + plan

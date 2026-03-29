@@ -9,6 +9,8 @@ import pytest
 
 from app.services.simulated_account import (
     SimulatedAccount,
+    count_trade_days_held,
+    pending_buys_file,
     price_from_map,
     recommendations_from_top_pool,
 )
@@ -92,6 +94,52 @@ def test_sell_before_buy_releases_cash():
         lambda s: 10.0 if s == "600001" else 9.0,
     )
     assert any(t.get("side") == "sell" for t in acc._state["transactions"])
+
+
+def test_count_trade_days_held():
+    td = ["20260101", "20260102", "20260103", "20260106"]
+    assert count_trade_days_held(td, "20260101", "20260103") == 2
+
+
+def test_take_profit_before_max_hold_days():
+    acc, _, _, _ = _make_acc()
+    acc._cfg["max_holding_days"] = 1
+    acc._cfg["stop_profit"] = 0.1
+    acc._cfg["stop_loss"] = -0.5
+    assert acc.buy("600000", "A", 100, 10.0, "测", "20260101")
+    acc.update_prices({"600000": 12.0})
+    sigs = acc.check_sell_signals("20260110", trade_days=["20260101", "20260102", "20260103"])
+    assert sigs and "止盈" in sigs[0].get("reason", "")
+
+
+def test_next_day_open_writes_pending():
+    acc, d, _, cp = _make_acc()
+    with open(cp, "w", encoding="utf-8") as f:
+        import json
+
+        json.dump(
+            {
+                **acc._cfg,
+                "buy_price_type": "next_day_open",
+                "max_positions": 5,
+                "position_size_pct": 0.2,
+                "min_cash_reserve": 100,
+            },
+            f,
+        )
+    acc.load_state()
+    recs = [
+        {"symbol": "600001", "name": "A", "style_bucket": "龙头", "buy_reason": "t"},
+    ]
+    prices = {"600001": 10.0}
+    acc.execute_daily_trades(
+        recs,
+        "20260110",
+        lambda s: price_from_map(prices, s),
+    )
+    pf = pending_buys_file(acc.project_root, "20260110")
+    assert os.path.isfile(pf)
+    os.remove(pf)
 
 
 def test_recommendations_from_top_pool():

@@ -36,3 +36,6 @@ jobs:
 
       - name: Run pytest
         run: pytest tests/ -q
+
+      - name: Validate configs and data
+        run: python scripts/validate.py

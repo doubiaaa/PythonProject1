@@ -247,3 +247,17 @@ def send_report_email(
         return True, "ok"
     except Exception as e:
         return False, str(e)
+
+
+def send_simple_email(
+    subject: str,
+    body: str,
+    cfg: dict[str, Any],
+    *,
+    timeout: float = 30.0,
+) -> tuple[bool, str]:
+    """
+    短通知邮件（Markdown 正文），与复盘共用 SMTP / mail_to。
+    复用 send_report_email 的发送逻辑。
+    """
+    return send_report_email(cfg, subject, body, timeout=timeout)
