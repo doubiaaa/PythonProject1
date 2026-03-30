@@ -8,7 +8,7 @@
 #   SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASSWORD SMTP_FROM MAIL_TO
 #   SMTP_SSL  填 true / 1 表示 SMTPS（465）；留空则默认 STARTTLS（587）
 #
-# 说明：cron 使用 UTC。北京时间 21:00 = UTC 13:00。GitHub 可能对定时任务有几分钟抖动。
+# 说明：cron 使用 UTC。北京时间 21:00 = UTC 13:00。GitHub 可能对定时任务有几分钟抖动。（schedule wake-up touch: 2026-03-30）
 # 仅默认分支会按计划执行；并发组避免定时与手动同时跑两套任务。
 name: Nightly replay (21:00 CST)
 
