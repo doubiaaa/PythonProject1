@@ -21,6 +21,7 @@ from app.services.replay_checkpoint import (
     save_fetcher_bundle,
 )
 from app.services.zhipu_client import ZhipuClient
+from app.services.separation_confirmation import perform_separation_confirmation
 
 MODEL_NAME = "glm-4-flash"  # 智谱免费模型
 MAX_LOG_ENTRIES = 200
@@ -120,10 +121,12 @@ class ReplayTask:
         effective_weights=None,
         stability_hint: str = "",
         dragon_meta: Optional[dict[str, Any]] = None,
+        separation_result: Optional[dict[str, Any]] = None,
     ):
         """
         龙头短线选手复盘模板 + 次日竞价半路程序约束。
         dragon_meta：程序侧结构化快照（连板梯队、大面数等），供引用。
+        separation_result：分离确认结果。
         """
         addon = build_prompt_addon(
             effective_weights=effective_weights,
@@ -139,12 +142,29 @@ class ReplayTask:
                 "\n## 【程序结构化快照·JSON】（须与「龙头选手·程序量化快照」Markdown 交叉验证）\n"
                 f"```json\n{meta_json}\n```\n"
             )
+        
+        # 添加分离确认结果
+        separation_block = ""
+        if separation_result and separation_result.get('candidates'):
+            separation_block = "\n## 【分离确认·候选】\n"
+            separation_block += "- 总龙头：{name}({code}) 连板{lb}\n".format(
+                name=separation_result['leading_stock'].get('name', ''),
+                code=separation_result['leading_stock'].get('code', ''),
+                lb=separation_result['leading_stock'].get('lb', 0)
+            )
+            if separation_result.get('volatility_points'):
+                points = separation_result['volatility_points']
+                separation_block += f"- 异动时间点：{len(points)} 个（{points[0]['type']}等）\n"
+            separation_block += "- 分离确认候选：\n"
+            for i, candidate in enumerate(separation_result['candidates'][:5], 1):
+                separation_block += f"  {i}. {candidate['name']}({candidate['code']}) 得分：{candidate.get('separation_score', 0):.2f}\n"
+        
         return build_main_replay_prompt(
             mode_name=MODE_NAME,
             date=str(date),
             market_data=market_data,
             addon=addon,
-            meta_block=meta_block,
+            meta_block=meta_block + separation_block,
         )
 
     def call_zhipu(self, api_key, prompt, temperature=0.42, max_tokens=6144):
@@ -203,6 +223,21 @@ class ReplayTask:
             self.log("数据获取完成，正在调用AI…")
             eff_w = None
             stab_hint = ""
+            separation_result = None
+            
+            # 执行分离确认分析
+            try:
+                df_zt = getattr(data_fetcher, "_last_zt_pool", None)
+                if df_zt is not None:
+                    _td = data_fetcher.get_trade_cal()
+                    if _td:
+                        separation_result = perform_separation_confirmation(actual_date, df_zt, _td)
+                        if separation_result and separation_result.get('candidates'):
+                            self.log(f"分离确认完成，找到 {len(separation_result['candidates'])} 个候选股")
+            except Exception as ex:
+                self.log(f"分离确认分析失败：{ex}")
+            
+            # 风格稳定性探测
             _cm2 = ConfigManager()
             if _cm2.get("enable_style_stability_probe", True):
                 try:
@@ -213,13 +248,15 @@ class ReplayTask:
                     self.log(f"风格稳定性探测：{stab}")
                 except Exception as ex:
                     self.log(f"风格稳定性探测失败（沿用文件权重）：{ex}")
+            
+            # 构建prompt
             prompt = self.build_prompt(
                 actual_date,
                 market_data,
                 effective_weights=eff_w,
                 stability_hint=stab_hint,
-                dragon_meta=getattr(data_fetcher, "_last_dragon_trader_meta", None)
-                or {},
+                dragon_meta=getattr(data_fetcher, "_last_dragon_trader_meta", None) or {},
+                separation_result=separation_result,
             )
             result = self.call_zhipu(api_key, prompt)
             result = _ensure_dragon_report_sections(_ensure_summary_line(result))

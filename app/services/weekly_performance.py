@@ -67,36 +67,9 @@ def fetch_open_close_qfq(
     code: str, d_entry: str, d_exit: str
 ) -> tuple[Optional[float], Optional[float]]:
     """前复权 开盘(买入日) / 收盘(卖出日)。"""
+    from app.services.price_cache import fetch_open_close_qfq_cached
     c = norm_code(code)
-    start = min(d_entry, d_exit)
-    end = max(d_entry, d_exit)
-    try:
-        df = ak.stock_zh_a_hist(
-            symbol=c,
-            period="daily",
-            start_date=start,
-            end_date=end,
-            adjust="qfq",
-        )
-        if df is None or df.empty:
-            return None, None
-        if "日期" not in df.columns:
-            return None, None
-        df = df.copy()
-        df["日期"] = pd.to_datetime(df["日期"]).dt.strftime("%Y%m%d")
-        row_e = df[df["日期"] == d_entry]
-        row_x = df[df["日期"] == d_exit]
-        if row_e.empty or row_x.empty:
-            return None, None
-        o = row_e["开盘"].iloc[-1]
-        cl = row_x["收盘"].iloc[-1]
-        o = float(pd.to_numeric(o, errors="coerce"))
-        cl = float(pd.to_numeric(cl, errors="coerce"))
-        if pd.isna(o) or pd.isna(cl) or o <= 0:
-            return None, None
-        return o, cl
-    except Exception:
-        return None, None
+    return fetch_open_close_qfq_cached(c, d_entry, d_exit)
 
 
 @dataclass
