@@ -41,6 +41,15 @@ DEFAULT_CONFIG = {
     "enable_tech_momentum": True,
     # 财联社等公开要闻：拉取摘要并与龙头池/主线做关键词关联；关闭则不请求、不推送要闻块
     "enable_finance_news": True,
+    # 东财个股主力净流入排名（今日）；关闭则不请求
+    "enable_individual_fund_flow_rank": True,
+    "individual_fund_flow_top_n": 12,
+    # 概念板块成分股快照（东财）；名称为空列表则跳过（可在 replay_config.json 中配置，如 ["人工智能","固态电池"]）
+    "enable_concept_cons_snapshot": True,
+    "concept_board_symbols": [],
+    # 腾讯分笔（稳定性一般，默认关闭）；仅用于调试「分离确认」类分析
+    "enable_intraday_tick_probe": False,
+    "intraday_tick_probe_symbol": "",  # 6 位代码，如 000001；空则不请求
     # 龙头池周度邮件：周末脚本汇总涨跌；关闭则只跑脚本不寄信（或手动 --dry-run）
     "enable_weekly_performance_email": True,
     # 周报复盘末尾是否调用智谱生成「风格诊断+下周侧重」（需 ZHIPU_API_KEY）

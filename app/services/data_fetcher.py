@@ -3,6 +3,7 @@ import re
 import io
 from contextlib import redirect_stdout
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Optional
 
 import akshare as ak
 import pandas as pd
@@ -16,6 +17,13 @@ SPOT_EM_CACHE_TTL_SEC = 90
 # 财联社要闻接口为「最新」列表，短缓存减轻重复请求
 FINANCE_NEWS_CACHE_KEY = "finance_news_main_cx"
 FINANCE_NEWS_CACHE_TTL_SEC = 600
+# 个股主力净流入排名（今日）
+INDIVIDUAL_FUND_FLOW_CACHE_KEY = "individual_fund_flow_rank_today"
+INDIVIDUAL_FUND_FLOW_CACHE_TTL_SEC = 120
+# 概念板块成分（按板块名缓存）
+CONCEPT_CONS_CACHE_TTL_SEC = 600
+# 分笔探测（按代码短缓存）
+INTRADAY_TICK_CACHE_TTL_SEC = 60
 
 
 def _finance_news_enabled() -> bool:
@@ -73,6 +81,18 @@ def _news_keywords_from_meta(ah_meta: dict) -> tuple[set[str], list[str]]:
             seen.add(n)
             uniq_names.append(n)
     return codes, uniq_names
+
+
+def _code_to_tick_js_symbol(code: str) -> str:
+    """腾讯分笔接口用的市场前缀 + 6 位代码。"""
+    c = re.sub(r"[^0-9]", "", str(code))[:6].zfill(6)
+    if not c or len(c) < 6:
+        return "sz000001"
+    if c[0] in ("8", "4"):
+        return f"bj{c}"
+    if c[0] == "6":
+        return f"sh{c}"
+    return f"sz{c}"
 
 
 def _truncate_news_line(s: str, n: int) -> str:
@@ -188,6 +208,7 @@ class DataFetcher:
         self._last_auction_meta: dict = {}
         self._last_email_kpi: dict = {}
         self._last_dragon_trader_meta: dict = {}
+        self._tick_js_cache: dict[str, tuple[float, Optional[pd.DataFrame]]] = {}
 
     def _is_cache_valid(self, key):
         if key in self.cache:
@@ -211,16 +232,159 @@ class DataFetcher:
         self.current_task = task
 
     def get_stock_zh_a_spot_em_cached(self):
-        """全 A 行情（东财）短缓存，避免溢价计算与选股两次全量拉取。"""
+        """全 A 行情（东财优先，失败或空表则新浪 stock_zh_a_spot）短缓存。"""
         now = time.time()
         if (
             self._spot_em_df is not None
             and now - self._spot_em_cache_ts < SPOT_EM_CACHE_TTL_SEC
         ):
             return self._spot_em_df
-        df = ak.stock_zh_a_spot_em()
+        df = None
+        try:
+            df = ak.stock_zh_a_spot_em()
+        except Exception as e:
+            print(f"stock_zh_a_spot_em 失败，将尝试新浪备用源: {e}")
+        if df is None or df.empty:
+            try:
+                df = ak.stock_zh_a_spot()
+                if df is not None and not df.empty:
+                    print("已使用新浪 stock_zh_a_spot 作为全市场行情备用源")
+            except Exception as e2:
+                print(f"stock_zh_a_spot 备用源失败: {e2}")
+                df = pd.DataFrame()
         self._spot_em_df = df
         self._spot_em_cache_ts = now
+        return df
+
+    def get_individual_fund_flow_rank_df(self) -> pd.DataFrame:
+        """当日个股主力净流入排名（东财）；独立短 TTL 缓存。"""
+        key = INDIVIDUAL_FUND_FLOW_CACHE_KEY
+        if key in self.cache:
+            ts, data = self.cache[key]
+            if time.time() - ts < INDIVIDUAL_FUND_FLOW_CACHE_TTL_SEC:
+                return data.copy() if isinstance(data, pd.DataFrame) else pd.DataFrame()
+        try:
+            df = self.fetch_with_retry(
+                ak.stock_individual_fund_flow_rank, indicator="今日"
+            )
+            if df is None:
+                df = pd.DataFrame()
+        except Exception as e:
+            print(f"个股主力净流入排名获取失败: {e}")
+            df = pd.DataFrame()
+        self.cache[key] = (time.time(), df)
+        return df
+
+    def format_individual_fund_flow_markdown(
+        self, df: pd.DataFrame, top_n: int
+    ) -> str:
+        """将个股资金流表转为 Markdown 表（列名随东财接口略有差异时做模糊匹配）。"""
+        if df is None or df.empty or top_n <= 0:
+            return ""
+        sub = df.head(int(top_n)).copy()
+        cols = sub.columns.tolist()
+        rank_c = next((c for c in cols if "序号" in str(c)), cols[0] if cols else None)
+        code_c = next((c for c in cols if str(c).strip() == "代码"), None)
+        if not code_c:
+            code_c = next((c for c in cols if "代码" in str(c)), None)
+        name_c = next(
+            (
+                c
+                for c in cols
+                if "名称" in str(c) and "板块" not in str(c) and "行业" not in str(c)
+            ),
+            None,
+        )
+        pct_c = next((c for c in cols if "涨跌幅" in str(c)), None)
+        main_c = next(
+            (
+                c
+                for c in cols
+                if "主力净流入" in str(c) and "净额" in str(c)
+            ),
+            None,
+        )
+        lines = [
+            "\n## 个股主力净流入·排名前列（今日·东财）\n",
+            "> 观察当日资金集中方向；列口径为东财「今日」快照。\n\n",
+        ]
+        lines.append(
+            "| 排名 | 代码 | 名称 | 涨跌幅 | 主力净流入-净额（元） |\n"
+            "|------|------|------|--------|----------------------|\n"
+        )
+        for _, row in sub.iterrows():
+            rk = row[rank_c] if rank_c and rank_c in sub.columns else ""
+            cd = row[code_c] if code_c and code_c in sub.columns else ""
+            nm = row[name_c] if name_c and name_c in sub.columns else ""
+            pc = row[pct_c] if pct_c and pct_c in sub.columns else ""
+            mn = row[main_c] if main_c and main_c in sub.columns else ""
+            lines.append(f"| {rk} | {cd} | {nm} | {pc} | {mn} |\n")
+        lines.append("\n")
+        return "".join(lines)
+
+    def get_concept_cons_em(self, board_name: str) -> pd.DataFrame:
+        """概念板块成分股（东财）；按板块名单独短 TTL 缓存。"""
+        sym = str(board_name).strip()
+        if not sym:
+            return pd.DataFrame()
+        key = f"concept_cons_em_{sym}"
+        if key in self.cache:
+            ts, data = self.cache[key]
+            if time.time() - ts < CONCEPT_CONS_CACHE_TTL_SEC:
+                return data.copy() if isinstance(data, pd.DataFrame) else pd.DataFrame()
+        try:
+            df = self.fetch_with_retry(ak.stock_board_concept_cons_em, symbol=sym)
+            if df is None:
+                df = pd.DataFrame()
+        except Exception as e:
+            print(f"概念板块成分获取失败 ({sym}): {e}")
+            df = pd.DataFrame()
+        self.cache[key] = (time.time(), df)
+        return df
+
+    def format_concept_cons_snapshot_markdown(self, symbols: list[str]) -> str:
+        """多个概念板块：成分数量与当日涨幅≥5% 家数（快照）。"""
+        if not symbols:
+            return ""
+        lines = [
+            "\n## 概念板块·成分股快照（东财）\n",
+            "> 用于观察题材覆盖广度；**板块名须与东财概念名称一致**（可在 replay_config.json 的 "
+            "`concept_board_symbols` 中配置）。\n\n",
+        ]
+        for sym in symbols:
+            sym = str(sym).strip()
+            if not sym:
+                continue
+            df = self.get_concept_cons_em(sym)
+            if df is None or df.empty:
+                lines.append(f"### {sym}\n- 未获取到成分或板块名不存在。\n\n")
+                continue
+            n = len(df)
+            pct_col = next((c for c in df.columns if "涨跌幅" in str(c)), None)
+            hi = 0
+            if pct_col:
+                p = pd.to_numeric(df[pct_col], errors="coerce")
+                hi = int((p >= 5.0).sum())
+            lines.append(
+                f"### {sym}\n"
+                f"- 成分股约 **{n}** 只；涨跌幅 **≥5%** 约 **{hi}** 只（当日快照口径）\n\n"
+            )
+        return "".join(lines)
+
+    def fetch_intraday_tick_tx_js_safe(self, code: str) -> Optional[pd.DataFrame]:
+        """腾讯历史分笔（akshare：stock_zh_a_tick_tx_js），短缓存；失败返回 None。"""
+        sym = _code_to_tick_js_symbol(code)
+        now = time.time()
+        if sym in self._tick_js_cache:
+            ts, prev = self._tick_js_cache[sym]
+            if now - ts < INTRADAY_TICK_CACHE_TTL_SEC:
+                return prev
+        try:
+            df = self.fetch_with_retry(ak.stock_zh_a_tick_tx_js, symbol=sym)
+        except Exception as e:
+            print(f"分笔数据获取失败 ({sym}): {e}")
+            df = None
+        self._tick_js_cache[sym] = (now, df)
         return df
 
     def fetch_with_retry(self, fetch_func, *args, **kwargs):
@@ -1138,6 +1302,37 @@ class DataFetcher:
         else:
             summary += "## 板块资金流向\n- 暂无板块资金流向数据\n\n"
 
+        # 个股主力净流入排名、概念板块成分（可选，见 replay_config.json）
+        try:
+            from app.utils.config import ConfigManager
+
+            cm = ConfigManager()
+            if cm.get("enable_individual_fund_flow_rank", True):
+                top_n = int(cm.get("individual_fund_flow_top_n", 12) or 12)
+                top_n = max(3, min(30, top_n))
+                df_ind = self.get_individual_fund_flow_rank_df()
+                if df_ind is not None and not df_ind.empty:
+                    summary += self.format_individual_fund_flow_markdown(df_ind, top_n)
+                else:
+                    summary += (
+                        "\n## 个股主力净流入（今日）\n"
+                        "- 接口暂无数据或获取失败。\n\n"
+                    )
+            if cm.get("enable_concept_cons_snapshot", True):
+                raw_syms = cm.get("concept_board_symbols") or []
+                if isinstance(raw_syms, str):
+                    raw_syms = [
+                        x.strip() for x in raw_syms.replace("，", ",").split(",") if x.strip()
+                    ]
+                elif not isinstance(raw_syms, list):
+                    raw_syms = []
+                if raw_syms:
+                    summary += self.format_concept_cons_snapshot_markdown(
+                        [str(x).strip() for x in raw_syms if str(x).strip()][:8]
+                    )
+        except Exception as e:
+            summary += f"\n## 扩展行情数据\n- 个股资金流/概念快照跳过：{e!s}\n\n"
+
         # 连板梯队
         if not df_zt.empty:
             lb_stats = df_zt['lb'].value_counts().sort_index()
@@ -1207,6 +1402,28 @@ class DataFetcher:
             summary += f"\n## 【次日竞价半路模式】选股\n- 执行异常：{e!s}\n\n"
             self._last_news_push_prefix = ""
             self._last_auction_meta = {}
+
+        try:
+            from app.utils.config import ConfigManager
+
+            cm2 = ConfigManager()
+            if cm2.get("enable_intraday_tick_probe", False):
+                raw = str(cm2.get("intraday_tick_probe_symbol") or "").strip()
+                if raw:
+                    tdf = self.fetch_intraday_tick_tx_js_safe(raw)
+                    if tdf is not None and not tdf.empty:
+                        summary += (
+                            "\n## 分时成交探测（腾讯分笔·调试）\n"
+                            f"- 标的 `{raw}`：共 **{len(tdf)}** 条分笔记录。"
+                            " 仅供调试，接口不稳定，勿单独作为交易依据。\n\n"
+                        )
+                    else:
+                        summary += (
+                            "\n## 分时成交探测（腾讯分笔·调试）\n"
+                            f"- 标的 `{raw}`：**未取到数据**（非交易时段或接口限制）。\n\n"
+                        )
+        except Exception as e:
+            summary += f"\n## 分时成交探测\n- 跳过：{e!s}\n\n"
 
         self._last_email_kpi = {
             "zt_count": int(zt_count),
