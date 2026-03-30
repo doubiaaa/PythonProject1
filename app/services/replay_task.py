@@ -22,6 +22,7 @@ from app.services.replay_checkpoint import (
 )
 from app.services.zhipu_client import ZhipuClient
 from app.services.separation_confirmation import perform_separation_confirmation
+from app.services.news_mapper import analyze_finance_news
 
 MODEL_NAME = "glm-4-flash"  # 智谱免费模型
 MAX_LOG_ENTRIES = 200
@@ -122,6 +123,7 @@ class ReplayTask:
         stability_hint: str = "",
         dragon_meta: Optional[dict[str, Any]] = None,
         separation_result: Optional[dict[str, Any]] = None,
+        news_mapping: str = "",
     ):
         """
         龙头短线选手复盘模板 + 次日竞价半路程序约束。
@@ -155,16 +157,21 @@ class ReplayTask:
             if separation_result.get('volatility_points'):
                 points = separation_result['volatility_points']
                 separation_block += f"- 异动时间点：{len(points)} 个（{points[0]['type']}等）\n"
-            separation_block += "- 分离确认候选：\n"
+            separation_block += "- 分离确认候选（含判断依据）：\n"
             for i, candidate in enumerate(separation_result['candidates'][:5], 1):
                 separation_block += f"  {i}. {candidate['name']}({candidate['code']}) 得分：{candidate.get('separation_score', 0):.2f}\n"
+                if candidate.get('remark'):
+                    separation_block += f"     备注：{candidate['remark']}\n"
+        
+        # 添加要闻映射
+        news_block = news_mapping if news_mapping else ""
         
         return build_main_replay_prompt(
             mode_name=MODE_NAME,
             date=str(date),
             market_data=market_data,
             addon=addon,
-            meta_block=meta_block + separation_block,
+            meta_block=meta_block + separation_block + news_block,
         )
 
     def call_zhipu(self, api_key, prompt, temperature=0.42, max_tokens=6144):
@@ -237,6 +244,17 @@ class ReplayTask:
             except Exception as ex:
                 self.log(f"分离确认分析失败：{ex}")
             
+            # 执行要闻映射分析
+            news_mapping = ""
+            try:
+                finance_news = getattr(data_fetcher, "_last_finance_news", [])
+                if finance_news:
+                    news_mapping = analyze_finance_news(finance_news)
+                    if news_mapping:
+                        self.log("要闻映射分析完成")
+            except Exception as ex:
+                self.log(f"要闻映射分析失败：{ex}")
+            
             # 风格稳定性探测
             _cm2 = ConfigManager()
             if _cm2.get("enable_style_stability_probe", True):
@@ -257,6 +275,7 @@ class ReplayTask:
                 stability_hint=stab_hint,
                 dragon_meta=getattr(data_fetcher, "_last_dragon_trader_meta", None) or {},
                 separation_result=separation_result,
+                news_mapping=news_mapping,
             )
             result = self.call_zhipu(api_key, prompt)
             result = _ensure_dragon_report_sections(_ensure_summary_line(result))

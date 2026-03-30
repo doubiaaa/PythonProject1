@@ -145,34 +145,36 @@ def detect_volatility_timepoints(df: pd.DataFrame, stock_info: Dict[str, Any]) -
 def calculate_separation_score(
     candidate_df: pd.DataFrame, 
     volatility_time: datetime, 
-    leading_stock_df: pd.DataFrame
-) -> float:
+    leading_stock_df: pd.DataFrame,
+    volatility_type: str = ""
+) -> tuple[float, dict]:
     """
-    计算候选股的分离确认得分
+    计算候选股的分离确认得分，并返回详细的判断依据
+    返回: (得分, 判断依据详情)
     """
     if candidate_df is None or candidate_df.empty:
-        return 0.0
+        return 0.0, {}
     
     # 找到异动时间附近的候选股价格
     candidate_df['time_diff'] = candidate_df['time'].apply(lambda x: abs((x - volatility_time).total_seconds()))
     candidate_point = candidate_df[candidate_df['time_diff'] == candidate_df['time_diff'].min()]
     
     if candidate_point.empty:
-        return 0.0
+        return 0.0, {}
     
     # 找到异动时间附近的龙头股价格
     leading_stock_df['time_diff'] = leading_stock_df['time'].apply(lambda x: abs((x - volatility_time).total_seconds()))
     leading_point = leading_stock_df[leading_stock_df['time_diff'] == leading_stock_df['time_diff'].min()]
     
     if leading_point.empty:
-        return 0.0
+        return 0.0, {}
     
     # 计算5分钟前的价格
     candidate_5min_ago = candidate_df[candidate_df['time'] <= volatility_time - timedelta(minutes=5)]
     leading_5min_ago = leading_stock_df[leading_stock_df['time'] <= volatility_time - timedelta(minutes=5)]
     
     if candidate_5min_ago.empty or leading_5min_ago.empty:
-        return 0.0
+        return 0.0, {}
     
     candidate_prev_price = candidate_5min_ago.iloc[-1]['price']
     leading_prev_price = leading_5min_ago.iloc[-1]['price']
@@ -188,14 +190,30 @@ def calculate_separation_score(
     if candidate_change > 0 and leading_change < 0:
         # 逆势拉升
         score = candidate_change - leading_change
+        pattern = "逆势拉升"
     elif candidate_change > leading_change:
         # 抗跌
         score = (candidate_change - leading_change) * 0.5
+        pattern = "抗跌"
     else:
         # 跟随下跌
         score = 0.0
+        pattern = "跟随下跌"
     
-    return max(0.0, score)
+    # 构建判断依据详情
+    details = {
+        'volatility_time': volatility_time.strftime('%H:%M'),
+        'volatility_type': volatility_type,
+        'pattern': pattern,
+        'candidate_change': round(candidate_change, 2),
+        'leading_change': round(leading_change, 2),
+        'candidate_prev_price': round(candidate_prev_price, 2),
+        'candidate_curr_price': round(candidate_curr_price, 2),
+        'leading_prev_price': round(leading_prev_price, 2),
+        'leading_curr_price': round(leading_curr_price, 2),
+    }
+    
+    return max(0.0, score), details
 
 
 def get_candidate_stocks(
@@ -273,15 +291,30 @@ def perform_separation_confirmation(
         if candidate_tick_df is not None:
             # 对每个异动时间点计算得分
             total_score = 0
+            all_details = []
             for point in volatility_points:
-                score = calculate_separation_score(
+                score, details = calculate_separation_score(
                     candidate_tick_df, 
                     point['time'], 
-                    leading_tick_df
+                    leading_tick_df,
+                    point.get('type', '')
                 )
                 total_score += score
+                if details:
+                    all_details.append(details)
             
             candidate['separation_score'] = total_score
+            candidate['separation_details'] = all_details
+            
+            # 生成判断依据备注
+            if all_details:
+                best_detail = max(all_details, key=lambda x: x.get('candidate_change', 0))
+                candidate['remark'] = (
+                    f"今日在总龙头{best_detail['volatility_type']}时（{best_detail['volatility_time']}），"
+                    f"该股{best_detail['pattern']}，涨跌幅{best_detail['candidate_change']:+.2f}%，"
+                    f"而总龙头涨跌幅{best_detail['leading_change']:+.2f}%，确认独立走势。"
+                )
+            
             result['candidates'].append(candidate)
     
     # 按得分排序

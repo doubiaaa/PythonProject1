@@ -1045,7 +1045,10 @@ class DataFetcher:
         yest_codes = [self._norm_code(c) for c in yest_zt["code"].tolist()]
         meta["yest_zt_count"] = len(yest_codes)
 
-        up_n, down_n = self._spot_red_green_counts()
+        # 涨跌家数已从 get_market_summary 统一获取，这里不再重复调用
+        # 使用已存储在实例中的数据
+        up_n = getattr(self, '_last_up_count', None)
+        down_n = getattr(self, '_last_down_count', None)
         meta["red_count"], meta["green_count"] = up_n, down_n
         if up_n is not None and down_n is not None:
             lines.append(f"- **涨跌家数（全 A 快照）**：上涨约 **{up_n}** 家，下跌约 **{down_n}** 家\n")
@@ -1434,8 +1437,8 @@ class DataFetcher:
 
         sentiment_temp = min(sentiment_temp, 100)
 
-        # 市场阶段判断
-        market_phase = "震荡期"
+        # 市场阶段判断 - 统一使用"高位震荡期"而非"震荡期"
+        market_phase = "高位震荡期"
         position_suggestion = "30%"
         if sentiment_temp > 80:
             market_phase = "主升期"
@@ -1444,12 +1447,41 @@ class DataFetcher:
             market_phase = "退潮期"
             position_suggestion = "0-10%"
 
+        # 获取涨跌家数（统一数据源）
+        up_n, down_n = self._spot_red_green_counts()
+        # 存储到实例变量，供其他方法使用，确保数据一致性
+        self._last_up_count = up_n
+        self._last_down_count = down_n
+
+        # 计算情绪周期量化评分
+        try:
+            from app.services.sentiment_scorer import calculate_sentiment_score
+            max_lb = int(df_zt['lb'].max()) if not df_zt.empty and 'lb' in df_zt.columns else 0
+            sentiment_score, sentiment_md = calculate_sentiment_score(
+                yest_zt_premium=premium if premium != -99 else 0,
+                max_lb_height=max_lb,
+                zhaban_rate=zhaban_rate,
+                up_count=up_n or 0,
+                down_count=down_n or 0,
+            )
+            self._last_sentiment_score = sentiment_score
+            self._last_sentiment_markdown = sentiment_md
+        except Exception:
+            self._last_sentiment_score = None
+            self._last_sentiment_markdown = ""
+
         summary += f"## 基础数据\n"
+        if up_n is not None and down_n is not None:
+            summary += f"- 涨跌家数：上涨约 **{up_n}** 家，下跌约 **{down_n}** 家\n"
         summary += f"- 涨停数：{zt_count}\n"
         summary += f"- 跌停数：{dt_count}\n"
         summary += f"- 炸板数：{zb_count}\n"
         summary += f"- 炸板率：{zhaban_rate}%\n"
         summary += f"- 昨日涨停溢价：{premium if premium != -99 else premium_note}\n"
+        
+        # 添加情绪周期量化评分
+        if hasattr(self, '_last_sentiment_markdown') and self._last_sentiment_markdown:
+            summary += self._last_sentiment_markdown
         if north_status == "fetch_failed":
             summary += "- 北向资金净流入：**获取失败**（网络或接口原因，勿作为核心依据）\n"
         elif north_status == "empty_df":
