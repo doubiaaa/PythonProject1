@@ -72,11 +72,11 @@ DEFAULT_CONFIG = {
     # 周报权重更新后异常时额外发一封提醒邮件
     "enable_weekly_weight_anomaly_email": True,
     # 模拟账户：按程序龙头池与收盘价撮合（data/simulated_account.json）
-    "enable_simulated_account": False,
+    "enable_simulated_account": True,
     "simulated_account_path": "data/simulated_account.json",
     "simulated_config_path": "data/simulated_config.json",
     # 模拟买入价格：close_of_recommendation_day=当日收盘撮合；next_day_open=仅写 pending，次日开盘脚本买入
-    "simulated_buy_price_type": "close_of_recommendation_day",
+    "simulated_buy_price_type": "next_day_open",
     # 模拟账户每笔买卖成交通知（与复盘共用 SMTP / MAIL_TO）
     "enable_simulated_trade_notification": False,
 }
