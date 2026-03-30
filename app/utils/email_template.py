@@ -380,16 +380,106 @@ def build_email_content_prefix(
     if summ_html:
         parts.append(summ_html)
 
+    ladder_html = build_ladder_distribution_email_html(ev.get("email_dragon_meta"))
+    if ladder_html:
+        parts.append(ladder_html)
+
     parts.append(
         '<p style="margin:0 0 20px;font-size:13px;color:#475569;line-height:1.65;border-left:4px solid #94a3b8;'
         'padding:12px 14px;background:#f8fafc;border-radius:0 8px 8px 0;">'
-        "<strong style=\"color:#0f172a;\">报告说明</strong>：正文由<strong>程序侧数据</strong>（交易日历、行情与规则、龙头池与标签等）"
-        "与<strong>智谱模型</strong>在固定章节结构下共同生成，通常依次包含：<strong>市场阶段与情绪</strong>、"
-        "<strong>主线与程序选股</strong>、<strong>次日竞价预案</strong>、<strong>风险与不适用场景</strong>等。"
+        "<strong style=\"color:#0f172a;\">报告说明</strong>：正文由<strong>程序侧数据</strong>（交易日历、行情与规则、龙头池、"
+        "<strong>近5日连板梯队对比</strong>与标签等）"
+        "与<strong>智谱模型</strong>在固定章节结构下共同生成，通常依次包含：<strong>周期与情绪</strong>、"
+        "<strong>核心股与明日预案</strong>、<strong>风险</strong>等。"
         "文中表格、列表与代码块仅用于展示数据与逻辑，<strong>不构成投资建议</strong>；请结合自身情况独立决策。"
         "</p>"
     )
     return "\n".join(parts)
+
+
+def build_ladder_distribution_email_html(
+    meta: Optional[dict[str, Any]] = None,
+) -> str:
+    """
+    邮件内嵌：近 5 日连板历史表 + 当日梯队条形示意（邮件安全 table/div）。
+    """
+    if not meta:
+        return ""
+    hist = meta.get("ladder_history_5d") or []
+    if not hist:
+        return ""
+    trend = html.escape(str(meta.get("ladder_trend") or ""))
+    rows_html: list[str] = []
+    for r in hist:
+        lad = r.get("ladder") or {}
+        ge5 = sum(int(lad[k]) for k in lad if int(k) >= 5)
+        rows_html.append(
+            "<tr>"
+            f'<td style="border:1px solid #e2e8f0;padding:6px 8px;font-size:12px;">{html.escape(str(r.get("date", "")))}</td>'
+            f'<td style="border:1px solid #e2e8f0;padding:6px 8px;text-align:right;">{r.get("total_zt", 0)}</td>'
+            f'<td style="border:1px solid #e2e8f0;padding:6px 8px;text-align:right;">{r.get("multi_board_sum", 0)}</td>'
+            f'<td style="border:1px solid #e2e8f0;padding:6px 8px;text-align:right;">{lad.get(2, 0)}</td>'
+            f'<td style="border:1px solid #e2e8f0;padding:6px 8px;text-align:right;">{lad.get(3, 0)}</td>'
+            f'<td style="border:1px solid #e2e8f0;padding:6px 8px;text-align:right;">{lad.get(4, 0)}</td>'
+            f'<td style="border:1px solid #e2e8f0;padding:6px 8px;text-align:right;">{ge5}</td>'
+            f'<td style="border:1px solid #e2e8f0;padding:6px 8px;text-align:center;">{r.get("max_lb", 0)}板</td>'
+            "</tr>"
+        )
+    last = hist[-1]
+    lad0 = last.get("ladder") or {}
+    tot = int(last.get("total_zt") or 0) or 1
+    levels = [
+        ("2 连板", int(lad0.get(2, 0))),
+        ("3 连板", int(lad0.get(3, 0))),
+        ("4 连板", int(lad0.get(4, 0))),
+        ("5 连及以上", sum(int(lad0[k]) for k in lad0 if int(k) >= 5)),
+    ]
+    mx = max((x[1] for x in levels), default=1)
+    bars: list[str] = []
+    for label, cnt in levels:
+        w = min(100, int(round(cnt / mx * 100))) if mx else 0
+        pct_tot = round(cnt / tot * 100, 1) if tot else 0.0
+        bars.append(
+            '<tr><td style="padding:6px 8px;border:1px solid #e2e8f0;font-size:12px;white-space:nowrap;">'
+            f"{html.escape(label)}</td>"
+            '<td style="padding:4px 8px;border:1px solid #e2e8f0;">'
+            f'<div style="height:14px;background:#e2e8f0;border-radius:4px;overflow:hidden;max-width:100%;">'
+            f'<div style="height:14px;width:{w}%;background:linear-gradient(90deg,#2563eb,#38bdf8);"></div></div>'
+            f'</td><td style="padding:6px 8px;border:1px solid #e2e8f0;text-align:right;font-size:12px;">'
+            f"{cnt} 只（占涨停 {pct_tot}%）</td></tr>"
+        )
+    return (
+        '<div style="margin:0 0 18px;padding:16px 18px;border-radius:12px;border:1px solid #c7d2fe;'
+        'background:linear-gradient(165deg,#f8fafc 0%,#ffffff 100%);">'
+        '<div style="font-size:11px;font-weight:700;color:#3730a3;letter-spacing:0.06em;margin:0 0 10px;">'
+        "LADDER · 连板梯队历史对比</div>"
+        f'<p style="margin:0 0 10px;font-size:12px;color:#475569;">情绪倾向：<strong>{trend}</strong></p>'
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        'style="border-collapse:collapse;font-size:12px;margin:0 0 14px;">'
+        "<thead><tr>"
+        '<th style="border:1px solid #e2e8f0;padding:6px 8px;background:#f1f5f9;">日期</th>'
+        '<th style="border:1px solid #e2e8f0;padding:6px 8px;background:#f1f5f9;">涨停</th>'
+        '<th style="border:1px solid #e2e8f0;padding:6px 8px;background:#f1f5f9;">≥2连</th>'
+        '<th style="border:1px solid #e2e8f0;padding:6px 8px;background:#f1f5f9;">2</th>'
+        '<th style="border:1px solid #e2e8f0;padding:6px 8px;background:#f1f5f9;">3</th>'
+        '<th style="border:1px solid #e2e8f0;padding:6px 8px;background:#f1f5f9;">4</th>'
+        '<th style="border:1px solid #e2e8f0;padding:6px 8px;background:#f1f5f9;">5+</th>'
+        '<th style="border:1px solid #e2e8f0;padding:6px 8px;background:#f1f5f9;">最高</th>'
+        "</tr></thead><tbody>"
+        + "".join(rows_html)
+        + "</tbody></table>"
+        '<div style="font-size:11px;font-weight:700;color:#64748b;margin:0 0 8px;">'
+        "当日梯队分布（条形长度为相对值，便于一眼对比）</div>"
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        'style="border-collapse:collapse;font-size:12px;">'
+        "<thead><tr>"
+        '<th style="border:1px solid #e2e8f0;padding:6px 8px;background:#f1f5f9;width:26%;">梯队</th>'
+        '<th style="border:1px solid #e2e8f0;padding:6px 8px;background:#f1f5f9;">图示</th>'
+        '<th style="border:1px solid #e2e8f0;padding:6px 8px;background:#f1f5f9;width:22%;">数量</th>'
+        "</tr></thead><tbody>"
+        + "".join(bars)
+        + "</tbody></table></div>"
+    )
 
 
 def build_plain_text_email_header(extra_vars: Optional[dict[str, Any]] = None) -> str:

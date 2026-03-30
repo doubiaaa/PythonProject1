@@ -609,6 +609,82 @@ class DataFetcher:
         except Exception:
             return None, None
 
+    def compute_ladder_history_5d(
+        self, date: str, trade_days: list[str]
+    ) -> tuple[list[dict], str]:
+        """
+        近 5 个交易日（含当日）每日涨停连板梯队，用于历史对比与情绪倾向。
+        返回 (rows, trend_text)。
+        """
+        rows: list[dict] = []
+        if not trade_days or date not in trade_days:
+            return rows, "数据不足（交易日历）"
+        idx = trade_days.index(date)
+        start = max(0, idx - 4)
+        days = trade_days[start : idx + 1]
+        multi_series: list[int] = []
+        for d in days:
+            df = self.get_zt_pool(d)
+            if df is None or df.empty or "lb" not in df.columns:
+                rows.append(
+                    {
+                        "date": d,
+                        "ladder": {},
+                        "total_zt": 0,
+                        "max_lb": 0,
+                        "multi_board_sum": 0,
+                    }
+                )
+                multi_series.append(0)
+                continue
+            lb_stats = df["lb"].value_counts().sort_index()
+            ladder = {int(k): int(v) for k, v in lb_stats.items()}
+            total = len(df)
+            max_lb = int(df["lb"].max())
+            multi = sum(int(v) for k, v in ladder.items() if int(k) >= 2)
+            rows.append(
+                {
+                    "date": d,
+                    "ladder": ladder,
+                    "total_zt": total,
+                    "max_lb": max_lb,
+                    "multi_board_sum": multi,
+                }
+            )
+            multi_series.append(multi)
+        if len(multi_series) < 2:
+            return rows, "历史样本不足"
+        last = multi_series[-1]
+        prev_avg = sum(multi_series[:-1]) / max(1, len(multi_series) - 1)
+        if prev_avg < 1e-6:
+            trend = "梯队震荡（基数过低，仅作参考）"
+        elif last > prev_avg * 1.08:
+            trend = "梯队加强（≥2 连家数明显高于近几日均值，接力情绪偏强）"
+        elif last < prev_avg * 0.92:
+            trend = "梯队减弱（≥2 连家数低于近几日均值，接力情绪收敛）"
+        else:
+            trend = "梯队震荡（连板结构变化不大）"
+        return rows, trend
+
+    def _format_ladder_history_markdown(self, rows: list[dict], trend: str) -> str:
+        """近 5 日连板梯队 Markdown 表 + 情绪倾向句。"""
+        if not rows:
+            return ""
+        lines = [
+            "\n### 【连板梯队·近5交易日对比】\n",
+            "| 日期 | 涨停合计 | ≥2连合计 | 2板 | 3板 | 4板 | 5板+ | 最高连板 |\n",
+            "|------|----------|----------|-----|-----|-----|------|----------|\n",
+        ]
+        for r in rows:
+            lad = r.get("ladder") or {}
+            ge5 = sum(int(lad[k]) for k in lad if int(k) >= 5)
+            lines.append(
+                f"| {r.get('date','')} | {r.get('total_zt',0)} | {r.get('multi_board_sum',0)} "
+                f"| {lad.get(2, 0)} | {lad.get(3, 0)} | {lad.get(4, 0)} | {ge5} | {r.get('max_lb',0)}板 |\n"
+            )
+        lines.append(f"\n- **情绪倾向（程序口径）**：{trend}\n")
+        return "".join(lines)
+
     def build_dragon_trader_snapshot(
         self,
         date: str,
@@ -633,6 +709,8 @@ class DataFetcher:
             "mid_tier_yesterday": [],
             "separation_candidates": [],
             "notes": [],
+            "ladder_history_5d": [],
+            "ladder_trend": "",
         }
         lines: list[str] = [
             "\n## 【龙头选手·程序量化快照】\n",
@@ -644,6 +722,11 @@ class DataFetcher:
             return "".join(lines), meta
 
         idx = trade_days.index(date)
+        hist_rows, hist_trend = self.compute_ladder_history_5d(date, trade_days)
+        meta["ladder_history_5d"] = hist_rows
+        meta["ladder_trend"] = hist_trend
+        lines.append(self._format_ladder_history_markdown(hist_rows, hist_trend))
+
         if idx == 0:
             lines.append("- 无上一交易日，昨日涨停衍生指标跳过。\n\n")
             meta["notes"].append("no_prior_trade_day")
