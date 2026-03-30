@@ -1,17 +1,25 @@
-import time
-import re
 import io
+import json
+import os
+import re
+import time
 from contextlib import redirect_stdout
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 
 import akshare as ak
 import pandas as pd
-from tenacity import retry, stop_after_attempt, wait_exponential
+from requests.exceptions import ChunkedEncodingError, ConnectionError, Timeout
+from tenacity import (
+    retry,
+    retry_if_exception_type,
+    stop_after_attempt,
+    wait_exponential,
+)
 
 from config import data_source_config as _dsc
 from app.services.data_source_errors import DataSourceExhaustedError, DataSourceInvalidError
-from app.utils.disk_cache import df_to_payload, get_json, payload_to_df, set_json
+from app.utils.disk_cache import df_to_payload, payload_to_df
 from app.utils.logger import get_logger
 
 # 板块接口为「今日」行业资金流，与复盘日无关；缓存键勿绑定 date，避免误判
@@ -32,6 +40,61 @@ CONCEPT_CONS_CACHE_TTL_SEC = 600
 INTRADAY_TICK_CACHE_TTL_SEC = 60
 
 _log = get_logger(__name__)
+
+_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
+
+
+def _data_source_cfg() -> dict:
+    try:
+        from app.utils.config import ConfigManager
+
+        ds = ConfigManager().get("data_source")
+        return ds if isinstance(ds, dict) else {}
+    except Exception:
+        return {}
+
+
+def _cache_dir() -> str:
+    base = _data_source_cfg().get("cache_dir") or "data_cache"
+    if os.path.isabs(base):
+        p = base
+    else:
+        p = os.path.join(_PROJECT_ROOT, str(base).replace("/", os.sep))
+    os.makedirs(p, exist_ok=True)
+    return p
+
+
+def _cache_ttl_sec() -> int:
+    days = float(_data_source_cfg().get("cache_expire_days", 1))
+    return max(60, int(days * 86400))
+
+
+def _cache_key(prefix: str, date: str) -> str:
+    safe = re.sub(r"[^a-zA-Z0-9_.-]", "_", f"{prefix}_{str(date)[:12]}")
+    return os.path.join(_cache_dir(), f"{safe}.json")
+
+
+def _read_cache(prefix: str, date: str):
+    """读 data_cache 下 JSON；超 TTL 视为未命中。"""
+    path = _cache_key(prefix, date)
+    if not os.path.isfile(path):
+        return None
+    if time.time() - os.path.getmtime(path) > _cache_ttl_sec():
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return None
+
+
+def _write_cache(prefix: str, date: str, data) -> None:
+    path = _cache_key(prefix, date)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
 
 
 def _finance_news_enabled() -> bool:
@@ -396,15 +459,19 @@ class DataFetcher:
         return df
 
     def fetch_with_retry(self, fetch_func, *args, **kwargs):
-        """带重试的获取函数（tenacity 指数退避 + redirect_stdout）。"""
-        attempts = max(_dsc.AK_RETRY_ATTEMPTS, self.retry_times + 1)
+        """带重试：仅对连接/读超时类异常重试；其余一次失败即抛出。"""
+        attempts = max(
+            int(_data_source_cfg().get("retry_times", _dsc.AK_RETRY_ATTEMPTS)),
+            self.retry_times + 1,
+        )
+        max_w = float(_data_source_cfg().get("timeout", 8))
+        max_w = max(2.0, min(max_w, 32.0))
 
         @retry(
             stop=stop_after_attempt(attempts),
-            wait=wait_exponential(
-                multiplier=1,
-                min=_dsc.AK_RETRY_WAIT_MIN_SEC,
-                max=_dsc.AK_RETRY_WAIT_MAX_SEC,
+            wait=wait_exponential(multiplier=1, min=2, max=max_w),
+            retry=retry_if_exception_type(
+                (Timeout, ConnectionError, ChunkedEncodingError)
             ),
             reraise=True,
         )
@@ -476,7 +543,7 @@ class DataFetcher:
         cache_key = "trade_cal"
         if self._is_cache_valid(cache_key):
             return self._get_cache(cache_key)
-        disk = get_json("trade_cal_sina_v1", _dsc.API_DISK_CACHE_TTL_SEC)
+        disk = _read_cache("trade_cal_sina_v1", "global")
         if isinstance(disk, dict) and isinstance(disk.get("days"), list) and disk["days"]:
             self._set_cache(cache_key, disk["days"])
             return disk["days"]
@@ -488,7 +555,7 @@ class DataFetcher:
             )
             self._set_cache(cache_key, trade_days)
             try:
-                set_json("trade_cal_sina_v1", {"days": trade_days})
+                _write_cache("trade_cal_sina_v1", "global", {"days": trade_days})
             except OSError as ex:
                 _log.warning("交易日历磁盘缓存失败: %s", ex)
             return trade_days
@@ -509,7 +576,7 @@ class DataFetcher:
         cache_key = f"zt_pool_{date}"
         if self._is_cache_valid(cache_key):
             return self._get_cache(cache_key)
-        disk = get_json(f"zt_pool_em_{date}", _dsc.API_DISK_CACHE_TTL_SEC)
+        disk = _read_cache("zt_pool_em", str(date)[:8])
         if disk is not None:
             df_disk = payload_to_df(disk)
             if df_disk is not None and not df_disk.empty and "code" in df_disk.columns:
@@ -530,7 +597,7 @@ class DataFetcher:
             df['lb'] = pd.to_numeric(df['lb'], errors='coerce').fillna(1).astype(int)
             self._set_cache(cache_key, df)
             try:
-                set_json(f"zt_pool_em_{date}", df_to_payload(df))
+                _write_cache("zt_pool_em", str(date)[:8], df_to_payload(df))
             except OSError as ex:
                 _log.warning("zt_pool 磁盘缓存失败: %s", ex)
             return df
@@ -544,7 +611,7 @@ class DataFetcher:
         cache_key = f"dt_pool_{date}"
         if self._is_cache_valid(cache_key):
             return self._get_cache(cache_key)
-        disk = get_json(f"dt_pool_em_{date}", _dsc.API_DISK_CACHE_TTL_SEC)
+        disk = _read_cache("dt_pool_em", str(date)[:8])
         if disk is not None:
             df_disk = payload_to_df(disk)
             if df_disk is not None and not df_disk.empty and "code" in df_disk.columns:
@@ -560,7 +627,7 @@ class DataFetcher:
             self._set_cache(cache_key, df)
             if not df.empty:
                 try:
-                    set_json(f"dt_pool_em_{date}", df_to_payload(df))
+                    _write_cache("dt_pool_em", str(date)[:8], df_to_payload(df))
                 except OSError as ex:
                     _log.warning("dt_pool 磁盘缓存失败: %s", ex)
             return df
@@ -573,7 +640,7 @@ class DataFetcher:
         cache_key = f"zb_pool_{date}"
         if self._is_cache_valid(cache_key):
             return self._get_cache(cache_key)
-        disk = get_json(f"zb_pool_em_{date}", _dsc.API_DISK_CACHE_TTL_SEC)
+        disk = _read_cache("zb_pool_em", str(date)[:8])
         if disk is not None:
             df_disk = payload_to_df(disk)
             if df_disk is not None and not df_disk.empty and "code" in df_disk.columns:
@@ -589,7 +656,7 @@ class DataFetcher:
             self._set_cache(cache_key, df)
             if not df.empty:
                 try:
-                    set_json(f"zb_pool_em_{date}", df_to_payload(df))
+                    _write_cache("zb_pool_em", str(date)[:8], df_to_payload(df))
                 except OSError as ex:
                     _log.warning("zb_pool 磁盘缓存失败: %s", ex)
             return df
@@ -1124,22 +1191,35 @@ class DataFetcher:
         北向净流入（亿元）与状态。
         状态：ok / ok_zero / empty_df / fetch_failed
         """
+        ds = str(date)[:8]
+        cached = _read_cache("north_net", ds)
+        if isinstance(cached, dict) and "value" in cached and "status" in cached:
+            return float(cached["value"]), str(cached["status"])
         try:
-            df = ak.stock_hsgt_north_net_flow_sina(date=date)
+            df = self.fetch_with_retry(
+                ak.stock_hsgt_north_net_flow_sina, date=date
+            )
             if df is None or df.empty:
-                return 0.0, "empty_df"
+                out = (0.0, "empty_df")
+                _write_cache("north_net", ds, {"value": out[0], "status": out[1]})
+                return out
             if "北向资金净流入" in df.columns:
                 net_flow = df["北向资金净流入"].iloc[0]
             elif "净流入" in df.columns:
                 net_flow = df["净流入"].iloc[0]
             else:
-                return 0.0, "empty_df"
+                out = (0.0, "empty_df")
+                _write_cache("north_net", ds, {"value": out[0], "status": out[1]})
+                return out
             val = round(float(net_flow) / 1e8, 2)
             if val == 0.0:
-                return 0.0, "ok_zero"
-            return val, "ok"
+                st = "ok_zero"
+            else:
+                st = "ok"
+            _write_cache("north_net", ds, {"value": val, "status": st})
+            return val, st
         except Exception as e:
-            print(f"获取北向资金数据失败: {e}")
+            _log.error("获取北向资金数据失败: %s", e)
             return 0.0, "fetch_failed"
 
     def get_lhb_snippet_for_codes(self, date: str, codes: list[str]) -> str:
@@ -1150,14 +1230,26 @@ class DataFetcher:
         if self._is_cache_valid(cache_key):
             df = self._get_cache(cache_key)
         else:
-            try:
-                df = self.fetch_with_retry(ak.stock_lhb_detail_daily_sina, date=date)
-                if df is None:
+            df = None
+            disk = _read_cache("lhb_daily", str(date)[:8])
+            if disk is not None:
+                df = payload_to_df(disk)
+            if df is None or getattr(df, "empty", True):
+                try:
+                    df = self.fetch_with_retry(
+                        ak.stock_lhb_detail_daily_sina, date=date
+                    )
+                    if df is None:
+                        df = pd.DataFrame()
+                except Exception as e:
+                    _log.error("龙虎榜日表获取失败: %s", e)
                     df = pd.DataFrame()
-            except Exception as e:
-                print(f"龙虎榜日表获取失败: {e}")
-                df = pd.DataFrame()
             self._set_cache(cache_key, df)
+            if df is not None and not df.empty:
+                try:
+                    _write_cache("lhb_daily", str(date)[:8], df_to_payload(df))
+                except OSError as ex:
+                    _log.warning("龙虎榜磁盘缓存失败: %s", ex)
         if df is None or df.empty:
             return (
                 "\n## （可选）龙虎榜\n"
@@ -1199,12 +1291,23 @@ class DataFetcher:
             if time.time() - ts < FINANCE_NEWS_CACHE_TTL_SEC:
                 df = data
         if df is None:
+            disk = _read_cache("finance_news_cx", "latest")
+            if disk is not None:
+                df = payload_to_df(disk)
+                if df is not None and not df.empty:
+                    self._set_cache(FINANCE_NEWS_CACHE_KEY, df)
+        if df is None or getattr(df, "empty", True):
             try:
                 df = self.fetch_with_retry(ak.stock_news_main_cx)
             except Exception as e:
-                print(f"财经要闻获取失败: {e}")
+                _log.error("财经要闻获取失败: %s", e)
                 df = pd.DataFrame()
             self._set_cache(FINANCE_NEWS_CACHE_KEY, df)
+            if df is not None and not df.empty:
+                try:
+                    _write_cache("finance_news_cx", "latest", df_to_payload(df))
+                except OSError as ex:
+                    _log.warning("要闻磁盘缓存失败: %s", ex)
         if df is None or df.empty:
             line = (
                 "\n## 【财经要闻·与程序观察标的】\n"

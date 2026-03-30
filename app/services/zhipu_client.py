@@ -33,13 +33,14 @@ class ZhipuClient:
         api_key: str,
         *,
         model: str = DEFAULT_MODEL,
-        timeout: float = DEFAULT_TIMEOUT,
+        timeout: float | tuple[float, float] = DEFAULT_TIMEOUT,
     ) -> None:
         self.api_key = api_key
         self.model = model
         self.timeout = timeout
 
     def _post_once(self, payload: dict[str, Any]) -> requests.Response:
+        # timeout 可为标量或 (连接秒数, 读取秒数)，长文生成须给足 read
         return requests.post(
             ZHIPU_API_URL,
             headers={

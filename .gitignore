@@ -8,6 +8,7 @@ replay_config.json
 data/strategy_evolution_log.jsonl
 data/replay_status/
 data/api_cache/
+data_cache/
 data/logs/
 data/trade_records.log
 .env

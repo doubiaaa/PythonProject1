@@ -148,8 +148,13 @@ class ReplayTask:
         )
 
     def call_zhipu(self, api_key, prompt, temperature=0.42, max_tokens=6144):
-        """调用智谱API（封装重试与超时）。"""
-        client = ZhipuClient(api_key, model=MODEL_NAME)
+        """调用智谱API（封装重试与超时；连接与读取超时见 replay_config data_source）。"""
+        cm = ConfigManager()
+        ds = cm.get("data_source") or {}
+        conn = float(ds.get("zhipu_connect_timeout", 10))
+        read = float(ds.get("zhipu_read_timeout", 120))
+        timeout = (conn, read)
+        client = ZhipuClient(api_key, model=MODEL_NAME, timeout=timeout)
         return client.chat_completion(
             prompt, temperature=temperature, max_tokens=max_tokens
         )

@@ -93,6 +93,15 @@ DEFAULT_CONFIG = {
     "resume_replay_if_available": False,
     # 策略权重：单次更新每桶相对上一版最大绝对变化（默认 10%，与 max_change_per_week 不同）
     "strategy_max_weight_delta_per_update": 0.10,
+    # 数据源：本地 JSON 缓存目录、过期、重试；可被 replay_config.json 覆盖
+    "data_source": {
+        "timeout": 8,
+        "retry_times": 3,
+        "cache_expire_days": 1,
+        "cache_dir": "data_cache",
+        "zhipu_connect_timeout": 10,
+        "zhipu_read_timeout": 120,
+    },
 }
 
 
