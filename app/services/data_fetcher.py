@@ -187,6 +187,7 @@ class DataFetcher:
         # 程序选股 meta（龙头池等），供存档与周度统计
         self._last_auction_meta: dict = {}
         self._last_email_kpi: dict = {}
+        self._last_dragon_trader_meta: dict = {}
 
     def _is_cache_valid(self, key):
         if key in self.cache:
@@ -537,6 +538,268 @@ class DataFetcher:
             print(f"计算溢价异常: {e}")
             return -99.0, f"异常:{str(e)[:20]}"
 
+    def _norm_code(self, c) -> str:
+        return re.sub(r"[^0-9]", "", str(c))[:6].zfill(6)
+
+    def _pct_map_for_codes_on_date(self, codes: list, date_str: str) -> dict[str, float]:
+        """按代码拉取当日涨跌幅，返回 code→pct（失败则不含该键）。"""
+        out: dict[str, float] = {}
+        if not codes:
+            return out
+
+        def one(raw):
+            c = self._norm_code(raw)
+            try:
+                df = ak.stock_zh_a_hist(
+                    symbol=c,
+                    period="daily",
+                    start_date=date_str,
+                    end_date=date_str,
+                    adjust="",
+                )
+                if df is not None and not df.empty and "涨跌幅" in df.columns:
+                    return c, float(df["涨跌幅"].iloc[-1])
+            except Exception:
+                pass
+            return c, None
+
+        max_workers = min(12, max(1, len(codes)))
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            futures = [ex.submit(one, c) for c in codes]
+            for fut in as_completed(futures):
+                c, v = fut.result()
+                if v is not None:
+                    out[c] = v
+        return out
+
+    def _pct_map_from_spot_for_codes(self, codes: list) -> dict[str, float]:
+        """用全市场 snapshot 匹配代码（样本过大时替代逐只 hist）。"""
+        if not codes:
+            return {}
+        want = {self._norm_code(c) for c in codes}
+        all_df = self.get_stock_zh_a_spot_em_cached()
+        if all_df is None or all_df.empty or "代码" not in all_df.columns:
+            return {}
+        all_df = all_df.copy()
+        all_df["code"] = all_df["代码"].apply(
+            lambda x: re.sub(r"[^0-9]", "", str(x))[:6].zfill(6)
+        )
+        pct_col = "涨跌幅" if "涨跌幅" in all_df.columns else None
+        if not pct_col:
+            return {}
+        sub = all_df[all_df["code"].isin(want)]
+        out: dict[str, float] = {}
+        for _, row in sub.iterrows():
+            try:
+                out[str(row["code"])] = float(row[pct_col])
+            except Exception:
+                continue
+        return out
+
+    def _spot_red_green_counts(self) -> tuple[Optional[int], Optional[int]]:
+        """全 A 涨跌家数（东财 spot），失败返回 (None, None)。"""
+        try:
+            df = self.get_stock_zh_a_spot_em_cached()
+            if df is None or df.empty or "涨跌幅" not in df.columns:
+                return None, None
+            s = pd.to_numeric(df["涨跌幅"], errors="coerce")
+            up = int((s > 0).sum())
+            down = int((s < 0).sum())
+            return up, down
+        except Exception:
+            return None, None
+
+    def build_dragon_trader_snapshot(
+        self,
+        date: str,
+        trade_days: list[str],
+        df_zt: pd.DataFrame,
+        df_dt: pd.DataFrame,
+    ) -> tuple[str, dict]:
+        """
+        龙头短线选手所需程序量化：连板梯队、大面、溢价拆分、总龙头、中位断板、分离候选等。
+        分离确认无逐笔分时，仅提供同日强弱对比候选。
+        """
+        meta: dict = {
+            "trade_date": date,
+            "ladder": {},
+            "red_count": None,
+            "green_count": None,
+            "yest_zt_count": 0,
+            "big_face_count": 0,
+            "premium_first_board_pct": None,
+            "premium_multi_board_pct": None,
+            "top_dragon": None,
+            "mid_tier_yesterday": [],
+            "separation_candidates": [],
+            "notes": [],
+        }
+        lines: list[str] = [
+            "\n## 【龙头选手·程序量化快照】\n",
+            "> 以下由程序按公开日 K / 涨停池计算；**分离确认**无分时数据，"
+            "「候选」为同日相对最高连板股的补涨/卡位观察名单，须结合盘面验证。\n\n",
+        ]
+        if not trade_days or date not in trade_days:
+            lines.append("- 交易日历异常，本块跳过。\n\n")
+            return "".join(lines), meta
+
+        idx = trade_days.index(date)
+        if idx == 0:
+            lines.append("- 无上一交易日，昨日涨停衍生指标跳过。\n\n")
+            meta["notes"].append("no_prior_trade_day")
+            return "".join(lines), meta
+
+        yest_date = trade_days[idx - 1]
+        yest_zt = self.get_zt_pool(yest_date)
+        if yest_zt is None or yest_zt.empty:
+            lines.append("- 昨日涨停池为空，无法计算大面数、溢价拆分、中位股表现。\n\n")
+            meta["notes"].append("empty_yest_zt")
+            return "".join(lines), meta
+
+        yest_codes = [self._norm_code(c) for c in yest_zt["code"].tolist()]
+        meta["yest_zt_count"] = len(yest_codes)
+
+        up_n, down_n = self._spot_red_green_counts()
+        meta["red_count"], meta["green_count"] = up_n, down_n
+        if up_n is not None and down_n is not None:
+            lines.append(f"- **涨跌家数（全 A 快照）**：上涨约 **{up_n}** 家，下跌约 **{down_n}** 家\n")
+
+        if not df_zt.empty and "lb" in df_zt.columns:
+            lb_stats = df_zt["lb"].value_counts().sort_index()
+            ladder = {int(k): int(v) for k, v in lb_stats.items()}
+            meta["ladder"] = ladder
+            parts = [f"{k}连板×{v}只" for k, v in sorted(ladder.items())]
+            lines.append(f"- **连板梯队（当日涨停池）**：{'，'.join(parts)}\n")
+            max_lb = int(df_zt["lb"].max())
+            df_m = df_zt[df_zt["lb"] == max_lb].copy()
+            if not df_m.empty and "first_time" in df_m.columns:
+                dragon = df_m.sort_values("first_time").iloc[0]
+            else:
+                dragon = df_m.iloc[0]
+            td = {
+                "code": str(dragon.get("code", "")),
+                "name": str(dragon.get("name", "")),
+                "lb": int(dragon.get("lb", 0) or 0),
+                "industry": str(dragon.get("industry", "")),
+            }
+            meta["top_dragon"] = td
+            try:
+                d_pct = float(dragon["pct_chg"])
+            except Exception:
+                d_pct = None
+            lines.append(
+                f"- **总龙头（当日最高连板）**：{td['name']}（`{td['code']}`）"
+                f" **{td['lb']}连板**，行业：{td['industry']}；"
+                f"当日涨跌幅：{d_pct if d_pct is not None else '—'}%\n"
+            )
+            dcode = self._norm_code(td["code"])
+            if (
+                not df_zt.empty
+                and "pct_chg" in df_zt.columns
+                and "code" in df_zt.columns
+                and max_lb >= 2
+            ):
+                alt = df_zt[
+                    (df_zt["lb"] >= 2)
+                    & (df_zt["code"].astype(str).map(self._norm_code) != dcode)
+                ].nlargest(5, "pct_chg")
+                cand = []
+                for _, r in alt.iterrows():
+                    item = {
+                        "code": self._norm_code(r.get("code")),
+                        "name": str(r.get("name", "")),
+                        "lb": int(r.get("lb", 0) or 0),
+                        "today_pct": round(float(r.get("pct_chg", 0)), 2)
+                        if pd.notna(r.get("pct_chg"))
+                        else None,
+                    }
+                    cand.append(item)
+                meta["separation_candidates"] = cand
+                if cand:
+                    lines.append("- **分离确认·候选（非分时，补涨/卡位观察）**：\n")
+                    for it in cand[:5]:
+                        lines.append(
+                            f"  - {it['name']}（`{it['code']}`）{it['lb']}连板，"
+                            f"当日 {it['today_pct']}%\n"
+                        )
+                else:
+                    lines.append("- **分离确认·候选**：无同梯队备选或数据不足。\n")
+
+        pct_map: dict[str, float] = {}
+        if len(yest_codes) <= YEST_PREMIUM_HIST_MAX_CODES:
+            pct_map = self._pct_map_for_codes_on_date(yest_codes, date)
+        if len(pct_map) < max(3, len(yest_codes) // 3):
+            pct_map = self._pct_map_from_spot_for_codes(yest_codes)
+
+        big_face = 0
+        dt_codes: set[str] = set()
+        if df_dt is not None and not df_dt.empty and "code" in df_dt.columns:
+            dt_codes = {self._norm_code(x) for x in df_dt["code"].tolist()}
+        for c in yest_codes:
+            pv = pct_map.get(c)
+            in_dt = c in dt_codes
+            if in_dt or (pv is not None and float(pv) < -5.0):
+                big_face += 1
+        meta["big_face_count"] = big_face
+        lines.append(
+            f"- **大面数（程序口径）**：昨日涨停股中今日 **跌幅 < -5%** 或 **跌停** 计 **{big_face}** 只（每票最多计一次）\n"
+        )
+
+        if "lb" in yest_zt.columns:
+            y1 = yest_zt[yest_zt["lb"] == 1]
+            ym = yest_zt[yest_zt["lb"] >= 2]
+            c1 = [self._norm_code(c) for c in y1["code"].tolist()]
+            cm_ = [self._norm_code(c) for c in ym["code"].tolist()]
+            v1 = [pct_map[c] for c in c1 if c in pct_map]
+            vm = [pct_map[c] for c in cm_ if c in pct_map]
+            if v1:
+                meta["premium_first_board_pct"] = round(sum(v1) / len(v1), 2)
+                lines.append(
+                    f"- **昨日涨停溢价·首板子样本均值**：**{meta['premium_first_board_pct']}%** "
+                    f"（{len(v1)}/{len(c1)} 只有效）\n"
+                )
+            if vm:
+                meta["premium_multi_board_pct"] = round(sum(vm) / len(vm), 2)
+                lines.append(
+                    f"- **昨日涨停溢价·连板（≥2）子样本均值**：**{meta['premium_multi_board_pct']}%** "
+                    f"（{len(vm)}/{len(cm_)} 只有效）\n"
+                )
+
+        mid_rows = yest_zt[yest_zt["lb"].isin([3, 4])] if "lb" in yest_zt.columns else pd.DataFrame()
+        if not mid_rows.empty:
+            lines.append("- **中位股（昨日 3～4 连板）今日表现**：\n")
+            for _, row in mid_rows.head(12).iterrows():
+                c = self._norm_code(row.get("code"))
+                nm = str(row.get("name", ""))
+                lb0 = int(row.get("lb", 0) or 0)
+                pv = pct_map.get(c)
+                in_dt = c in dt_codes
+                note = "跌停" if in_dt else (f"{pv:.2f}%" if pv is not None else "—")
+                meta["mid_tier_yesterday"].append(
+                    {
+                        "code": c,
+                        "name": nm,
+                        "yesterday_lb": lb0,
+                        "today_pct": round(pv, 2) if pv is not None else None,
+                        "limit_down_today": in_dt,
+                    }
+                )
+                lines.append(f"  - {nm}（`{c}`）昨 {lb0} 连板 → 今日 {note}\n")
+
+        top5_ind = []
+        if not df_zt.empty and "industry" in df_zt.columns:
+            ic = df_zt["industry"].value_counts().head(5)
+            for ind, cnt in ic.items():
+                top5_ind.append(f"{ind}（涨停 {cnt} 家）")
+        if top5_ind:
+            lines.append(
+                f"- **板块涨停热度（行业分布 Top）**：{'；'.join(top5_ind)}；"
+                f"成分股总数/占比需另行 Level2 数据，此处仅家数。\n"
+            )
+
+        lines.append("\n")
+        return "".join(lines), meta
+
     def get_north_money(self, date) -> tuple[float, str]:
         """
         北向净流入（亿元）与状态。
@@ -694,11 +957,13 @@ class DataFetcher:
         self._last_news_push_prefix = ""
         self._last_auction_meta = {}
         self._last_email_kpi = {}
+        self._last_dragon_trader_meta = {}
         summary = ""
         trade_days = self.get_trade_cal()
         if not trade_days:
             summary += "## 基础数据\n- 无法获取交易日历，请检查网络或数据源。\n\n"
             self._last_email_kpi = {}
+            self._last_dragon_trader_meta = {}
             return summary, date
         if date not in trade_days:
             print(f"{date} 非交易日，将自动调整")
@@ -816,6 +1081,19 @@ class DataFetcher:
                 for industry, cnt in industry_stats.items():
                     summary += f"- {industry}：{cnt}家\n"
                 summary += "\n"
+
+        try:
+            snap_md, snap_meta = self.build_dragon_trader_snapshot(
+                date, trade_days, df_zt, df_dt
+            )
+            summary += snap_md
+            self._last_dragon_trader_meta = snap_meta
+        except Exception as e:
+            summary += (
+                f"\n## 【龙头选手·程序量化快照】\n"
+                f"- 程序计算异常（已跳过本块）：{e!s}\n\n"
+            )
+            self._last_dragon_trader_meta = {"error": str(e)[:300]}
 
         try:
             from app.services.auction_halfway_strategy import build_auction_halfway_report

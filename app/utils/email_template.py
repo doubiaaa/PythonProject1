@@ -160,7 +160,7 @@ def truncate_news(
 
 
 def _parse_summary_line_metrics(raw_md: str) -> dict[str, str]:
-    """从首条【摘要】解析 市场阶段 / 适宜度 / 置信度。"""
+    """从首条【摘要】解析 周期阶段/市场阶段、适宜度、置信度。"""
     out: dict[str, str] = {}
     for line in (raw_md or "").split("\n"):
         s = line.strip()
@@ -186,10 +186,12 @@ def _pill_color_stage(val: str) -> tuple[str, str]:
     v = (val or "").strip()
     if "主升" in v:
         return "#14532d", "#dcfce7"
-    if "退潮" in v:
+    if "退潮" in v or "冰点" in v:
         return "#475569", "#e2e8f0"
-    if "震荡" in v:
+    if "震荡" in v or "高位" in v:
         return "#c2410c", "#ffedd5"
+    if "混沌" in v or "试错" in v:
+        return "#6b21a8", "#f3e8ff"
     return "#1e3a5f", "#dbeafe"
 
 
@@ -276,7 +278,7 @@ def build_summary_metrics_card_html(
     kpi = ev.get("email_kpi") or {}
     if not m and not kpi:
         return ""
-    stage = m.get("市场阶段") or "—"
+    stage = m.get("周期阶段") or m.get("市场阶段") or "—"
     fit = m.get("适宜度") or "—"
     conf = m.get("置信度") or "—"
     pos = (kpi.get("position_suggestion") or "").strip() or "—"
@@ -296,7 +298,7 @@ def build_summary_metrics_card_html(
     )
 
     pills = (
-        _build_metric_pill("市场阶段", stage, fg_s, bg_s)
+        _build_metric_pill("周期阶段", stage, fg_s, bg_s)
         + _build_metric_pill("适宜度", fit, fg_f[0], fg_f[1])
         + _build_metric_pill("置信度", conf, fg_c[0], bg_c[1])
         + _build_metric_pill("建议仓位", pos, "#1e3a5f", "#e0e7ff")
