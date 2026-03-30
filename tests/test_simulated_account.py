@@ -20,7 +20,11 @@ def _make_acc():
     d = tempfile.mkdtemp()
     ap = os.path.join(d, "simulated_account.json")
     cp = os.path.join(d, "simulated_config.json")
-    return SimulatedAccount(ap, cp, project_root=d), d, ap, cp
+    acc = SimulatedAccount(ap, cp, project_root=d)
+    # 单元测试固定为无滑点/手续费，便于断言现金与旧行为一致
+    acc._cfg["commission_rate"] = 0.0
+    acc._cfg["slippage_rate"] = 0.0
+    return acc, d, ap, cp
 
 
 def test_buy_lot_and_cash():

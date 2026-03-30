@@ -13,6 +13,11 @@ from copy import deepcopy
 from datetime import datetime
 from typing import Any, Callable, Optional
 
+from config.simulated_account_config import (
+    DEFAULT_COMMISSION_RATE,
+    DEFAULT_SLIPPAGE_RATE,
+)
+
 _logger = logging.getLogger(__name__)
 
 _lock = threading.Lock()
@@ -31,6 +36,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "max_positions": 5,
     "position_size_pct": 0.2,
     "min_cash_reserve": 500,
+    "commission_rate": DEFAULT_COMMISSION_RATE,
+    "slippage_rate": DEFAULT_SLIPPAGE_RATE,
 }
 
 DEFAULT_STATE: dict[str, Any] = {
@@ -98,7 +105,18 @@ class SimulatedAccount:
         self._last_session_buys: list[dict[str, Any]] = []
         self._last_session_sells: list[dict[str, Any]] = []
         self._last_pending_recs: list[dict[str, Any]] = []
+        self._trade_lock = threading.RLock()
         self.load_state()
+
+    def _append_trade_log(self, rec: dict[str, Any]) -> None:
+        path = os.path.join(self.project_root, "data", "trade_records.log")
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            line = json.dumps(rec, ensure_ascii=False) + "\n"
+            with open(path, "a", encoding="utf-8") as f:
+                f.write(line)
+        except OSError as ex:
+            _logger.warning("trade_records.log 写入失败：%s", ex)
 
     def _ensure_data_files(self) -> None:
         os.makedirs(os.path.dirname(self.account_path), exist_ok=True)
@@ -302,91 +320,111 @@ class SimulatedAccount:
         reason: str,
         date: str,
     ) -> bool:
-        if shares < 100 or shares % 100 != 0:
-            return False
-        if price <= 0:
-            return False
-        cost = shares * price
-        if float(self._state["cash"]) < cost:
-            return False
-        sym = _norm_symbol(symbol)
-        self._state["cash"] = float(self._state["cash"]) - cost
-        self._state["holdings"].append(
-            {
-                "symbol": sym,
-                "name": name or sym,
-                "shares": shares,
-                "cost_price": round(price, 4),
-                "buy_date": date,
-                "current_price": round(price, 4),
-                "style_bucket": "",
-            }
-        )
-        self._state["transactions"].append(
-            {
+        with self._trade_lock:
+            if shares < 100 or shares % 100 != 0:
+                return False
+            if price <= 0:
+                return False
+            comm_r = float(self._cfg.get("commission_rate", DEFAULT_COMMISSION_RATE))
+            slp_r = float(self._cfg.get("slippage_rate", DEFAULT_SLIPPAGE_RATE))
+            exec_price = float(price) * (1.0 + slp_r)
+            gross = shares * exec_price
+            fee = gross * comm_r
+            total_cost = gross + fee
+            if float(self._state["cash"]) < total_cost:
+                return False
+            sym = _norm_symbol(symbol)
+            self._state["cash"] = float(self._state["cash"]) - total_cost
+            self._state["holdings"].append(
+                {
+                    "symbol": sym,
+                    "name": name or sym,
+                    "shares": shares,
+                    "cost_price": round(exec_price, 4),
+                    "buy_date": date,
+                    "current_price": round(exec_price, 4),
+                    "style_bucket": "",
+                }
+            )
+            tx = {
                 "date": date,
                 "symbol": sym,
                 "name": name or sym,
                 "side": "buy",
                 "shares": shares,
                 "price": round(price, 4),
-                "amount": round(cost, 2),
+                "exec_price": round(exec_price, 4),
+                "slippage_rate": slp_r,
+                "commission_rate": comm_r,
+                "fee": round(fee, 2),
+                "amount": round(total_cost, 2),
                 "reason": reason,
             }
-        )
-        self._state["total_value"] = float(self._state["cash"]) + self._holding_value()
-        self._schedule_trade_notification(
-            side="buy",
-            symbol=sym,
-            name=str(name or sym),
-            shares=shares,
-            price=float(price),
-            reason=reason,
-            trade_date=date,
-        )
-        return True
+            self._state["transactions"].append(tx)
+            self._append_trade_log(tx)
+            self._state["total_value"] = float(self._state["cash"]) + self._holding_value()
+            self._schedule_trade_notification(
+                side="buy",
+                symbol=sym,
+                name=str(name or sym),
+                shares=shares,
+                price=float(exec_price),
+                reason=reason,
+                trade_date=date,
+            )
+            return True
 
     def sell(
         self, symbol: str, price: float, reason: str, date: str
     ) -> bool:
-        sym = _norm_symbol(symbol)
-        idx = None
-        for i, h in enumerate(self._state["holdings"]):
-            if _norm_symbol(str(h.get("symbol"))) == sym:
-                idx = i
-                break
-        if idx is None:
-            return False
-        h = self._state["holdings"].pop(idx)
-        sh = int(h.get("shares") or 0)
-        if price <= 0 or sh <= 0:
-            self._state["holdings"].insert(idx, h)
-            return False
-        proceeds = sh * price
-        self._state["cash"] = float(self._state["cash"]) + proceeds
-        self._state["transactions"].append(
-            {
+        with self._trade_lock:
+            sym = _norm_symbol(symbol)
+            idx = None
+            for i, h in enumerate(self._state["holdings"]):
+                if _norm_symbol(str(h.get("symbol"))) == sym:
+                    idx = i
+                    break
+            if idx is None:
+                return False
+            h = self._state["holdings"].pop(idx)
+            sh = int(h.get("shares") or 0)
+            if price <= 0 or sh <= 0:
+                self._state["holdings"].insert(idx, h)
+                return False
+            comm_r = float(self._cfg.get("commission_rate", DEFAULT_COMMISSION_RATE))
+            slp_r = float(self._cfg.get("slippage_rate", DEFAULT_SLIPPAGE_RATE))
+            exec_price = float(price) * (1.0 - slp_r)
+            gross = sh * exec_price
+            fee = gross * comm_r
+            proceeds = gross - fee
+            self._state["cash"] = float(self._state["cash"]) + proceeds
+            tx = {
                 "date": date,
                 "symbol": sym,
                 "name": str(h.get("name") or sym),
                 "side": "sell",
                 "shares": sh,
                 "price": round(price, 4),
+                "exec_price": round(exec_price, 4),
+                "slippage_rate": slp_r,
+                "commission_rate": comm_r,
+                "fee": round(fee, 2),
                 "amount": round(proceeds, 2),
                 "reason": reason,
             }
-        )
-        self._state["total_value"] = float(self._state["cash"]) + self._holding_value()
-        self._schedule_trade_notification(
-            side="sell",
-            symbol=sym,
-            name=str(h.get("name") or sym),
-            shares=sh,
-            price=float(price),
-            reason=reason,
-            trade_date=date,
-        )
-        return True
+            self._state["transactions"].append(tx)
+            self._append_trade_log(tx)
+            self._state["total_value"] = float(self._state["cash"]) + self._holding_value()
+            self._schedule_trade_notification(
+                side="sell",
+                symbol=sym,
+                name=str(h.get("name") or sym),
+                shares=sh,
+                price=float(exec_price),
+                reason=reason,
+                trade_date=date,
+            )
+            return True
 
     def check_sell_signals(
         self,

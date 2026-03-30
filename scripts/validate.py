@@ -155,6 +155,8 @@ def check_imports() -> None:
         "requests",
         "markdown",
         "pytest",
+        "tenacity",
+        "config.data_source_config",
     ]
     for m in mods:
         try:

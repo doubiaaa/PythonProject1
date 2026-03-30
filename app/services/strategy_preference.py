@@ -22,6 +22,12 @@ from app.services.weekly_performance import (
     records_for_iso_week,
 )
 from app.services.watchlist_store import load_all_records
+from config.strategy_preference_config import (
+    MAX_WEIGHT_DELTA_PER_UPDATE,
+    WEIGHT_CLIP_HIGH,
+    WEIGHT_CLIP_LOW,
+    WEIGHT_HISTORY_MAX,
+)
 
 _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
 DATA_DIR = os.path.join(_PROJECT_ROOT, "data")
@@ -245,6 +251,39 @@ def _apply_floor_cap(
     return {k: round(capped[k] / s, 4) for k in BUCKETS}
 
 
+def _clip_bucket_normalize(
+    w: dict[str, float], low: float, high: float
+) -> dict[str, float]:
+    """每桶 clip 到 [low, high] 后再归一化到和为 1。"""
+    clipped = {k: min(max(float(w.get(k, 0)), low), high) for k in BUCKETS}
+    s = sum(clipped.values())
+    if s <= 0:
+        return dict(DEFAULT_WEIGHTS)
+    return {k: round(clipped[k] / s, 4) for k in BUCKETS}
+
+
+def _limit_weight_delta_vs_old(
+    new_w: dict[str, float],
+    old_w: dict[str, float],
+    *,
+    max_delta: float,
+) -> dict[str, float]:
+    """限制每桶相对上一版合并权重的绝对变化，再归一化。"""
+    out: dict[str, float] = {}
+    for k in BUCKETS:
+        target = float(new_w.get(k, 0))
+        prev = float(old_w.get(k, 0.2))
+        d = target - prev
+        if abs(d) > max_delta:
+            out[k] = prev + (max_delta if d > 0 else -max_delta)
+        else:
+            out[k] = target
+    s = sum(out.values())
+    if s <= 0:
+        return dict(old_w)
+    return {k: round(out[k] / s, 4) for k in BUCKETS}
+
+
 def _penalize_large_shift(
     new_w: dict[str, float],
     old_w: dict[str, float],
@@ -333,10 +372,22 @@ def update_from_recent_returns(
     min_total_trades_per_bucket: int = 3,
     max_change_per_week: float = 0.25,
     shift_pullback: float = 0.5,
+    max_weight_delta_per_update: Optional[float] = None,
 ) -> dict[str, Any]:
     """
     更新策略偏好。multi_week：用最近 multi_week_lookback 周衰减合成 suggested，再平滑。
     """
+    from app.utils.config import ConfigManager
+
+    _cm = ConfigManager()
+    if max_weight_delta_per_update is None:
+        max_weight_delta_per_update = float(
+            _cm.get(
+                "strategy_max_weight_delta_per_update",
+                MAX_WEIGHT_DELTA_PER_UPDATE,
+            )
+        )
+
     with _lock:
         cur = load_strategy_preference()
         old = dict(cur.get("strategy_weights") or DEFAULT_WEIGHTS)
@@ -369,6 +420,10 @@ def update_from_recent_returns(
         merged, old, max_change=max_change_per_week, pullback=shift_pullback
     )
     merged = _apply_floor_cap(merged, max_single=max_single, min_each=min_each)
+    merged = _clip_bucket_normalize(merged, WEIGHT_CLIP_LOW, WEIGHT_CLIP_HIGH)
+    merged = _limit_weight_delta_vs_old(
+        merged, old, max_delta=max_weight_delta_per_update
+    )
 
     notes = (
         f"周{iso_year}-W{iso_week:02d}；"
@@ -376,6 +431,10 @@ def update_from_recent_returns(
         f"多周衰减={use_multi_week_decay}"
     )
     alerts = detect_weight_anomalies(old, merged, counts)
+    hist = list(cur.get("weight_history") or [])
+    hist.append({"anchor": anchor_date, "weights": dict(merged)})
+    hist = hist[-WEIGHT_HISTORY_MAX:]
+
     out = {
         **cur,
         "strategy_weights": merged,
@@ -385,6 +444,7 @@ def update_from_recent_returns(
         "last_bucket_counts": counts,
         "last_week_meta": wmeta,
         "weight_alerts": alerts,
+        "weight_history": hist,
     }
     with _lock:
         _save_pref({k: v for k, v in out.items() if k != "weight_alerts"})

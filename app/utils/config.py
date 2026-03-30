@@ -88,6 +88,11 @@ DEFAULT_CONFIG = {
     "simulated_buy_price_type": "next_day_open",
     # 模拟账户每笔买卖成交通知（与复盘共用 SMTP / MAIL_TO）
     "enable_simulated_trade_notification": False,
+    # 复盘断点：成功后写入 data/replay_status/；resume 为 True 时优先用缓存跳过数据拉取
+    "enable_replay_checkpoint": True,
+    "resume_replay_if_available": False,
+    # 策略权重：单次更新每桶相对上一版最大绝对变化（默认 10%，与 max_change_per_week 不同）
+    "strategy_max_weight_delta_per_update": 0.10,
 }
 
 

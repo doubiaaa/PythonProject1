@@ -39,3 +39,6 @@ jobs:
 
       - name: Validate configs and data
         run: python scripts/validate.py
+
+      - name: Health check script
+        run: python scripts/health_check.py

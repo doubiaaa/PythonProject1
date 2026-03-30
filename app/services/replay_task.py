@@ -3,8 +3,7 @@ import json
 import threading
 from typing import Any, Optional
 
-import requests
-
+from config.replay_prompt_templates import build_main_replay_prompt
 from app.services.email_notify import has_email_config, send_report_email
 from app.utils.email_template import truncate_finance_news_push_prefix
 from app.services.serverchan_notify import send_serverchan
@@ -16,8 +15,13 @@ from app.services.strategy_preference import (
 )
 from app.services.watchlist_store import append_daily_top_pool
 from app.utils.config import ConfigManager
+from app.services.replay_checkpoint import (
+    load_fetcher_bundle,
+    load_market_data_cache,
+    save_fetcher_bundle,
+)
+from app.services.zhipu_client import ZhipuClient
 
-ZHIPU_API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
 MODEL_NAME = "glm-4-flash"  # 智谱免费模型
 MAX_LOG_ENTRIES = 200
 
@@ -135,96 +139,20 @@ class ReplayTask:
                 "\n## 【程序结构化快照·JSON】（须与「龙头选手·程序量化快照」Markdown 交叉验证）\n"
                 f"```json\n{meta_json}\n```\n"
             )
-        return f"""
-你是一位资深的**龙头短线交易员**视角的 A 股分析师，同时须遵守本系统的 **{MODE_NAME}** 程序约束：
-模式含义：**收盘后**完成程序选股，**次日集合竞价至早盘**可结合分时强弱考虑**半路介入**，非盲目顶板。
-
-## 硬性规则（违反则视为不合格输出）
-1. **必须与程序数据对齐**：程序给出的主线板块、**龙头池**（代码/名称/综合分排序）、「龙头选手·程序量化快照」中的数据须优先采信；不认可须**单独写清理由**，不得静默忽略。
-2. **须完整响应「【AI 提示】」块**（若市场数据中有）：数据缺失、置信度、冲突标的等须**逐条回应**，可合并叙述。
-3. 若含 **【财经要闻·与程序观察标的】**：仅在「周期定性 / 核心股聚焦」中**择要呼应**与主线/龙头池相关的外围信息，勿逐条复述快讯。
-4. **全文 Markdown**；下列**章节标题（含「### 一、」…「### 七、」）须全部出现**，顺序不得打乱；节内篇幅可控制，但总结构不可删。
-
-### 报告首行（单独一行）
-`【摘要】周期阶段：主升期/高位震荡期/退潮·冰点期/混沌·试错期｜适宜度：高/中/低｜置信度：高/中/低`
-（周期阶段须与下文「一、周期定性」一致；置信度综合数据完整性、龙头池是否完整、AI 提示风险。）
-
-### 一、周期定性（核心）
-- 判断当前市场处于：**主升期 / 高位震荡期 / 退潮·冰点期 / 混沌·试错期**（四选一或说明过渡）。
-- **判断依据**：必须引用程序数据中的连板高度、涨停家数、**大面数**、昨日涨停溢价、炸板率、涨跌家数等中的至少三项。
-- **总仓位上限建议**：重仓（≥6 成）/ 轻仓（约 2～4 成）/ 空仓或极轻仓；并与 {MODE_NAME} 的次日半路节奏相匹配。
-
-### 二、情绪数据量化（简洁卡片）
-用列表或表格概括（数据以程序块为准，勿编造）：
-- 涨跌家数（若程序提供）、涨停家数、**连板梯队**（2 板×N、3 板×N…）、炸板率、**大面数**、昨日涨停溢价（若有首板/连板拆分须引用）。
-- **结论**：赚钱效应（强/中/弱）与亏钱效应是否扩散。
-
-### 三、核心股聚焦
-- **总龙头**：当日市场**最高连板**标的（代码、名称、连板数），今日走势（加速/分歧/断板），明日预期。
-- **板块龙**：最多 3 个主流题材及其领涨股（与程序主线/龙头池对齐）。
-- **中位股风险**：昨日 **3～4 连板** 今日是否断板、跌停或大面（引用程序「中位股」小节）。
-- **分离确认**：若程序提供了「分离确认·候选」，须点评其补涨/卡位意义；若无分时数据，须说明不可臆测盘口。
-
-### 四、交易回溯（模拟账户 / 纪律）
-- 若市场数据末含模拟账户备忘或持仓，则逐笔对照模式；若无持仓数据，则写「无程序持仓则本节从简」并强调纪律。
-
-### 五、明日预案（三种剧本 + 可执行信号）
-- 每种剧本必须至少写清一条 **「若出现 ___（可观察信号），则 ___（仓位动作：重仓出击 / 半仓试错 / 减仓观望 / 空仓）」**；信号须具体（如高开幅度、量比区间、核心票是否封死、中位股是否核按钮等），**禁止**空泛表述。
-- **重仓出击条件（必填）**：单独用编号列表或加粗段，写明在**何种信号组合同时满足**时，允许将总仓位提升至 **≥6 成**（须与上文周期定性一致，且与程序龙头池不矛盾）。
-- **超预期**：核心龙头高开高走时的应对（含上述「若…则…」句）。
-- **符合预期**：震荡、分化时的应对（含「若…则…」句）。
-- **不及预期**：低开低走、中位核按钮时的应对（含「若…则…」句）。
-- **新方向**：新题材是否可能卡位；与旧周期仓位如何切换（含「若…则…」句）。
-
-### 六、备选标的（仅限 1～2 只）
-须与程序 **龙头池** 对齐或说明为何不选池内标的；表格含：代码、名称、标签、**买入条件**（可执行、可观察）。
-
-### 七、风险提示
-- 市场、个股、模式特有风险；不适用场景至少两类。
-
----
-
-### 免责声明（单独一节）
-> **免责声明**：以上分析基于公开数据与程序规则，仅供参考，不构成投资建议。股市有风险，投资需谨慎。
-
----
-{addon}
-{meta_block}
-## 今日市场数据（程序选股 + 基础指标 + 龙头量化 + AI 提示）
-交易日：{date}
-
-{market_data}
-"""
+        return build_main_replay_prompt(
+            mode_name=MODE_NAME,
+            date=str(date),
+            market_data=market_data,
+            addon=addon,
+            meta_block=meta_block,
+        )
 
     def call_zhipu(self, api_key, prompt, temperature=0.42, max_tokens=6144):
-        """调用智谱API"""
-        headers = {
-            "Authorization": f"Bearer {api_key}",
-            "Content-Type": "application/json",
-        }
-        data = {
-            "model": MODEL_NAME,
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        }
-        try:
-            response = requests.post(ZHIPU_API_URL, headers=headers, json=data, timeout=120)
-            if response.status_code == 200:
-                result = response.json()
-                choices = result.get("choices") or []
-                if not choices:
-                    return "API 返回异常：无 choices 字段"
-                msg = (choices[0].get("message") or {}).get("content")
-                if msg is None:
-                    return "API 返回异常：无 content"
-                return msg
-            else:
-                if response.status_code == 402:
-                    return "错误：智谱API账户余额不足，请充值后重试。"
-                return f"API请求失败（{response.status_code}）：{response.text}"
-        except Exception as e:
-            return f"调用智谱API异常：{str(e)}"
+        """调用智谱API（封装重试与超时）。"""
+        client = ZhipuClient(api_key, model=MODEL_NAME)
+        return client.chat_completion(
+            prompt, temperature=temperature, max_tokens=max_tokens
+        )
 
     def run(self, date, api_key, data_fetcher, serverchan_sendkey=None, email_cfg=None):
         actual_date = date
@@ -232,10 +160,36 @@ class ReplayTask:
             data_fetcher.set_current_task(self)
 
             self.progress = 10
-            self.log("正在获取市场数据与次日竞价半路选股…")
+            _cfg = ConfigManager()
+            use_resume = bool(
+                _cfg.get("resume_replay_if_available", False)
+                and _cfg.get("enable_replay_checkpoint", True)
+            )
+            market_data = None
+            if use_resume:
+                md = load_market_data_cache(date)
+                bundle = load_fetcher_bundle(date)
+                if md and bundle is not None:
+                    market_data = md
+                    data_fetcher._last_dragon_trader_meta = bundle.get("dragon") or {}
+                    data_fetcher._last_auction_meta = bundle.get("auction") or {}
+                    data_fetcher._last_email_kpi = bundle.get("email_kpi") or {}
+                    data_fetcher._last_news_push_prefix = str(
+                        bundle.get("news_prefix") or ""
+                    )
+                    actual_date = str(date)[:8]
+                    self.log("断点续跑：已加载市场摘要与程序缓存（跳过 get_market_summary）")
+                    self.progress = 90
 
-            market_data, actual_date = data_fetcher.get_market_summary(date)
-            self.progress = 90
+            if market_data is None:
+                self.log("正在获取市场数据与次日竞价半路选股…")
+                market_data, actual_date = data_fetcher.get_market_summary(date)
+                self.progress = 90
+                if _cfg.get("enable_replay_checkpoint", True):
+                    try:
+                        save_fetcher_bundle(actual_date, market_data, data_fetcher)
+                    except Exception as ex:
+                        self.log(f"写入复盘断点缓存失败（可忽略）：{ex}")
 
             if actual_date != date:
                 self.log(f"日期已自动调整为交易日: {actual_date}")

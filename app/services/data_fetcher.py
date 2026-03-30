@@ -7,6 +7,12 @@ from typing import Optional
 
 import akshare as ak
 import pandas as pd
+from tenacity import retry, stop_after_attempt, wait_exponential
+
+from config import data_source_config as _dsc
+from app.services.data_source_errors import DataSourceExhaustedError, DataSourceInvalidError
+from app.utils.disk_cache import df_to_payload, get_json, payload_to_df, set_json
+from app.utils.logger import get_logger
 
 # 板块接口为「今日」行业资金流，与复盘日无关；缓存键勿绑定 date，避免误判
 SECTOR_LIVE_CACHE_KEY = "sector_fund_flow_rank_live"
@@ -24,6 +30,8 @@ INDIVIDUAL_FUND_FLOW_CACHE_TTL_SEC = 120
 CONCEPT_CONS_CACHE_TTL_SEC = 600
 # 分笔探测（按代码短缓存）
 INTRADAY_TICK_CACHE_TTL_SEC = 60
+
+_log = get_logger(__name__)
 
 
 def _finance_news_enabled() -> bool:
@@ -388,20 +396,30 @@ class DataFetcher:
         return df
 
     def fetch_with_retry(self, fetch_func, *args, **kwargs):
-        """带重试的获取函数（用 redirect_stdout，避免多线程下全局替换 sys.stdout）"""
-        for attempt in range(self.retry_times + 1):
-            try:
-                buf = io.StringIO()
-                with redirect_stdout(buf):
-                    result = fetch_func(*args, **kwargs)
-                self._parse_progress(buf.getvalue())
-                return result
-            except Exception as e:
-                print(f"尝试 {attempt + 1}/{self.retry_times + 1} 失败: {e}")
-                if attempt == self.retry_times:
-                    raise
-                time.sleep(2)  # 等待2秒后重试
-        return None
+        """带重试的获取函数（tenacity 指数退避 + redirect_stdout）。"""
+        attempts = max(_dsc.AK_RETRY_ATTEMPTS, self.retry_times + 1)
+
+        @retry(
+            stop=stop_after_attempt(attempts),
+            wait=wait_exponential(
+                multiplier=1,
+                min=_dsc.AK_RETRY_WAIT_MIN_SEC,
+                max=_dsc.AK_RETRY_WAIT_MAX_SEC,
+            ),
+            reraise=True,
+        )
+        def _inner():
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                res = fetch_func(*args, **kwargs)
+            self._parse_progress(buf.getvalue())
+            return res
+
+        try:
+            return _inner()
+        except Exception as e:
+            _log.error("AK 调用失败（已重试）: %s", e)
+            raise DataSourceExhaustedError(str(e)) from e
 
     def _parse_progress(self, output):
         """解析akshare的进度输出"""
@@ -426,6 +444,16 @@ class DataFetcher:
                     if new_progress > self.current_task.progress:
                         self.current_task.progress = min(int(new_progress), 90)
 
+    def _validate_required_columns(
+        self, df: pd.DataFrame, required: tuple[str, ...], label: str
+    ) -> None:
+        if df is None or getattr(df, "empty", True):
+            return
+        miss = [c for c in required if c not in df.columns]
+        if miss:
+            _log.error("%s 缺少列 %s", label, miss)
+            raise DataSourceInvalidError(f"{label} 缺少列: {miss}")
+
     # ---------- 辅助函数：金额单位转换 ----------
     def _convert_money_to_float(self, money_str):
         """将带单位的金额字符串转换为以亿元为单位的浮点数"""
@@ -448,15 +476,24 @@ class DataFetcher:
         cache_key = "trade_cal"
         if self._is_cache_valid(cache_key):
             return self._get_cache(cache_key)
+        disk = get_json("trade_cal_sina_v1", _dsc.API_DISK_CACHE_TTL_SEC)
+        if isinstance(disk, dict) and isinstance(disk.get("days"), list) and disk["days"]:
+            self._set_cache(cache_key, disk["days"])
+            return disk["days"]
         try:
             cal = ak.tool_trade_date_hist_sina()
+            self._validate_required_columns(cal, _dsc.REQUIRED_TRADE_CAL_COLUMNS, "交易日历")
             trade_days = sorted(
                 pd.to_datetime(cal["trade_date"]).dt.strftime("%Y%m%d").tolist()
             )
             self._set_cache(cache_key, trade_days)
+            try:
+                set_json("trade_cal_sina_v1", {"days": trade_days})
+            except OSError as ex:
+                _log.warning("交易日历磁盘缓存失败: %s", ex)
             return trade_days
         except Exception as e:
-            print(f"获取交易日历失败: {e}")
+            _log.error("获取交易日历失败: %s", e)
             return []
 
     def get_last_trade_day(self, date_str, trade_days=None):
@@ -472,11 +509,18 @@ class DataFetcher:
         cache_key = f"zt_pool_{date}"
         if self._is_cache_valid(cache_key):
             return self._get_cache(cache_key)
+        disk = get_json(f"zt_pool_em_{date}", _dsc.API_DISK_CACHE_TTL_SEC)
+        if disk is not None:
+            df_disk = payload_to_df(disk)
+            if df_disk is not None and not df_disk.empty and "code" in df_disk.columns:
+                self._set_cache(cache_key, df_disk)
+                return df_disk
         try:
             df = self.fetch_with_retry(ak.stock_zt_pool_em, date=date)
             if df is None or df.empty:
                 self._set_cache(cache_key, pd.DataFrame())
                 return pd.DataFrame()
+            self._validate_required_columns(df, _dsc.REQUIRED_ZT_POOL_COLUMNS, "涨停池(原始)")
             # 重命名列
             df = df.rename(columns={
                 '代码': 'code', '名称': 'name', '最新价': 'price', '涨跌幅': 'pct_chg',
@@ -485,9 +529,13 @@ class DataFetcher:
             })
             df['lb'] = pd.to_numeric(df['lb'], errors='coerce').fillna(1).astype(int)
             self._set_cache(cache_key, df)
+            try:
+                set_json(f"zt_pool_em_{date}", df_to_payload(df))
+            except OSError as ex:
+                _log.warning("zt_pool 磁盘缓存失败: %s", ex)
             return df
         except Exception as e:
-            print(f"获取涨停数据失败: {e}")
+            _log.error("获取涨停数据失败: %s", e)
             self._set_cache(cache_key, pd.DataFrame())
             return pd.DataFrame()
 
@@ -496,13 +544,25 @@ class DataFetcher:
         cache_key = f"dt_pool_{date}"
         if self._is_cache_valid(cache_key):
             return self._get_cache(cache_key)
+        disk = get_json(f"dt_pool_em_{date}", _dsc.API_DISK_CACHE_TTL_SEC)
+        if disk is not None:
+            df_disk = payload_to_df(disk)
+            if df_disk is not None and not df_disk.empty and "code" in df_disk.columns:
+                self._set_cache(cache_key, df_disk)
+                return df_disk
         try:
             df = self.fetch_with_retry(ak.stock_zt_pool_dtgc_em, date=date)
-            if df is not None and not df.empty and '代码' in df.columns:
-                df = df.rename(columns={'代码': 'code', '名称': 'name'})
+            if df is not None and not df.empty and "代码" in df.columns:
+                self._validate_required_columns(df, _dsc.REQUIRED_DT_POOL_COLUMNS, "跌停池(原始)")
+                df = df.rename(columns={"代码": "code", "名称": "name"})
             else:
                 df = pd.DataFrame()
             self._set_cache(cache_key, df)
+            if not df.empty:
+                try:
+                    set_json(f"dt_pool_em_{date}", df_to_payload(df))
+                except OSError as ex:
+                    _log.warning("dt_pool 磁盘缓存失败: %s", ex)
             return df
         except Exception:
             self._set_cache(cache_key, pd.DataFrame())
@@ -513,13 +573,25 @@ class DataFetcher:
         cache_key = f"zb_pool_{date}"
         if self._is_cache_valid(cache_key):
             return self._get_cache(cache_key)
+        disk = get_json(f"zb_pool_em_{date}", _dsc.API_DISK_CACHE_TTL_SEC)
+        if disk is not None:
+            df_disk = payload_to_df(disk)
+            if df_disk is not None and not df_disk.empty and "code" in df_disk.columns:
+                self._set_cache(cache_key, df_disk)
+                return df_disk
         try:
             df = self.fetch_with_retry(ak.stock_zt_pool_zbgc_em, date=date)
-            if df is not None and not df.empty and '代码' in df.columns:
-                df = df.rename(columns={'代码': 'code', '名称': 'name'})
+            if df is not None and not df.empty and "代码" in df.columns:
+                self._validate_required_columns(df, _dsc.REQUIRED_ZB_POOL_COLUMNS, "炸板池(原始)")
+                df = df.rename(columns={"代码": "code", "名称": "name"})
             else:
                 df = pd.DataFrame()
             self._set_cache(cache_key, df)
+            if not df.empty:
+                try:
+                    set_json(f"zb_pool_em_{date}", df_to_payload(df))
+                except OSError as ex:
+                    _log.warning("zb_pool 磁盘缓存失败: %s", ex)
             return df
         except Exception:
             self._set_cache(cache_key, pd.DataFrame())
