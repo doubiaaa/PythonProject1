@@ -64,7 +64,7 @@ def _extract_summary_line(text: str) -> Optional[str]:
     return None
 
 
-def _ensure_summary_line(text: str) -> str:
+def _ensure_summary_line(text: str, market_phase: str = "高位震荡期") -> str:
     """模型未输出规范【摘要】首行时补一行，便于推送解析与阅读。"""
     if not text or not str(text).strip():
         return text
@@ -72,7 +72,7 @@ def _ensure_summary_line(text: str) -> str:
     if first.startswith("【摘要】"):
         return text
     return (
-        "【摘要】周期阶段：震荡期｜适宜度：中｜置信度：低（系统补全：模型未输出规范首行摘要）\n\n"
+        f"【摘要】周期阶段：{market_phase}｜适宜度：中｜置信度：低（系统补全：模型未输出规范首行摘要）\n\n"
         + text
     )
 
@@ -278,7 +278,9 @@ class ReplayTask:
                 news_mapping=news_mapping,
             )
             result = self.call_zhipu(api_key, prompt)
-            result = _ensure_dragon_report_sections(_ensure_summary_line(result))
+            # 从 data_fetcher 获取市场阶段，确保摘要一致性
+            market_phase = getattr(data_fetcher, "_last_market_phase", "高位震荡期")
+            result = _ensure_dragon_report_sections(_ensure_summary_line(result, market_phase))
             self.log("报告首行与龙头模板章节已校验（必要时已补全/提示）")
             sum_line = _extract_summary_line(result)
             news_pre = (getattr(data_fetcher, "_last_news_push_prefix", None) or "").strip()

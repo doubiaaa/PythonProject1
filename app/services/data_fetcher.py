@@ -1321,6 +1321,15 @@ class DataFetcher:
         codes, names = _news_keywords_from_meta(ah_meta or {})
         related: list[tuple[str, str, str]] = []
         general: list[tuple[str, str]] = []
+        
+        # 存储新闻数据到实例变量，供要闻映射使用
+        news_list = []
+        for _, row in df.head(20).iterrows():
+            summary = str(row.get("summary") or "").strip()
+            if summary:
+                news_list.append(summary)
+        self._last_finance_news = news_list
+        
         for _, row in df.head(100).iterrows():
             tag = str(row.get("tag") or "").strip()
             summary = str(row.get("summary") or "").strip()
@@ -1446,6 +1455,10 @@ class DataFetcher:
         elif sentiment_temp < 30:
             market_phase = "退潮期"
             position_suggestion = "0-10%"
+        
+        # 存储市场阶段到实例变量，供其他方法使用
+        self._last_market_phase = market_phase
+        self._last_position_suggestion = position_suggestion
 
         # 获取涨跌家数（统一数据源）
         up_n, down_n = self._spot_red_green_counts()
