@@ -1104,6 +1104,140 @@ class DataFetcher:
         lines.append("\n")
         return "".join(lines)
 
+    @staticmethod
+    def _md_table_cell(val: object, max_len: int = 44) -> str:
+        t = str(val if val is not None else "").strip()
+        t = t.replace("|", "｜").replace("\n", " ")
+        if len(t) > max_len:
+            t = t[: max_len - 1] + "…"
+        return t
+
+    def _format_zt_lb_distribution_markdown(self, df_zt: pd.DataFrame) -> str:
+        """连板数 × 家数 × 占比（涨停池内）。"""
+        if df_zt is None or df_zt.empty or "lb" not in df_zt.columns:
+            return ""
+        vc = df_zt["lb"].value_counts().sort_index()
+        total = max(1, len(df_zt))
+        lines = [
+            "\n### 连板分布（涨停池内）\n\n",
+            "| 连板数 | 家数 | 占涨停池 |\n",
+            "|--------|------|----------|\n",
+        ]
+        for lb, cnt in vc.items():
+            pct = round(100.0 * cnt / total, 2)
+            lines.append(f"| {int(lb)} 连板 | {int(cnt)} | {pct}% |\n")
+        lines.append("\n")
+        return "".join(lines)
+
+    def _format_zt_tier_detail_tables_markdown(self, df_zt: pd.DataFrame) -> str:
+        """按连板数从高到低，每档一张明细表（图二式）。"""
+        if df_zt is None or df_zt.empty or "lb" not in df_zt.columns:
+            return ""
+        lines: list[str] = ["\n### 涨停梯队明细（按连板数分组）\n\n"]
+        lbs = sorted({int(x) for x in df_zt["lb"].dropna().tolist()}, reverse=True)
+        for lb in lbs:
+            sub = df_zt[df_zt["lb"] == lb].copy()
+            if sub.empty:
+                continue
+            if "first_time" in sub.columns:
+                sub = sub.sort_values("first_time", na_position="last")
+            lines.append(f"#### {lb} 连板（{len(sub)} 只）\n\n")
+            lines.append(
+                "| 代码 | 名称 | 行业 | 连板 | 涨停原因 | 涨跌幅% |\n"
+                "|------|------|------|------|----------|--------|\n"
+            )
+            for _, row in sub.iterrows():
+                try:
+                    pc = float(row.get("pct_chg", 0))
+                    pc_s = f"{pc:.2f}"
+                except Exception:
+                    pc_s = self._md_table_cell(row.get("pct_chg"), 8)
+                lines.append(
+                    f"| {self._md_table_cell(row.get('code'), 8)} | "
+                    f"{self._md_table_cell(row.get('name'), 10)} | "
+                    f"{self._md_table_cell(row.get('industry'), 10)} | "
+                    f"{int(row.get('lb') or 0)} | "
+                    f"{self._md_table_cell(row.get('reason'), 36)} | "
+                    f"{pc_s} |\n"
+                )
+            lines.append("\n")
+        return "".join(lines)
+
+    def _format_zt_industry_top_table_markdown(
+        self, df_zt: pd.DataFrame, *, top_n: int = 12
+    ) -> str:
+        """行业涨停家数一览（单表）。"""
+        if df_zt is None or df_zt.empty or "industry" not in df_zt.columns:
+            return ""
+        vc = df_zt["industry"].value_counts().head(top_n)
+        total = len(df_zt)
+        lines = [
+            "\n### 行业涨停分布（TOP 行业）\n\n",
+            "| 行业 | 涨停家数 | 占涨停池比例 |\n",
+            "|------|----------|-------------|\n",
+        ]
+        for ind, cnt in vc.items():
+            pct = round(100.0 * cnt / max(1, total), 2)
+            lines.append(
+                f"| {self._md_table_cell(ind, 20)} | {int(cnt)} | {pct}% |\n"
+            )
+        lines.append("\n")
+        return "".join(lines)
+
+    def _format_zt_industry_detail_blocks_markdown(
+        self,
+        df_zt: pd.DataFrame,
+        *,
+        top_industries: int = 6,
+        per_sector: int = 14,
+    ) -> str:
+        """按行业涨停家数降序，分行业输出带「涨停原因」的明细表。"""
+        if df_zt is None or df_zt.empty or "industry" not in df_zt.columns:
+            return ""
+        vc = df_zt["industry"].value_counts().head(top_industries)
+        total = len(df_zt)
+        lines = [
+            "\n### 主线行业·涨停明细（程序按行业汇总）\n\n",
+            "> 按当日涨停池「所属行业」聚合，与东财板块资金流命名可能略有差异；"
+            "每行业至多列 **{0}** 只（按连板降序、首封升序）。\n\n".format(per_sector),
+        ]
+        for ind, cnt in vc.items():
+            pct = round(100.0 * cnt / max(1, total), 2)
+            sub = df_zt[df_zt["industry"] == ind].copy()
+            if sub.empty:
+                continue
+            sort_cols = []
+            asc = []
+            if "lb" in sub.columns:
+                sort_cols.append("lb")
+                asc.append(False)
+            if "first_time" in sub.columns:
+                sort_cols.append("first_time")
+                asc.append(True)
+            if sort_cols:
+                sub = sub.sort_values(sort_cols, ascending=asc)
+            sub = sub.head(per_sector)
+            lines.append(f"#### {ind}（{cnt} 只，占涨停池 {pct}%）\n\n")
+            lines.append(
+                "| 代码 | 名称 | 连板 | 涨停原因 | 涨跌幅% |\n"
+                "|------|------|------|----------|--------|\n"
+            )
+            for _, row in sub.iterrows():
+                try:
+                    pc = float(row.get("pct_chg", 0))
+                    pc_s = f"{pc:.2f}"
+                except Exception:
+                    pc_s = self._md_table_cell(row.get("pct_chg"), 8)
+                lines.append(
+                    f"| {self._md_table_cell(row.get('code'), 8)} | "
+                    f"{self._md_table_cell(row.get('name'), 10)} | "
+                    f"{int(row.get('lb') or 0)} | "
+                    f"{self._md_table_cell(row.get('reason'), 40)} | "
+                    f"{pc_s} |\n"
+                )
+            lines.append("\n")
+        return "".join(lines)
+
     def build_professional_report_preface(
         self,
         date: str,
@@ -1119,9 +1253,10 @@ class DataFetcher:
         north_status: str,
         sentiment_temp: int,
         market_phase: str,
+        df_zt: Optional[pd.DataFrame] = None,
     ) -> str:
         """
-        图二风格：报告顶部 KPI + 情绪概览表 + 涨跌分布 + 指数快照。
+        图二风格：报告顶部 KPI + 涨停梯队/行业明细表 + 情绪概览表 + 涨跌分布 + 指数快照。
         与正文「基础数据」衔接，供模型写盘面综述时引用。
         """
         ds = str(date)[:8]
@@ -1146,6 +1281,21 @@ class DataFetcher:
         else:
             north_s = f"北向净流入：{north_money} 亿"
 
+        max_lb = 0
+        if df_zt is not None and not df_zt.empty and "lb" in df_zt.columns:
+            try:
+                max_lb = int(df_zt["lb"].max())
+            except Exception:
+                max_lb = 0
+
+        seal_ok = None
+        if zt_count + zb_count > 0:
+            seal_ok = round(100.0 * zt_count / (zt_count + zb_count), 2)
+
+        zt_in_up_pct = None
+        if up_n is not None and up_n > 0 and zt_count >= 0:
+            zt_in_up_pct = round(100.0 * zt_count / up_n, 2)
+
         lines: list[str] = [
             f"## 【程序生成·A股收盘智能复盘简报】（{ds_fmt}）\n",
             "> 以下为程序据公开行情快照汇总，**供全文引用**；若与下文「基础数据」不一致，以本节 KPI 与表格为准。\n\n",
@@ -1153,6 +1303,20 @@ class DataFetcher:
             "|------|------|\n",
             "| 涨跌停 | 涨停 **{0}** 家 / 跌停 **{1}** 家 |\n".format(zt_count, dt_count),
         ]
+        if up_n is not None and down_n is not None:
+            lines.append(
+                f"| 涨跌家数（全 A） | 上涨 **{up_n}** 家 / 下跌 **{down_n}** 家 |\n"
+            )
+        if max_lb > 0:
+            lines.append(f"| 最高连板高度 | **{max_lb}** 板 |\n")
+        if zt_in_up_pct is not None:
+            lines.append(
+                f"| 涨停家数/上涨家数 | **{zt_in_up_pct}%**（情绪集中度参考） |\n"
+            )
+        if seal_ok is not None:
+            lines.append(
+                f"| 封板成功率（估） | **{seal_ok}%**（= 涨停 / (涨停+炸板)） |\n"
+            )
         if rise_pct is not None:
             lines.append(f"| 上涨率 | **{rise_pct}%**（全 A 快照） |\n")
         if turnover_yi is not None:
@@ -1167,6 +1331,12 @@ class DataFetcher:
         lines.append(f"| 北向资金 | {north_s} |\n")
         lines.append(f"| 情绪温度 | **{sentiment_temp}°C** · 市场阶段：**{market_phase}** |\n")
         lines.append(f"| 情绪标签（程序） | {tags} |\n\n")
+
+        if df_zt is not None and not df_zt.empty:
+            lines.append(self._format_zt_lb_distribution_markdown(df_zt))
+            lines.append(self._format_zt_tier_detail_tables_markdown(df_zt))
+            lines.append(self._format_zt_industry_top_table_markdown(df_zt))
+            lines.append(self._format_zt_industry_detail_blocks_markdown(df_zt))
 
         lines.append("### 情绪概览\n")
         lines.append(self._five_day_market_table_markdown(date, trade_days, up_n, down_n))
@@ -1761,6 +1931,7 @@ class DataFetcher:
             north_status=north_status,
             sentiment_temp=sentiment_temp,
             market_phase=market_phase,
+            df_zt=df_zt,
         )
 
         summary += f"## 基础数据\n"
@@ -1833,32 +2004,39 @@ class DataFetcher:
         except Exception as e:
             summary += f"\n## 扩展行情数据\n- 个股资金流/概念快照跳过：{e!s}\n\n"
 
-        # 连板梯队
-        if not df_zt.empty:
-            lb_stats = df_zt['lb'].value_counts().sort_index()
-            summary += f"## 连板梯队\n"
-            for lb, cnt in lb_stats.items():
-                summary += f"- {lb}连板：{cnt}只\n"
-            max_lb = df_zt['lb'].max()
-            summary += f"最高连板：{max_lb}板\n\n"
+        # 连板梯队（简报中已有梯队明细表，此处仅保留摘要便于扫读）
+        if not df_zt.empty and "lb" in df_zt.columns:
+            lb_stats = df_zt["lb"].value_counts().sort_index()
+            parts = [f"{lb}连板×{cnt}只" for lb, cnt in lb_stats.items()]
+            max_lb = int(df_zt["lb"].max())
+            summary += "## 连板梯队（摘要）\n"
+            summary += "- 结构统计：" + "，".join(parts) + "\n"
+            summary += (
+                f"- 最高连板：**{max_lb}** 板；**个股明细与涨停原因**见上文"
+                "「【程序生成·A股收盘智能复盘简报】」中 **涨停梯队明细 / 行业明细**。\n\n"
+            )
 
-            # 核心龙头（连板≥2）
-            df_top = df_zt[df_zt['lb'] >= 2].sort_values(['lb', 'first_time'], ascending=[False, True])
+            df_top = df_zt[df_zt["lb"] >= 2].sort_values(
+                ["lb", "first_time"], ascending=[False, True]
+            )
             if not df_top.empty:
-                summary += f"## 核心龙头\n"
+                summary += "## 核心龙头（摘要）\n"
                 for _, row in df_top.head(5).iterrows():
-                    industry = row.get('industry', '未知')
-                    first_time = row.get('first_time', '')
-                    summary += f"- {row['name']}（{row['code']}）{row['lb']}连板，行业：{industry}，首封：{first_time}\n"
+                    industry = row.get("industry", "未知")
+                    first_time = row.get("first_time", "")
+                    summary += (
+                        f"- {row['name']}（{row['code']}）{row['lb']}连板，"
+                        f"行业：{industry}，首封：{first_time}\n"
+                    )
                 summary += "\n"
 
-            # 行业分布
-            if 'industry' in df_zt.columns:
-                industry_stats = df_zt['industry'].value_counts().head(5)
-                summary += f"## 涨停行业分布\n"
-                for industry, cnt in industry_stats.items():
-                    summary += f"- {industry}：{cnt}家\n"
-                summary += "\n"
+            if "industry" in df_zt.columns:
+                industry_stats = df_zt["industry"].value_counts().head(5)
+                summary += "## 涨停行业分布（摘要）\n"
+                summary += "- TOP5：" + "，".join(
+                    f"{ind}（{cnt} 家）" for ind, cnt in industry_stats.items()
+                )
+                summary += "；**完整分布与分行业涨停原因表**见上文程序简报。\n\n"
 
         try:
             snap_md, snap_meta = self.build_dragon_trader_snapshot(
