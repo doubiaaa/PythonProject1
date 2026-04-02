@@ -1355,6 +1355,47 @@ class DataFetcher:
         lines.append("---\n\n")
         return "".join(lines)
 
+    def build_replay_six_section_catalog(
+        self,
+        date: str,
+        trade_days: list[str],
+        *,
+        zt_count: int,
+        dt_count: int,
+        zb_count: int,
+        zhaban_rate: float,
+        up_n: Optional[int],
+        down_n: Optional[int],
+        north_money: float,
+        north_status: str,
+        sentiment_temp: int,
+        market_phase: str,
+        position_suggestion: str,
+        df_zt: pd.DataFrame,
+        df_zb: pd.DataFrame,
+    ) -> str:
+        """业务约定的六大目录（篇首程序块），见 `replay_catalog.build_six_section_catalog`。"""
+        from app.services.replay_catalog import build_six_section_catalog
+
+        return build_six_section_catalog(
+            self,
+            date,
+            trade_days,
+            zt_count=zt_count,
+            dt_count=dt_count,
+            zb_count=zb_count,
+            zhaban_rate=zhaban_rate,
+            up_n=up_n,
+            down_n=down_n,
+            north_money=north_money,
+            north_status=north_status,
+            sentiment_temp=sentiment_temp,
+            market_phase=market_phase,
+            position_suggestion=position_suggestion,
+            df_zt=df_zt,
+            df_zb=df_zb,
+        )
+
     def compute_ladder_history_5d(
         self, date: str, trade_days: list[str]
     ) -> tuple[list[dict], str]:
@@ -1926,7 +1967,7 @@ class DataFetcher:
             self._last_sentiment_score = None
             self._last_sentiment_markdown = ""
 
-        summary += self.build_professional_report_preface(
+        summary += self.build_replay_six_section_catalog(
             date,
             trade_days,
             zt_count=zt_count,
@@ -1939,7 +1980,9 @@ class DataFetcher:
             north_status=north_status,
             sentiment_temp=sentiment_temp,
             market_phase=market_phase,
+            position_suggestion=position_suggestion,
             df_zt=df_zt,
+            df_zb=df_zb,
         )
 
         summary += f"## 基础数据\n"
@@ -2012,23 +2055,17 @@ class DataFetcher:
         except Exception as e:
             summary += f"\n## 扩展行情数据\n- 个股资金流/概念快照跳过：{e!s}\n\n"
 
-        # 连板梯队（简报中已有梯队明细表，此处仅保留摘要便于扫读）
+        # 连板/题材/涨停明细已收入篇首「六大目录」，此处仅保留核心龙头速览
         if not df_zt.empty and "lb" in df_zt.columns:
-            lb_stats = df_zt["lb"].value_counts().sort_index()
-            parts = [f"{lb}连板×{cnt}只" for lb, cnt in lb_stats.items()]
-            max_lb = int(df_zt["lb"].max())
-            summary += "## 连板梯队（摘要）\n"
-            summary += "- 结构统计：" + "，".join(parts) + "\n"
-            summary += (
-                f"- 最高连板：**{max_lb}** 板；**个股明细与涨停原因**见上文"
-                "「【程序生成·A股收盘智能复盘简报】」中 **涨停梯队明细 / 行业明细**。\n\n"
-            )
-
             df_top = df_zt[df_zt["lb"] >= 2].sort_values(
                 ["lb", "first_time"], ascending=[False, True]
             )
             if not df_top.empty:
                 summary += "## 核心龙头（摘要）\n"
+                summary += (
+                    "> 连板结构、分行业涨停、按时间排序个股见篇首 **"
+                    "【程序生成】复盘数据目录** 第 1～2、6 节。\n\n"
+                )
                 for _, row in df_top.head(5).iterrows():
                     industry = row.get("industry", "未知")
                     first_time = row.get("first_time", "")
@@ -2037,14 +2074,6 @@ class DataFetcher:
                         f"行业：{industry}，首封：{first_time}\n"
                     )
                 summary += "\n"
-
-            if "industry" in df_zt.columns:
-                industry_stats = df_zt["industry"].value_counts().head(5)
-                summary += "## 涨停行业分布（摘要）\n"
-                summary += "- TOP5：" + "，".join(
-                    f"{ind}（{cnt} 家）" for ind, cnt in industry_stats.items()
-                )
-                summary += "；**完整分布与分行业涨停原因表**见上文程序简报。\n\n"
 
         try:
             snap_md, snap_meta = self.build_dragon_trader_snapshot(
