@@ -159,69 +159,6 @@ def truncate_news(
     return cleaned[:max_items]
 
 
-def _parse_summary_line_metrics(raw_md: str) -> dict[str, str]:
-    """从首条【摘要】解析 周期阶段/市场阶段、适宜度、置信度。"""
-    out: dict[str, str] = {}
-    for line in (raw_md or "").split("\n"):
-        s = line.strip()
-        if not s.startswith("【摘要】"):
-            continue
-        body = s.replace("【摘要】", "", 1).strip()
-        for part in re.split(r"[｜|]", body):
-            part = part.strip()
-            if "：" in part:
-                k, v = part.split("：", 1)
-            elif ":" in part:
-                k, v = part.split(":", 1)
-            else:
-                continue
-            k, v = k.strip(), v.strip()
-            if k and v:
-                out[k] = v
-        break
-    return out
-
-
-def _pill_color_stage(val: str) -> tuple[str, str]:
-    v = (val or "").strip()
-    if "主升" in v:
-        return "#14532d", "#dcfce7"
-    if "退潮" in v or "冰点" in v:
-        return "#475569", "#e2e8f0"
-    if "震荡" in v or "高位" in v:
-        return "#c2410c", "#ffedd5"
-    if "混沌" in v or "试错" in v:
-        return "#6b21a8", "#f3e8ff"
-    return "#1e3a5f", "#dbeafe"
-
-
-def _pill_color_triplet(
-    val: str,
-    *,
-    high: tuple[str, str],
-    mid: tuple[str, str],
-    low: tuple[str, str],
-) -> tuple[str, str]:
-    v = (val or "").strip()
-    if "高" in v:
-        return high
-    if "中" in v:
-        return mid
-    if "低" in v:
-        return low
-    return "#475569", "#f1f5f9"
-
-
-def _build_metric_pill(label: str, value: str, fg: str, bg: str) -> str:
-    esc_l = html.escape(label)
-    esc_v = html.escape(value or "—")
-    return (
-        '<span style="display:inline-block;margin:4px 6px 4px 0;padding:6px 12px;border-radius:999px;'
-        f'font-size:12px;font-weight:600;color:{fg};background:{bg};">'
-        f"{esc_l} \u00b7 {esc_v}</span>"
-    )
-
-
 def build_kpi_card_html(kpi: dict[str, Any]) -> str:
     """数据 KPI：涨停/跌停/炸板率/溢价 2×2 网格。"""
     if not kpi:
@@ -268,61 +205,8 @@ def build_kpi_card_html(kpi: dict[str, Any]) -> str:
     )
 
 
-def build_summary_metrics_card_html(
-    raw_md: str,
-    extra_vars: Optional[dict[str, Any]] = None,
-) -> str:
-    """摘要条目的四象限标签卡（阶段 / 适宜度 / 置信度 / 建议仓位）。"""
-    ev = extra_vars or {}
-    m = _parse_summary_line_metrics(raw_md)
-    kpi = ev.get("email_kpi") or {}
-    if not m and not kpi:
-        return ""
-    stage = m.get("周期阶段") or m.get("市场阶段") or "—"
-    fit = m.get("适宜度") or "—"
-    conf = m.get("置信度") or "—"
-    pos = (kpi.get("position_suggestion") or "").strip() or "—"
-
-    fg_s, bg_s = _pill_color_stage(stage)
-    fg_f, bg_f = _pill_color_triplet(
-        fit,
-        high=("#14532d", "#dcfce7"),
-        mid=("#c2410c", "#ffedd5"),
-        low=("#475569", "#e2e8f0"),
-    )
-    fg_c, bg_c = _pill_color_triplet(
-        conf,
-        high=("#14532d", "#dcfce7"),
-        mid=("#a16207", "#fef9c3"),
-        low=("#991b1b", "#fee2e2"),
-    )
-
-    pills = (
-        _build_metric_pill("周期阶段", stage, fg_s, bg_s)
-        + _build_metric_pill("适宜度", fit, fg_f[0], fg_f[1])
-        + _build_metric_pill("置信度", conf, fg_c[0], bg_c[1])
-        + _build_metric_pill("建议仓位", pos, "#1e3a5f", "#e0e7ff")
-    )
-    warn_row = ""
-    if "低" in conf:
-        warn_row = (
-            '<div style="margin-top:10px;font-size:12px;color:#b45309;">'
-            '<span aria-hidden="true">⚠️</span> 置信度偏低，请谨慎参考模型结论。</div>'
-        )
-
-    return (
-        '<div style="margin:0 0 18px;padding:16px 18px;border-radius:12px;border-left:5px solid #1e3a5f;'
-        'background:linear-gradient(135deg,#eef2ff 0%,#f8fafc 100%);border:1px solid #c7d2fe;">'
-        '<div style="font-size:11px;font-weight:700;color:#3730a3;letter-spacing:0.06em;margin-bottom:10px;">'
-        "核心摘要 · EXECUTIVE SUMMARY</div>"
-        f'<div style="line-height:1.6;">{pills}</div>'
-        f"{warn_row}"
-        "</div>"
-    )
-
-
 def strip_first_summary_line(md: str) -> str:
-    """去掉正文里首条【摘要】行，避免与邮件顶部「核心摘要」框重复。"""
+    """去掉正文里首条【摘要】行（若需与页头模块去重时由调用方使用）。"""
     lines = (md or "").split("\n")
     i = 0
     while i < len(lines) and not lines[i].strip():
@@ -352,7 +236,7 @@ def build_email_content_prefix(
     extra_vars: Optional[dict[str, Any]] = None,
 ) -> str:
     """
-    在 Markdown 转 HTML 正文前追加：报告主标题区、【摘要】高亮、报告说明段。
+    在 Markdown 转 HTML 正文前追加：报告主标题区、程序 KPI 卡、连板梯队模块、报告说明段。
     使系统邮件信息层级更接近「摘要报表」原型，而非裸 Markdown。
     """
     ev = extra_vars or {}
@@ -376,9 +260,6 @@ def build_email_content_prefix(
     kpi_html = build_kpi_card_html(ev.get("email_kpi") or {})
     if kpi_html:
         parts.append(kpi_html)
-    summ_html = build_summary_metrics_card_html(raw_md, ev)
-    if summ_html:
-        parts.append(summ_html)
 
     ladder_html = build_ladder_distribution_email_html(ev.get("email_dragon_meta"))
     if ladder_html:

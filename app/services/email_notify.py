@@ -21,7 +21,6 @@ from app.utils.email_template import (
     render_simulated_trade_email,
     should_skip_rich_email_prefix,
     simulated_trade_plain_text,
-    strip_first_summary_line,
 )
 
 # 单封正文上限（字符），避免部分 SMTP 拒信
@@ -239,8 +238,7 @@ def send_report_email(
     if not html_document and not html_fragment and use_template:
         ev_mail = dict(ev)
         content_prefix_html = build_email_content_prefix(raw_body, ev_mail)
-        if content_prefix_html and "EXECUTIVE SUMMARY" in content_prefix_html:
-            md_src = strip_first_summary_line(raw_body)
+        # 已不再在页头渲染「核心摘要」卡；正文保留首行【摘要】，不再默认剔除。
 
     # 纯文本部分
     if raw_body.strip():
