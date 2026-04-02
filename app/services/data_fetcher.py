@@ -1032,7 +1032,7 @@ class DataFetcher:
         if not hist_rows:
             return ""
         lines = [
-            "\n### 近5交易日对照（程序口径）\n",
+            "\n#### 近5交易日对照（程序口径）\n",
             "> 涨跌家数：仅**复盘当日**为全 A 快照；历史日期为「—」（接口无当日收盘快照）。\n\n",
             "| 日期 | 涨停 | 跌停 | 上涨 | 下跌 | ≥2连板 | 情绪 |\n",
             "|------|------|------|------|------|--------|------|\n",
@@ -1058,24 +1058,21 @@ class DataFetcher:
         return "".join(lines)
 
     def _index_snapshot_markdown(self) -> str:
-        """上证 / 深证 / 创业板指 等快照（东财指数列表，失败则返回说明）。"""
-        lines: list[str] = [
-            "\n### 主要指数（当日快照）\n",
-        ]
+        """上证 / 深证 / 创业板指 等快照（东财指数列表，失败则返回说明）。不含章节标题，由 build_professional_report_preface 注入。"""
         try:
             df = self.fetch_with_retry(ak.stock_zh_index_spot_em)
         except Exception as e:
             _log.warning("stock_zh_index_spot_em 失败: %s", e)
-            return lines[0] + f"- 指数快照获取失败：{e!s}\n\n"
+            return f"- 指数快照获取失败：{e!s}\n\n"
 
         if df is None or df.empty:
-            return lines[0] + "- 指数快照为空。\n\n"
+            return "- 指数快照为空。\n\n"
 
         name_col = next((c for c in df.columns if str(c) in ("名称", "name")), None)
         pct_col = next((c for c in df.columns if "涨跌幅" in str(c)), None)
         code_col = next((c for c in df.columns if str(c).strip() == "代码"), None)
         if not name_col or not pct_col:
-            return lines[0] + "- 指数表结构异常，已跳过。\n\n"
+            return "- 指数表结构异常，已跳过。\n\n"
 
         want_codes = {"000001", "399001", "399006"}
         sub = pd.DataFrame()
@@ -1093,7 +1090,9 @@ class DataFetcher:
         if sub.empty:
             sub = df.head(5)
 
-        lines.append("| 指数 | 涨跌幅（%） |\n|------|------------|\n")
+        lines: list[str] = [
+            "| 指数 | 涨跌幅（%） |\n|------|------------|\n",
+        ]
         for _, row in sub.head(12).iterrows():
             nm = str(row.get(name_col, "") or "").strip()[:12]
             try:
@@ -1119,7 +1118,7 @@ class DataFetcher:
         vc = df_zt["lb"].value_counts().sort_index()
         total = max(1, len(df_zt))
         lines = [
-            "\n### 连板分布（涨停池内）\n\n",
+            "\n#### 连板分布（涨停池内）\n\n",
             "| 连板数 | 家数 | 占涨停池 |\n",
             "|--------|------|----------|\n",
         ]
@@ -1133,7 +1132,7 @@ class DataFetcher:
         """按连板数从高到低，每档一张明细表（图二式）。"""
         if df_zt is None or df_zt.empty or "lb" not in df_zt.columns:
             return ""
-        lines: list[str] = ["\n### 涨停梯队明细（按连板数分组）\n\n"]
+        lines: list[str] = ["\n#### 涨停梯队明细（按连板数分组）\n\n"]
         lbs = sorted({int(x) for x in df_zt["lb"].dropna().tolist()}, reverse=True)
         for lb in lbs:
             sub = df_zt[df_zt["lb"] == lb].copy()
@@ -1141,7 +1140,7 @@ class DataFetcher:
                 continue
             if "first_time" in sub.columns:
                 sub = sub.sort_values("first_time", na_position="last")
-            lines.append(f"#### {lb} 连板（{len(sub)} 只）\n\n")
+            lines.append(f"##### {lb} 连板（{len(sub)} 只）\n\n")
             lines.append(
                 "| 代码 | 名称 | 行业 | 连板 | 涨停原因 | 涨跌幅% |\n"
                 "|------|------|------|------|----------|--------|\n"
@@ -1172,7 +1171,7 @@ class DataFetcher:
         vc = df_zt["industry"].value_counts().head(top_n)
         total = len(df_zt)
         lines = [
-            "\n### 行业涨停分布（TOP 行业）\n\n",
+            "\n#### 行业涨停分布（TOP 行业）\n\n",
             "| 行业 | 涨停家数 | 占涨停池比例 |\n",
             "|------|----------|-------------|\n",
         ]
@@ -1197,7 +1196,7 @@ class DataFetcher:
         vc = df_zt["industry"].value_counts().head(top_industries)
         total = len(df_zt)
         lines = [
-            "\n### 主线行业·涨停明细（程序按行业汇总）\n\n",
+            "\n#### 分行业涨停明细（程序按行业汇总）\n\n",
             "> 按当日涨停池「所属行业」聚合，与东财板块资金流命名可能略有差异；"
             "每行业至多列 **{0}** 只（按连板降序、首封升序）。\n\n".format(per_sector),
         ]
@@ -1217,7 +1216,7 @@ class DataFetcher:
             if sort_cols:
                 sub = sub.sort_values(sort_cols, ascending=asc)
             sub = sub.head(per_sector)
-            lines.append(f"#### {ind}（{cnt} 只，占涨停池 {pct}%）\n\n")
+            lines.append(f"##### {ind}（{cnt} 只，占涨停池 {pct}%）\n\n")
             lines.append(
                 "| 代码 | 名称 | 连板 | 涨停原因 | 涨跌幅% |\n"
                 "|------|------|------|----------|--------|\n"
@@ -1256,7 +1255,7 @@ class DataFetcher:
         df_zt: Optional[pd.DataFrame] = None,
     ) -> str:
         """
-        图二风格：报告顶部 KPI + 涨停梯队/行业明细表 + 情绪概览表 + 涨跌分布 + 指数快照。
+        图二式纵向结构：一 KPI → 二 指数 → 三 情绪与广度 → 四 题材/行业涨停 → 五 连板梯队。
         与正文「基础数据」衔接，供模型写盘面综述时引用。
         """
         ds = str(date)[:8]
@@ -1298,7 +1297,10 @@ class DataFetcher:
 
         lines: list[str] = [
             f"## 【程序生成·A股收盘智能复盘简报】（{ds_fmt}）\n",
+            "> **图二式结构（程序块顺序）**：一、核心 KPI → 二、主要指数 → 三、情绪与广度 → "
+            "四、题材与行业涨停 → 五、涨停梯队与接力。\n"
             "> 以下为程序据公开行情快照汇总，**供全文引用**；若与下文「基础数据」不一致，以本节 KPI 与表格为准。\n\n",
+            "### 程序｜一、核心 KPI 与市场标签\n\n",
             "| 项目 | 内容 |\n",
             "|------|------|\n",
             "| 涨跌停 | 涨停 **{0}** 家 / 跌停 **{1}** 家 |\n".format(zt_count, dt_count),
@@ -1332,18 +1334,24 @@ class DataFetcher:
         lines.append(f"| 情绪温度 | **{sentiment_temp}°C** · 市场阶段：**{market_phase}** |\n")
         lines.append(f"| 情绪标签（程序） | {tags} |\n\n")
 
-        if df_zt is not None and not df_zt.empty:
-            lines.append(self._format_zt_lb_distribution_markdown(df_zt))
-            lines.append(self._format_zt_tier_detail_tables_markdown(df_zt))
-            lines.append(self._format_zt_industry_top_table_markdown(df_zt))
-            lines.append(self._format_zt_industry_detail_blocks_markdown(df_zt))
+        lines.append("### 程序｜二、主要指数（当日快照）\n\n")
+        lines.append(self._index_snapshot_markdown())
 
-        lines.append("### 情绪概览\n")
-        lines.append(self._five_day_market_table_markdown(date, trade_days, up_n, down_n))
-        lines.append("### 涨跌分布（全 A）\n")
+        lines.append("### 程序｜三、情绪与广度（近5日 + 涨跌分布）\n")
+        five_d = self._five_day_market_table_markdown(date, trade_days, up_n, down_n)
+        lines.append(five_d if five_d else "\n- 近5交易日对照：数据不足。\n\n")
+        lines.append("\n#### 涨跌分布（全 A）\n\n")
         dist = self._spot_price_distribution_markdown()
         lines.append(dist if dist else "- 分布表暂不可用。\n\n")
-        lines.append(self._index_snapshot_markdown())
+
+        if df_zt is not None and not df_zt.empty:
+            lines.append("### 程序｜四、题材与行业·涨停结构\n")
+            lines.append(self._format_zt_industry_top_table_markdown(df_zt))
+            lines.append(self._format_zt_industry_detail_blocks_markdown(df_zt))
+            lines.append("### 程序｜五、涨停梯队与接力\n")
+            lines.append(self._format_zt_lb_distribution_markdown(df_zt))
+            lines.append(self._format_zt_tier_detail_tables_markdown(df_zt))
+
         lines.append("---\n\n")
         return "".join(lines)
 
