@@ -912,6 +912,271 @@ class DataFetcher:
         except Exception:
             return None, None
 
+    def _spot_turnover_rise_rate_flat(self) -> tuple[Optional[float], Optional[float], Optional[int]]:
+        """
+        全 A 成交额合计（亿元）与上涨家数占比（%）。
+        东财 spot 成交额列多为元，合计后 /1e8；失败返回 (None, None, None)。
+        """
+        try:
+            df = self.get_stock_zh_a_spot_em_cached()
+            if df is None or df.empty or "涨跌幅" not in df.columns:
+                return None, None, None
+            s = pd.to_numeric(df["涨跌幅"], errors="coerce")
+            up = int((s > 0).sum())
+            down = int((s < 0).sum())
+            flat = int((s == 0).sum())
+            denom = up + down + flat
+            rise_pct = round(up / denom * 100, 2) if denom else None
+            amt_col = next((c for c in df.columns if "成交额" in str(c)), None)
+            turnover_yi = None
+            if amt_col:
+                total = pd.to_numeric(df[amt_col], errors="coerce").sum()
+                if total is not None and not (pd.isna(total)):
+                    turnover_yi = float(total) / 1e8
+            return turnover_yi, rise_pct, flat
+        except Exception:
+            return None, None, None
+
+    def _spot_price_distribution_markdown(self) -> str:
+        """全 A 涨跌幅区间分布（占当日有涨跌幅样本的比例）。"""
+        try:
+            df = self.get_stock_zh_a_spot_em_cached()
+            if df is None or df.empty or "涨跌幅" not in df.columns:
+                return ""
+            s = pd.to_numeric(df["涨跌幅"], errors="coerce").dropna()
+            n = len(s)
+            if n <= 0:
+                return ""
+
+            def pct(cond) -> float:
+                return round(float(cond.sum()) / n * 100, 2)
+
+            rows = [
+                (">7%", pct(s > 7)),
+                ("5%~7%", pct((s > 5) & (s <= 7))),
+                ("2%~5%", pct((s > 2) & (s <= 5))),
+                ("0%~2%", pct((s > 0) & (s <= 2))),
+                ("0%", pct(s == 0)),
+                ("0%~-2%", pct((s < 0) & (s >= -2))),
+                ("-2%~-5%", pct((s < -2) & (s >= -5))),
+                ("<-5%", pct(s < -5)),
+            ]
+            lines = [
+                "\n| 涨跌幅区间 | 家数占比（%） |\n",
+                "|------------|---------------|\n",
+            ]
+            for label, p in rows:
+                lines.append(f"| {label} | {p} |\n")
+            lines.append("\n")
+            return "".join(lines)
+        except Exception:
+            return ""
+
+    def _sentiment_mood_label(self, zt: int, dt: int, multi_ge2: int) -> str:
+        """近 5 日表「情绪」列：程序口径简标签。"""
+        if dt >= 40 and zt < 20:
+            return "低迷"
+        if zt >= 50 and dt <= 8:
+            return "偏强"
+        if zt >= 35 and dt <= 15:
+            return "回暖"
+        if dt >= 25:
+            return "承压"
+        if multi_ge2 >= 25:
+            return "接力活跃"
+        return "中性"
+
+    def _sentiment_tags_line(
+        self,
+        *,
+        zt_count: int,
+        dt_count: int,
+        zb_count: int,
+        zhaban_rate: float,
+        turnover_yi: Optional[float],
+        rise_pct: Optional[float],
+    ) -> str:
+        """短标签（与图二「情绪标签」风格一致，可多条）。"""
+        tags: list[str] = []
+        if rise_pct is not None:
+            if rise_pct >= 55:
+                tags.append("普涨")
+            elif rise_pct <= 35:
+                tags.append("涨少跌多")
+        if zt_count >= 40:
+            tags.append("涨停活跃")
+        elif zt_count <= 15:
+            tags.append("涨停偏少")
+        if dt_count >= 15:
+            tags.append("跌停较多")
+        if zhaban_rate >= 35:
+            tags.append("分歧加大")
+        if turnover_yi is not None and rise_pct is not None:
+            if turnover_yi < 0.85 and rise_pct >= 50:
+                tags.append("缩量上涨")
+            elif turnover_yi > 1.3 and rise_pct is not None and rise_pct < 45:
+                tags.append("放量整理")
+        if not tags:
+            tags.append("情绪中性")
+        return "、".join(tags[:6])
+
+    def _five_day_market_table_markdown(
+        self,
+        date: str,
+        trade_days: list[str],
+        up_n: Optional[int],
+        down_n: Optional[int],
+    ) -> str:
+        """近 5 交易日：涨停/跌停/涨跌家数（仅当日有快照）/连板/情绪。"""
+        hist_rows, _ = self.compute_ladder_history_5d(date, trade_days)
+        if not hist_rows:
+            return ""
+        lines = [
+            "\n### 近5交易日对照（程序口径）\n",
+            "> 涨跌家数：仅**复盘当日**为全 A 快照；历史日期为「—」（接口无当日收盘快照）。\n\n",
+            "| 日期 | 涨停 | 跌停 | 上涨 | 下跌 | ≥2连板 | 情绪 |\n",
+            "|------|------|------|------|------|--------|------|\n",
+        ]
+        for r in hist_rows:
+            d = str(r.get("date", ""))
+            zt = int(r.get("total_zt", 0) or 0)
+            multi = int(r.get("multi_board_sum", 0) or 0)
+            try:
+                df_dt = self.get_dt_pool(d)
+                dt_n = len(df_dt) if df_dt is not None else 0
+            except Exception:
+                dt_n = 0
+            mood = self._sentiment_mood_label(zt, dt_n, multi)
+            if d == str(date)[:8] and up_n is not None and down_n is not None:
+                uu, dd = str(up_n), str(down_n)
+            else:
+                uu, dd = "—", "—"
+            lines.append(
+                f"| {d} | {zt} | {dt_n} | {uu} | {dd} | {multi} | {mood} |\n"
+            )
+        lines.append("\n")
+        return "".join(lines)
+
+    def _index_snapshot_markdown(self) -> str:
+        """上证 / 深证 / 创业板指 等快照（东财指数列表，失败则返回说明）。"""
+        lines: list[str] = [
+            "\n### 主要指数（当日快照）\n",
+        ]
+        try:
+            df = self.fetch_with_retry(ak.stock_zh_index_spot_em)
+        except Exception as e:
+            _log.warning("stock_zh_index_spot_em 失败: %s", e)
+            return lines[0] + f"- 指数快照获取失败：{e!s}\n\n"
+
+        if df is None or df.empty:
+            return lines[0] + "- 指数快照为空。\n\n"
+
+        name_col = next((c for c in df.columns if str(c) in ("名称", "name")), None)
+        pct_col = next((c for c in df.columns if "涨跌幅" in str(c)), None)
+        code_col = next((c for c in df.columns if str(c).strip() == "代码"), None)
+        if not name_col or not pct_col:
+            return lines[0] + "- 指数表结构异常，已跳过。\n\n"
+
+        want_codes = {"000001", "399001", "399006"}
+        sub = pd.DataFrame()
+        if code_col:
+            norm = (
+                df[code_col]
+                .astype(str)
+                .str.replace(r"[^0-9]", "", regex=True)
+                .str[-6:]
+            )
+            sub = df[norm.isin(want_codes)]
+        if sub.empty:
+            want = ("上证指数", "深证成指", "创业板指")
+            sub = df[df[name_col].astype(str).str.contains("|".join(want), regex=True)]
+        if sub.empty:
+            sub = df.head(5)
+
+        lines.append("| 指数 | 涨跌幅（%） |\n|------|------------|\n")
+        for _, row in sub.head(12).iterrows():
+            nm = str(row.get(name_col, "") or "").strip()[:12]
+            try:
+                pc = float(row[pct_col])
+            except Exception:
+                pc = row.get(pct_col)
+            lines.append(f"| {nm} | {pc} |\n")
+        lines.append("\n")
+        return "".join(lines)
+
+    def build_professional_report_preface(
+        self,
+        date: str,
+        trade_days: list[str],
+        *,
+        zt_count: int,
+        dt_count: int,
+        zb_count: int,
+        zhaban_rate: float,
+        up_n: Optional[int],
+        down_n: Optional[int],
+        north_money: float,
+        north_status: str,
+        sentiment_temp: int,
+        market_phase: str,
+    ) -> str:
+        """
+        图二风格：报告顶部 KPI + 情绪概览表 + 涨跌分布 + 指数快照。
+        与正文「基础数据」衔接，供模型写盘面综述时引用。
+        """
+        ds = str(date)[:8]
+        ds_fmt = f"{ds[:4]}-{ds[4:6]}-{ds[6:8]}"
+        turnover_yi, rise_pct, _flat = self._spot_turnover_rise_rate_flat()
+        tags = self._sentiment_tags_line(
+            zt_count=zt_count,
+            dt_count=dt_count,
+            zb_count=zb_count,
+            zhaban_rate=zhaban_rate,
+            turnover_yi=turnover_yi,
+            rise_pct=rise_pct,
+        )
+
+        north_s = ""
+        if north_status == "fetch_failed":
+            north_s = "北向：获取失败"
+        elif north_status == "empty_df":
+            north_s = "北向：空表"
+        elif north_status == "ok_zero":
+            north_s = "北向净流入：0 亿（口径）"
+        else:
+            north_s = f"北向净流入：{north_money} 亿"
+
+        lines: list[str] = [
+            f"## 【程序生成·A股收盘智能复盘简报】（{ds_fmt}）\n",
+            "> 以下为程序据公开行情快照汇总，**供全文引用**；若与下文「基础数据」不一致，以本节 KPI 与表格为准。\n\n",
+            "| 项目 | 内容 |\n",
+            "|------|------|\n",
+            "| 涨跌停 | 涨停 **{0}** 家 / 跌停 **{1}** 家 |\n".format(zt_count, dt_count),
+        ]
+        if rise_pct is not None:
+            lines.append(f"| 上涨率 | **{rise_pct}%**（全 A 快照） |\n")
+        if turnover_yi is not None:
+            if turnover_yi >= 10000:
+                lines.append(
+                    f"| 成交额（估） | **{round(turnover_yi / 10000, 2)} 万亿**（全 A 成交额合计） |\n"
+                )
+            else:
+                lines.append(
+                    f"| 成交额（估） | **{round(turnover_yi, 2)} 亿**（全 A 成交额合计） |\n"
+                )
+        lines.append(f"| 北向资金 | {north_s} |\n")
+        lines.append(f"| 情绪温度 | **{sentiment_temp}°C** · 市场阶段：**{market_phase}** |\n")
+        lines.append(f"| 情绪标签（程序） | {tags} |\n\n")
+
+        lines.append("### 情绪概览\n")
+        lines.append(self._five_day_market_table_markdown(date, trade_days, up_n, down_n))
+        lines.append("### 涨跌分布（全 A）\n")
+        dist = self._spot_price_distribution_markdown()
+        lines.append(dist if dist else "- 分布表暂不可用。\n\n")
+        lines.append(self._index_snapshot_markdown())
+        lines.append("---\n\n")
+        return "".join(lines)
+
     def compute_ladder_history_5d(
         self, date: str, trade_days: list[str]
     ) -> tuple[list[dict], str]:
@@ -1483,6 +1748,21 @@ class DataFetcher:
             self._last_sentiment_score = None
             self._last_sentiment_markdown = ""
 
+        summary += self.build_professional_report_preface(
+            date,
+            trade_days,
+            zt_count=zt_count,
+            dt_count=dt_count,
+            zb_count=zb_count,
+            zhaban_rate=zhaban_rate,
+            up_n=up_n,
+            down_n=down_n,
+            north_money=north_money,
+            north_status=north_status,
+            sentiment_temp=sentiment_temp,
+            market_phase=market_phase,
+        )
+
         summary += f"## 基础数据\n"
         if up_n is not None and down_n is not None:
             summary += f"- 涨跌家数：上涨约 **{up_n}** 家，下跌约 **{down_n}** 家\n"
@@ -1645,6 +1925,7 @@ class DataFetcher:
         except Exception as e:
             summary += f"\n## 分时成交探测\n- 跳过：{e!s}\n\n"
 
+        _ty, _rp, _ = self._spot_turnover_rise_rate_flat()
         self._last_email_kpi = {
             "zt_count": int(zt_count),
             "dt_count": int(dt_count),
@@ -1653,5 +1934,7 @@ class DataFetcher:
             "premium": float(premium) if premium != -99 else None,
             "premium_note": str(premium_note),
             "position_suggestion": str(position_suggestion),
+            "turnover_yi_est": _ty,
+            "rise_rate_pct": _rp,
         }
         return summary, date  # 返回可能调整后的日期

@@ -30,6 +30,8 @@ MAX_LOG_ENTRIES = 200
 MODE_NAME = "次日竞价半路模式"
 
 _DRAGON_HEADINGS = (
+    "盘面综述",
+    "情绪与数据解读",
     "周期定性",
     "情绪数据量化",
     "核心股聚焦",
