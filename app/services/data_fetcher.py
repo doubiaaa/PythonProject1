@@ -24,6 +24,7 @@ from app.utils.logger import get_logger
 
 # 板块接口为「今日」行业资金流，与复盘日无关；缓存键勿绑定 date，避免误判
 SECTOR_LIVE_CACHE_KEY = "sector_fund_flow_rank_live"
+CONCEPT_FLOW_CACHE_KEY = "sector_fund_flow_concept_live"
 # 昨日涨停溢价：超过该数量则走全市场 spot，避免过多单股请求
 YEST_PREMIUM_HIST_MAX_CODES = 100
 # 同一请求内可能多次拉全市场行情，短 TTL 复用
@@ -664,6 +665,37 @@ class DataFetcher:
             self._set_cache(cache_key, pd.DataFrame())
             return pd.DataFrame()
 
+    def _parse_fund_flow_rank_frame(self, df: pd.DataFrame, top_n: int) -> pd.DataFrame:
+        """解析东财 stock_sector_fund_flow_rank 返回表，统一为 sector/pct/money。"""
+        if df is None or df.empty:
+            return pd.DataFrame()
+        if all(col in df.columns for col in ["名称", "今日涨跌幅", "今日主力净流入-净额"]):
+            df_result = df[["名称", "今日涨跌幅", "今日主力净流入-净额"]].rename(
+                columns={
+                    "名称": "sector",
+                    "今日涨跌幅": "pct",
+                    "今日主力净流入-净额": "money",
+                }
+            )
+            df_result["pct"] = df_result["pct"].astype(str).str.replace("%", "").astype(float)
+            df_result["money"] = df_result["money"].apply(self._convert_money_to_float)
+            return df_result.sort_values("money", ascending=False).head(top_n)
+        _log.warning("资金流表标准列名不存在，可用列: %s", df.columns.tolist())
+        name_col = next((col for col in df.columns if "名称" in col), None)
+        pct_col = next((col for col in df.columns if "涨跌幅" in col), None)
+        money_col = next(
+            (col for col in df.columns if "主力净流入" in col and "净额" in col),
+            None,
+        )
+        if not (name_col and pct_col and money_col):
+            return pd.DataFrame()
+        df_result = df[[name_col, pct_col, money_col]].rename(
+            columns={name_col: "sector", pct_col: "pct", money_col: "money"}
+        )
+        df_result["pct"] = df_result["pct"].astype(str).str.replace("%", "").astype(float)
+        df_result["money"] = df_result["money"].apply(self._convert_money_to_float)
+        return df_result.sort_values("money", ascending=False).head(top_n)
+
     def get_sector_rank(self, date):
         """
         获取板块资金流向排名（成交额、涨幅）。
@@ -687,48 +719,12 @@ class DataFetcher:
                 self._set_cache(cache_key, pd.DataFrame())
                 return pd.DataFrame()
 
-            # 根据实际返回的列名进行调整（基于日志）
-            # 常见列名：'名称', '今日涨跌幅', '今日主力净流入-净额'
-            if all(col in df.columns for col in ['名称', '今日涨跌幅', '今日主力净流入-净额']):
-                df_result = df[['名称', '今日涨跌幅', '今日主力净流入-净额']].rename(
-                    columns={
-                        '名称': 'sector',
-                        '今日涨跌幅': 'pct',
-                        '今日主力净流入-净额': 'money'
-                    }
-                )
-
-                # 转换数据格式：涨跌幅去除%，并转为浮点数
-                df_result['pct'] = df_result['pct'].astype(str).str.replace('%', '').astype(float)
-
-                # 转换主力净流入为亿元
-                df_result['money'] = df_result['money'].apply(self._convert_money_to_float)
-
-                # 按净流入金额排序，取前5
-                df_result = df_result.sort_values('money', ascending=False).head(5)
-
+            df_result = self._parse_fund_flow_rank_frame(df, 5)
+            if not df_result.empty:
                 self._set_cache(cache_key, df_result)
                 return df_result
-            else:
-                _log.warning("标准列名不存在，可用列: %s", df.columns.tolist())
-                # 尝试模糊匹配（简单处理）
-                # 查找包含'名称'、'涨跌幅'、'主力净流入'的列
-                name_col = next((col for col in df.columns if '名称' in col), None)
-                pct_col = next((col for col in df.columns if '涨跌幅' in col), None)
-                money_col = next((col for col in df.columns if '主力净流入' in col and '净额' in col), None)
-
-                if name_col and pct_col and money_col:
-                    df_result = df[[name_col, pct_col, money_col]].rename(
-                        columns={name_col: 'sector', pct_col: 'pct', money_col: 'money'}
-                    )
-                    df_result['pct'] = df_result['pct'].astype(str).str.replace('%', '').astype(float)
-                    df_result['money'] = df_result['money'].apply(self._convert_money_to_float)
-                    df_result = df_result.sort_values('money', ascending=False).head(5)
-                    self._set_cache(cache_key, df_result)
-                    return df_result
-                else:
-                    self._set_cache(cache_key, pd.DataFrame())
-                    return pd.DataFrame()
+            self._set_cache(cache_key, pd.DataFrame())
+            return pd.DataFrame()
 
         except Exception as e:
             _log.warning("获取板块排名失败: %s", e)
@@ -761,6 +757,30 @@ class DataFetcher:
             except Exception as e2:
                 _log.warning("备用接口也失败: %s", e2)
 
+            self._set_cache(cache_key, pd.DataFrame())
+            return pd.DataFrame()
+
+    def get_concept_fund_flow_rank(self, top_n: int = 12) -> pd.DataFrame:
+        """
+        东财「概念资金流」今日排行（与复盘日非严格对齐），用于复盘长图式「题材强弱」块。
+        """
+        cache_key = CONCEPT_FLOW_CACHE_KEY
+        if self._is_cache_valid(cache_key):
+            return self._get_cache(cache_key)
+        try:
+            df = self.fetch_with_retry(
+                ak.stock_sector_fund_flow_rank,
+                indicator="今日",
+                sector_type="概念资金流",
+            )
+            if df is None or df.empty:
+                self._set_cache(cache_key, pd.DataFrame())
+                return pd.DataFrame()
+            df_result = self._parse_fund_flow_rank_frame(df, top_n)
+            self._set_cache(cache_key, df_result)
+            return df_result
+        except Exception as e:
+            _log.warning("概念资金流排名获取失败: %s", e)
             self._set_cache(cache_key, pd.DataFrame())
             return pd.DataFrame()
 
@@ -1373,9 +1393,19 @@ class DataFetcher:
         position_suggestion: str,
         df_zt: pd.DataFrame,
         df_zb: pd.DataFrame,
+        df_sector: Optional[pd.DataFrame] = None,
     ) -> str:
         """业务约定的六大目录（篇首程序块），见 `replay_catalog.build_six_section_catalog`。"""
         from app.services.replay_catalog import build_six_section_catalog
+
+        df_concept = pd.DataFrame()
+        try:
+            from app.utils.config import ConfigManager as _Cfg
+
+            if _Cfg().get("enable_replay_concept_fund_snapshot", True):
+                df_concept = self.get_concept_fund_flow_rank(top_n=12)
+        except Exception:
+            df_concept = pd.DataFrame()
 
         return build_six_section_catalog(
             self,
@@ -1394,6 +1424,8 @@ class DataFetcher:
             position_suggestion=position_suggestion,
             df_zt=df_zt,
             df_zb=df_zb,
+            df_sector=df_sector,
+            df_concept=df_concept,
         )
 
     def compute_ladder_history_5d(
@@ -1983,6 +2015,7 @@ class DataFetcher:
             position_suggestion=position_suggestion,
             df_zt=df_zt,
             df_zb=df_zb,
+            df_sector=df_sector,
         )
 
         summary += "## 基础数据\n"

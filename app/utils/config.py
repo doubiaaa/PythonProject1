@@ -90,6 +90,8 @@ DEFAULT_CONFIG = {
     "enable_simulated_trade_notification": False,
     # 复盘 Markdown 目录中「4. 龙虎榜数据」是否请求东财接口（关则可省多次外网调用）
     "enable_replay_lhb_catalog": True,
+    # 复盘目录是否拉取「概念资金流」TOP（与行业榜并列，偏题材向；多一次东财请求）
+    "enable_replay_concept_fund_snapshot": True,
     # 智谱对话模型名（如 glm-4-flash）；空则使用程序内置默认
     "zhipu_model_name": "",
     # 复盘断点：成功后写入 data/replay_status/；resume 为 True 时优先用缓存跳过数据拉取

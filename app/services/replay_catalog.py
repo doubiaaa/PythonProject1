@@ -156,6 +156,73 @@ def _lhb_yyb_md(fetcher: "DataFetcher") -> str:
     return "".join(lines)
 
 
+def _format_fund_flow_block(
+    df: pd.DataFrame, *, title: str, max_rows: int = 10
+) -> str:
+    """东财资金流排行 → Markdown 表（行业/概念并列展示）。"""
+    if df is None or df.empty:
+        return f"\n#### {title}\n\n- 暂无数据或接口未返回。\n\n"
+    lines = [
+        f"\n#### {title}\n\n",
+        "| 名称 | 涨跌幅% | 主力净流入（亿） |\n|------|--------|------------------|\n",
+    ]
+    for _, row in df.head(max_rows).iterrows():
+        nm = _md_cell(row.get("sector"), 14)
+        try:
+            pc = float(row.get("pct", 0))
+            pc_s = f"{pc:.2f}"
+        except Exception:
+            pc_s = _md_cell(row.get("pct"), 8)
+        try:
+            my = float(row.get("money", 0))
+            my_s = f"{my:.2f}"
+        except Exception:
+            my_s = _md_cell(row.get("money"), 10)
+        lines.append(f"| {nm} | {pc_s} | {my_s} |\n")
+    lines.append("\n")
+    return "".join(lines)
+
+
+def _sentiment_dashboard_block(
+    up_n: Optional[int],
+    down_n: Optional[int],
+    rise_pct: Optional[float],
+    zt_in_up_pct: Optional[float],
+    zhaban_rate: float,
+    seal_ok: Optional[float],
+    sentiment_temp: int,
+) -> str:
+    """对标复盘长图「环形/百分比」：用表格呈现可读性更好的情绪刻度。"""
+    lines = [
+        "\n#### 情绪仪表盘（程序估算）\n\n",
+        "| 维度 | 数值 | 说明 |\n|------|------|------|\n",
+    ]
+    if up_n is not None and down_n is not None and (up_n + down_n) > 0:
+        up_ratio = round(100.0 * up_n / (up_n + down_n), 2)
+        lines.append(
+            f"| 全 A 上涨家数占比 | **{up_ratio}%** | 涨家数 / (涨+跌)，反映广度 |\n"
+        )
+        if down_n > 0:
+            ud = round(up_n / down_n, 2)
+            lines.append(f"| 涨跌家数比 | **{ud} : 1** | 涨家 / 跌家 |\n")
+    if rise_pct is not None:
+        lines.append(f"| 全 A 上涨率（快照） | **{rise_pct}%** | 与东财 spot 口径一致 |\n")
+    if zt_in_up_pct is not None:
+        lines.append(
+            f"| 涨停家数 / 上涨家数 | **{zt_in_up_pct}%** | 情绪集中度参考 |\n"
+        )
+    lines.append(f"| 炸板率 | **{zhaban_rate}%** | 炸 / (涨停+炸) |\n")
+    if seal_ok is not None:
+        lines.append(f"| 封板成功率（估） | **{seal_ok}%** | 涨停 / (涨停+炸) |\n")
+    lines.append(
+        f"| 情绪温度（程序） | **{sentiment_temp}°C** | 与下文「情绪指数」一致 |\n"
+    )
+    lines.append(
+        "\n> 上述指标对应专业报告中「市场温度 / 涨跌结构」类环形图；邮件环境以表代图。\n\n"
+    )
+    return "".join(lines)
+
+
 def _nine_grid_markdown(sentiment_temp: int, market_phase: str) -> str:
     """简版情绪九宫格：温度分档 × 周期阶段。"""
     t = sentiment_temp
@@ -192,6 +259,8 @@ def build_six_section_catalog(
     position_suggestion: str,
     df_zt: pd.DataFrame,
     df_zb: pd.DataFrame,
+    df_sector: Optional[pd.DataFrame] = None,
+    df_concept: Optional[pd.DataFrame] = None,
 ) -> str:
     ds = str(date)[:8]
     ds_fmt = f"{ds[:4]}-{ds[4:6]}-{ds[6:8]}"
@@ -236,10 +305,34 @@ def build_six_section_catalog(
     )
 
     idx_df = _index_spot_df(fetcher)
+    if df_sector is None:
+        df_sector = pd.DataFrame()
+    if df_concept is None:
+        df_concept = pd.DataFrame()
 
     lines: list[str] = [
         f"## 【程序生成】复盘数据目录（{ds_fmt}）\n",
-        "> 以下为固定 **六大块** 结构；与历史「简报」相比，目录与子节名称与业务对齐。\n\n",
+        "> 以下为固定 **六大块** 结构；篇首增加 **盘面总览**，对齐专业复盘长图中的大盘概览、情绪刻度与分类强弱表（以 **Markdown 表格** 呈现，便于邮件与推送）。\n\n",
+        "---\n\n",
+        "## 0. 盘面总览（结构化速览）\n\n",
+        "> **说明**：参考专业复盘中的 K 线、分时、环形图等，程序侧以 **可审计数据表** 为主；"
+        "精细图请使用行情终端。\n\n",
+        _sentiment_dashboard_block(
+            up_n,
+            down_n,
+            rise_pct,
+            zt_in_up_pct,
+            zhaban_rate,
+            seal_ok,
+            sentiment_temp,
+        ),
+        _format_fund_flow_block(df_sector, title="行业 · 主力净流入 TOP（东财·今日）", max_rows=8),
+        _format_fund_flow_block(
+            df_concept, title="概念 · 主力净流入 TOP（东财·今日）", max_rows=12
+        ),
+        "#### 多维趋势提示\n\n",
+        "- **涨停家数 / 连板** 近 5 日轨迹见下文 **第 3 节** 与 **第 1.1 节**。\n",
+        "- **分档涨停、题材明细** 见 **第 2 节**；**指数点位** 见 **第 1.3 节**。\n\n",
         "---\n\n",
         "## 1. 复盘总结\n\n",
         "### 1.1 连板梯队\n\n",
