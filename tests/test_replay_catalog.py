@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import pandas as pd
+import pytest
 
 from app.services.replay_catalog import (
     _board_kind,
@@ -7,6 +8,10 @@ from app.services.replay_catalog import (
     _is_yizi_row,
     _format_fund_flow_block,
     _sentiment_dashboard_block,
+    _dash_date_yyyymmdd,
+    _monitor_window_end,
+    _sim_closed_trades_stats,
+    _max_drawdown_pct_from_series,
 )
 
 
@@ -31,6 +36,29 @@ def test_is_yizi_row():
 
 def test_format_fund_flow_block_empty():
     assert "暂无" in _format_fund_flow_block(pd.DataFrame(), title="测试", max_rows=5)
+
+
+def test_dash_date_yyyymmdd():
+    assert _dash_date_yyyymmdd("20260330") == "2026-03-30"
+
+
+def test_monitor_window_end():
+    days = ["20260325", "20260326", "20260327", "20260328", "20260330"]
+    assert _monitor_window_end("20260326", days, 1) == "20260326"
+    assert _monitor_window_end("20260326", days, 3) == "20260328"
+
+
+def test_sim_closed_trades_stats_fifo():
+    txs = [
+        {"date": "20260101", "symbol": "000001", "side": "buy", "shares": 100, "amount": 1000},
+        {"date": "20260102", "symbol": "000001", "side": "sell", "shares": 100, "amount": 1100},
+    ]
+    n, nw, gp, gl = _sim_closed_trades_stats(txs)
+    assert n == 1 and nw == 1 and gp == 100 and gl == 0
+
+
+def test_max_drawdown_pct():
+    assert _max_drawdown_pct_from_series([100.0, 110.0, 88.0]) == pytest.approx(20.0)
 
 
 def test_sentiment_dashboard_has_rows():

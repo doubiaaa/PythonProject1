@@ -5,7 +5,8 @@
 """
 from __future__ import annotations
 
-from typing import Optional, TYPE_CHECKING
+import os
+from typing import TYPE_CHECKING, Any, Optional
 
 import akshare as ak
 import pandas as pd
@@ -16,6 +17,8 @@ if TYPE_CHECKING:
     from app.services.data_fetcher import DataFetcher
 
 _log = get_logger(__name__)
+
+_CATALOG_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
 
 
 def _norm6(code: object) -> str:
@@ -239,6 +242,277 @@ def _nine_grid_markdown(sentiment_temp: int, market_phase: str) -> str:
         f"| **情绪温度** | {t}°C（{row}） | 程序阶段：{col} | 详见周期定性 |\n\n"
         "> 精细九宫格需自定义规则；此处为**扫读占位**，与正文「周期定性」一致即可。\n\n"
     )
+
+
+def _dash_date_yyyymmdd(yyyymmdd: str) -> str:
+    s = str(yyyymmdd)[:8]
+    if len(s) != 8 or not s.isdigit():
+        return s
+    return f"{s[:4]}-{s[4:6]}-{s[6:8]}"
+
+
+def _monitor_window_end(signal_date: str, trade_days: list[str], span: int) -> str:
+    """自 signal_date 起第 span 个交易日（含首日）的日期；无日历时退回原串。"""
+    span = max(1, int(span))
+    ds = str(signal_date)[:8]
+    day_list = sorted({str(d)[:8] for d in (trade_days or []) if str(d)[:8].isdigit()})
+    if not day_list:
+        return ds
+    start_idx = None
+    for i, d in enumerate(day_list):
+        if d >= ds:
+            start_idx = i
+            break
+    if start_idx is None:
+        start_idx = len(day_list) - 1
+    end_idx = min(start_idx + span - 1, len(day_list) - 1)
+    return day_list[end_idx]
+
+
+def _watchlist_program_pool_md(
+    trade_days: list[str],
+    ref_yyyymmdd: str,
+    *,
+    max_rows: int,
+    monitor_span: int,
+) -> str:
+    """程序龙头池持久化档案，对齐专业复盘「监控池」表意。"""
+    try:
+        from app.services.watchlist_store import load_all_records
+    except Exception as e:
+        return f"- 加载监控池模块失败：{_md_cell(str(e), 72)}\n\n"
+    recs = load_all_records()
+    if not recs:
+        return (
+            "- `data/watchlist_records.json` 尚无记录；龙头池随竞价/复盘写入后次日可见档案。\n\n"
+        )
+    ref = str(ref_yyyymmdd)[:8]
+    filtered = [r for r in recs if str(r.get("signal_date") or "")[:8] <= ref]
+    filtered.sort(
+        key=lambda x: (
+            str(x.get("signal_date") or ""),
+            str(x.get("code") or ""),
+        ),
+        reverse=True,
+    )
+    take = filtered[: max(1, int(max_rows))]
+    lines = [
+        "> **口径**：监控开始 =程序写入的 `signal_date`；监控结束 = 该日起 **连续 "
+        f"{monitor_span}** 个交易日（含首日）的末日，用于对照区间表现（与真实人工池可能不同）。\n\n",
+        "| 代码 | 名称 | 监控开始 | 监控结束 | 池内序 | 标签 | 板块 |\n",
+        "|------|------|----------|----------|--------|------|------|\n",
+    ]
+    for r in take:
+        sd = str(r.get("signal_date") or "")[:8]
+        ed = _monitor_window_end(sd, trade_days, monitor_span)
+        lines.append(
+            f"| {_md_cell(r.get('code'), 8)} | {_md_cell(r.get('name'), 10)} | "
+            f"{_dash_date_yyyymmdd(sd)} | {_dash_date_yyyymmdd(ed)} | "
+            f"{int(r.get('rank') or 0)} | {_md_cell(r.get('tag'), 10)} | "
+            f"{_md_cell(r.get('sector'), 12)} |\n"
+        )
+    lines.append("\n")
+    return "".join(lines)
+
+
+def _spot_five_day_leaderboard_md(fetcher: "DataFetcher", top_n: int) -> str:
+    """两市 A 股快照：按 5 日涨跌幅排序的 TOP N（东财列存在时）。"""
+    try:
+        from app.services.market_style_indices import _find_5d_column
+    except Exception:
+        _find_5d_column = None  # type: ignore
+
+    n = max(3, min(50, int(top_n)))
+    try:
+        df = fetcher.get_stock_zh_a_spot_em_cached()
+    except Exception as e:
+        return f"- 全市场行情获取失败：{_md_cell(str(e), 80)}\n\n"
+    if df is None or df.empty:
+        return "- 全市场行情为空。\n\n"
+    col5 = _find_5d_column(df) if _find_5d_column else None
+    code_c = next((c for c in df.columns if str(c).strip() == "代码"), None)
+    if not code_c:
+        code_c = next((c for c in df.columns if "代码" in str(c)), None)
+    name_c = next((c for c in df.columns if str(c).strip() == "名称"), None)
+    if not name_c:
+        name_c = next((c for c in df.columns if "名称" in str(c)), None)
+    pct1 = next((c for c in df.columns if str(c) == "涨跌幅"), None)
+    if not pct1:
+        pct1 = next((c for c in df.columns if "涨跌幅" in str(c)), None)
+    price_c = next(
+        (c for c in df.columns if str(c) in ("最新价", "现价")),
+        None,
+    )
+    if not col5 or not code_c or not name_c:
+        return (
+            "- 当前行情源无 **5 日涨跌幅** 列（如新浪备用源），本节跳过；可改用东财终端查看「5日涨幅榜」。\n\n"
+        )
+    work = df.copy()
+    work["_p5"] = pd.to_numeric(work[col5], errors="coerce")
+    work = work.dropna(subset=["_p5"])
+    work = work.sort_values("_p5", ascending=False).head(n)
+    lines = [
+        f"> 快照口径，**非**严格「自然五日区间」复盘；列 **{col5}** ·今日涨跌 **{pct1 or '—'}**。\n\n",
+        "| 排名 | 代码 | 名称 |5日涨跌幅% | 今日涨跌% | 最新价 | 备注 |\n",
+        "|------|------|------|------------|-----------|--------|------|\n",
+    ]
+    for i, (_, row) in enumerate(work.iterrows(), start=1):
+        c = row.get(code_c)
+        nm = row.get(name_c)
+        p5 = row.get("_p5")
+        p1v = float(row[pct1]) if pct1 and pd.notna(row.get(pct1)) else None
+        px = row.get(price_c) if price_c else None
+        note = _board_kind(c)
+        lines.append(
+            f"| {i} | {_md_cell(c, 8)} | {_md_cell(nm, 10)} | "
+            f"{float(p5):.2f} | "
+            f"{(f'{p1v:.2f}' if p1v is not None else '—')} | "
+            f"{(_md_cell(px, 10) if px is not None else '—')} | {note} |\n"
+        )
+    lines.append(
+        "\n- **题材归纳**请见正文「涨停原因 / 核心股」；程序表不替代资讯解读。\n\n"
+    )
+    return "".join(lines)
+
+
+def _max_drawdown_pct_from_series(values: list[float]) -> Optional[float]:
+    if len(values) < 2:
+        return None
+    peak = values[0]
+    max_dd = 0.0
+    for v in values:
+        if v > peak:
+            peak = v
+        if peak > 0:
+            dd = (peak - v) / peak * 100.0
+            if dd > max_dd:
+                max_dd = dd
+    return round(max_dd, 2)
+
+
+def _sim_closed_trades_stats(
+    transactions: list[dict],
+) -> tuple[int, int, float, float]:
+    """
+    FIFO 配对买卖；每笔 **卖出** 记为一次平仓。
+    返回 (平仓次数, 盈利次数, 毛利和, 毛亏损绝对值和)。
+    """
+    from collections import defaultdict, deque
+
+    lots: dict[str, deque] = defaultdict(deque)
+    n_closed = 0
+    n_win = 0
+    gross_profit = 0.0
+    gross_loss = 0.0
+    for tx in sorted(transactions, key=lambda x: str(x.get("date") or "")):
+        if not isinstance(tx, dict):
+            continue
+        sym = _norm6(tx.get("symbol"))
+        if not sym:
+            continue
+        side = str(tx.get("side") or "").lower()
+        if side == "buy":
+            sh = int(tx.get("shares") or 0)
+            amt = float(tx.get("amount") or 0)
+            if sh <= 0 or amt <= 0:
+                continue
+            lots[sym].append({"sh": sh, "amt": amt})
+        elif side == "sell":
+            sh_rem = int(tx.get("shares") or 0)
+            proceeds = float(tx.get("amount") or 0)
+            if sh_rem <= 0:
+                continue
+            cost_basis = 0.0
+            while sh_rem > 0 and lots[sym]:
+                lot = lots[sym][0]
+                take = min(sh_rem, lot["sh"])
+                cost_part = float(lot["amt"]) * (take / float(lot["sh"]))
+                cost_basis += cost_part
+                lot["sh"] -= take
+                lot["amt"] = float(lot["amt"]) - cost_part
+                sh_rem -= take
+                if lot["sh"] <= 0:
+                    lots[sym].popleft()
+            if sh_rem > 0:
+                continue
+            if cost_basis <= 0:
+                continue
+            pnl = proceeds - cost_basis
+            n_closed += 1
+            if pnl >= 0:
+                n_win += 1
+                gross_profit += pnl
+            else:
+                gross_loss += abs(pnl)
+    return n_closed, n_win, gross_profit, gross_loss
+
+
+def _sim_account_retrospective_md(account_path: str) -> str:
+    """读取模拟账户 JSON，输出与量化复盘相近的摘要指标。"""
+    import json
+    import os
+
+    if not account_path or not os.path.isfile(account_path):
+        return "- 未找到模拟账户状态文件（或路径为空）。\n\n"
+    try:
+        with open(account_path, "r", encoding="utf-8") as f:
+            state = json.load(f)
+    except Exception as e:
+        return f"- 读取模拟账户失败：{_md_cell(str(e), 72)}\n\n"
+    if not isinstance(state, dict):
+        return "- 状态文件格式异常。\n\n"
+    init_v = float(state.get("initial_capital") or 0)
+    total_v = float(state.get("total_value") or 0)
+    cash = float(state.get("cash") or 0)
+    holdings = state.get("holdings") or []
+    n_hold = len(holdings) if isinstance(holdings, list) else 0
+    pnl = total_v - init_v if init_v > 0 else 0.0
+    pnl_pct = round(100.0 * pnl / init_v, 2) if init_v > 0 else None
+    series = state.get("daily_series") or []
+    vals: list[float] = []
+    if isinstance(series, list):
+        for pt in series:
+            if isinstance(pt, dict) and pt.get("total_value") is not None:
+                try:
+                    vals.append(float(pt["total_value"]))
+                except Exception:
+                    continue
+    max_dd = _max_drawdown_pct_from_series(vals)
+    txs = state.get("transactions") or []
+    txs_list = txs if isinstance(txs, list) else []
+    n_closed, n_win, gp, gl = _sim_closed_trades_stats(
+        [t for t in txs_list if isinstance(t, dict)]
+    )
+    win_rate = round(100.0 * n_win / n_closed, 2) if n_closed > 0 else None
+    pf = round(gp / gl, 3) if gl > 1e-6 else None
+    lines = [
+        "| 项目 | 数值 |\n|------|------|\n",
+        f"| 初始资金 | {init_v:.2f} |\n",
+        f"| 总权益 | {total_v:.2f} |\n",
+        f"| 现金 | {cash:.2f} |\n",
+        f"| 持仓只数 | {n_hold} |\n",
+    ]
+    if pnl_pct is not None:
+        lines.append(f"| 总盈亏 | {pnl:.2f}（**{pnl_pct}%**） |\n")
+    else:
+        lines.append(f"| 总盈亏 | {pnl:.2f} |\n")
+    if max_dd is not None:
+        lines.append(f"| 最大回撤（权益序列估） | **{max_dd}%** |\n")
+    else:
+        lines.append("| 最大回撤 | 样本不足 |\n")
+    if n_closed > 0:
+        lines.append(f"| 平仓次数 | {n_closed} |\n")
+        if win_rate is not None:
+            lines.append(f"| 胜率（按卖出笔） | **{win_rate}%** |\n")
+        lines.append(f"| 毛利 / 毛亏 | {gp:.2f} / {gl:.2f} |\n")
+        if pf is not None:
+            lines.append(f"| 盈亏比（估） | **{pf}** |\n")
+    else:
+        lines.append("| 平仓统计 | 尚无卖出成交 |\n")
+    lines.append(
+        "\n> 与专业回测报告相比：此处为 **模拟盘快照**；细分到时段/品种请结合 `transactions` 与正文。\n\n"
+    )
+    return "".join(lines)
 
 
 def build_six_section_catalog(
@@ -556,28 +830,80 @@ def build_six_section_catalog(
     )
     lines.append("### 5.2 情绪九宫格（简版）\n\n")
     lines.append(_nine_grid_markdown(sentiment_temp, market_phase))
-    lines.append("### 5.3 监控池\n\n")
+    lines.append("### 5.3 程序龙头池档案（监控池）\n\n")
+    cm5: Optional[Any] = None
     try:
         from app.utils.config import ConfigManager
 
-        cm = ConfigManager()
-        raw = cm.get("concept_board_symbols") or []
+        cm5 = ConfigManager()
+    except Exception:
+        cm5 = None
+    if cm5 is None:
+        lines.append("- （读取配置失败。）\n\n")
+    else:
+        if bool(cm5.get("enable_replay_watchlist_snapshot", True)):
+            lines.append(
+                _watchlist_program_pool_md(
+                    trade_days,
+                    ds,
+                    max_rows=int(cm5.get("replay_watchlist_max_rows", 40)),
+                    monitor_span=int(cm5.get("replay_watchlist_monitor_span", 5)),
+                )
+            )
+        else:
+            lines.append(
+                "> 已按配置跳过龙头池档案（`enable_replay_watchlist_snapshot: false`）。\n\n"
+            )
+        raw = cm5.get("concept_board_symbols") or []
         if isinstance(raw, str):
             raw = [x.strip() for x in raw.replace("，", ",").split(",") if x.strip()]
         if raw:
             lines.append(
-                "- 配置的概念观察（`concept_board_symbols`）："
+                "- 另：配置的概念观察（`concept_board_symbols`）："
                 + "、".join(str(x) for x in raw[:8])
                 + "\n\n"
             )
         else:
             lines.append(
-                "- 未配置 `concept_board_symbols`；**龙头池**见下文竞价选股块。\n\n"
+                "- 未配置 `concept_board_symbols` 时，仅上表 **程序龙头池** 与正文竞价块为准。\n\n"
             )
-    except Exception:
-        lines.append("- （读取配置失败。）\n\n")
 
-    lines.append("### 5.4 三大抱团区间涨幅（宽基/风格快照）\n\n")
+    lines.append("### 5.4 两市 A 股五日涨幅榜（快照 TOP）\n\n")
+    if cm5 is not None and bool(cm5.get("enable_replay_spot_5d_leaderboard", True)):
+        lines.append(
+            _spot_five_day_leaderboard_md(
+                fetcher, int(cm5.get("replay_spot_5d_top_n", 19))
+            )
+        )
+    elif cm5 is not None:
+        lines.append(
+            "> 已按配置跳过五日涨幅榜（`enable_replay_spot_5d_leaderboard: false`）。\n\n"
+        )
+    else:
+        lines.append("- （配置不可用，跳过全 A 五日榜。）\n\n")
+
+    lines.append("### 5.5 模拟账户绩效快照\n\n")
+    if cm5 is not None and bool(cm5.get("enable_simulated_account", False)):
+        if bool(cm5.get("enable_replay_sim_account_summary", True)):
+            rel = str(cm5.get("simulated_account_path") or "data/simulated_account.json")
+            acc_path = (
+                rel
+                if os.path.isabs(rel)
+                else os.path.join(_CATALOG_ROOT, rel.replace("/", os.sep))
+            )
+            lines.append(_sim_account_retrospective_md(acc_path))
+        else:
+            lines.append(
+                "> 已按配置跳过模拟账户摘要（`enable_replay_sim_account_summary: false`）。\n\n"
+            )
+    elif cm5 is not None:
+        lines.append(
+            "- 模拟账户未启用（`enable_simulated_account: false`），本节跳过。\n\n"
+        )
+    else:
+        lines.append("- （配置不可用。）\n\n")
+
+    lines.append("### 5.6 三大抱团区间涨幅（宽基/风格快照）\n\n")
     hs300 = _index_pct_row(idx_df, ("沪深300", "沪深 300"))
     zz500 = _index_pct_row(idx_df, ("中证500", "中证 500"))
     cyb2 = _index_pct_row(idx_df, ("创业板", "创业板指"))
@@ -587,6 +913,12 @@ def build_six_section_catalog(
     if not any([hs300, zz500, cyb2]):
         lines.append("- 指数快照未匹配到上述宽基，请见 **1.3** 原始表。\n")
     lines.append("\n")
+
+    lines.append("#### 数据驱动的优化点（须正文落地）\n\n")
+    lines.append(
+        "> 对齐专业复盘「总结与优化」：**请结合本篇各表与涨停池**，在正文收束处列出 "
+        "**2～5 条可执行项**（如规避弱势时段/品种、调整监控窗口、仓位或止损规则等），避免空泛套话。\n\n"
+    )
 
     lines.append("---\n\n## 6. 个股解析（按涨停时间排序）\n\n")
     lines.append(

@@ -92,6 +92,16 @@ DEFAULT_CONFIG = {
     "enable_replay_lhb_catalog": True,
     # 复盘目录是否拉取「概念资金流」TOP（与行业榜并列，偏题材向；多一次东财请求）
     "enable_replay_concept_fund_snapshot": True,
+    # 复盘目录：程序龙头池档案（data/watchlist_records.json）
+    "enable_replay_watchlist_snapshot": True,
+    "replay_watchlist_max_rows": 40,
+    # 监控窗口长度：自 signal_date 起连续交易日数（含首日），用于推算「监控结束」
+    "replay_watchlist_monitor_span": 5,
+    # 复盘目录：全 A 快照五日涨跌幅榜（复用 get_stock_zh_a_spot_em_cached，无列或失败则降级）
+    "enable_replay_spot_5d_leaderboard": True,
+    "replay_spot_5d_top_n": 19,
+    # 复盘目录：模拟账户绩效摘要（需 enable_simulated_account 且存在状态文件）
+    "enable_replay_sim_account_summary": True,
     # 智谱对话模型名（如 glm-4-flash）；空则使用程序内置默认
     "zhipu_model_name": "",
     # 复盘断点：成功后写入 data/replay_status/；resume 为 True 时优先用缓存跳过数据拉取
