@@ -140,37 +140,91 @@ def format_news_mapping_markdown(mappings: List[Dict[str, Any]]) -> str:
         lines.append(f"- **{keyword}** → 关注板块：{sectors}\n")
     
     lines.append("\n> *注：以上映射基于关键词规则匹配，仅供参考，不构成投资建议。*\n")
-    
+
     return "".join(lines)
 
 
-def analyze_finance_news(news_list: List[str]) -> str:
+def _norm_code6(c: object) -> str:
+    return re.sub(r"[^0-9]", "", str(c))[:6].zfill(6)
+
+
+def format_pool_news_hits_markdown(
+    news_list: List[str],
+    top_pool: Optional[List[Dict[str, Any]]],
+) -> str:
+    """快讯正文中字面命中「次日竞价」程序龙头池代码/名称时单列，便于短线对照。"""
+    if not news_list or not top_pool:
+        return ""
+    codes = {_norm_code6(p.get("code")) for p in top_pool if p.get("code")}
+    codes.discard("000000")
+    names = sorted(
+        {str(p.get("name") or "").strip() for p in top_pool if p.get("name")},
+        key=len,
+        reverse=True,
+    )
+    lines_out: list[str] = []
+    seen_snip: set[str] = set()
+    for news in news_list:
+        text = str(news or "")
+        if not text.strip():
+            continue
+        hit_keys: list[str] = []
+        for c in codes:
+            if len(c) == 6 and c in text:
+                hit_keys.append(c)
+        for nm in names:
+            if len(nm) >= 2 and nm in text:
+                hit_keys.append(nm)
+        if not hit_keys:
+            continue
+        dedup: list[str] = []
+        for h in hit_keys:
+            if h not in dedup:
+                dedup.append(h)
+        snip = text.strip()[:160].replace("\n", " ")
+        if snip in seen_snip:
+            continue
+        seen_snip.add(snip)
+        lines_out.append(
+            f"- **命中** {' / '.join(dedup[:6])}：{snip}{'…' if len(text) > 160 else ''}\n"
+        )
+        if len(lines_out) >= 14:
+            break
+    if not lines_out:
+        return ""
+    return (
+        "\n### 【要闻·命中程序龙头池】\n"
+        "> 以下为快讯摘要与 **程序龙头池** 代码/名称的 **字面匹配**；"
+        "同名或片段重合可能误判，须结合正文。\n\n"
+        + "".join(lines_out)
+        + "\n"
+    )
+
+
+def analyze_finance_news(
+    news_list: List[str],
+    top_pool: Optional[List[Dict[str, Any]]] = None,
+) -> str:
     """
-    分析财经新闻列表，生成板块映射报告
-    
-    Args:
-        news_list: 新闻标题或摘要列表
-        
-    Returns:
-        Markdown 格式的映射报告
+    分析财经新闻列表，生成板块映射报告；可选叠加龙头池字面命中。
     """
     if not news_list:
         return ""
-    
+
     all_mappings = []
     for news in news_list:
         mappings = map_news_to_sectors(news)
         all_mappings.extend(mappings)
-    
-    # 去重
+
     seen_keywords = set()
     unique_mappings = []
     for mapping in all_mappings:
-        if mapping['keyword'] not in seen_keywords:
-            seen_keywords.add(mapping['keyword'])
+        if mapping["keyword"] not in seen_keywords:
+            seen_keywords.add(mapping["keyword"])
             unique_mappings.append(mapping)
-    
-    return format_news_mapping_markdown(unique_mappings)
+
+    base = format_news_mapping_markdown(unique_mappings)
+    return base + format_pool_news_hits_markdown(news_list, top_pool)
 
 
 # 手动填写区域模板

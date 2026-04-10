@@ -105,6 +105,174 @@ def _ascii_lb_bars(df_zt: pd.DataFrame, max_width: int = 28) -> str:
     return "".join(lines) + "\n"
 
 
+def _zt_first_seal_hour_buckets_md(df_zt: pd.DataFrame) -> str:
+    """首封时间按交易时段桶统计（短线看盘常用粒度）。"""
+    if df_zt is None or df_zt.empty or "first_time" not in df_zt.columns:
+        return ""
+    tser = pd.to_datetime(
+        df_zt["first_time"].astype(str).str.replace("：", ":", regex=False),
+        errors="coerce",
+    )
+    valid = tser.notna()
+    if not bool(valid.any()):
+        return ""
+    h = tser.dt.hour.fillna(0).astype(int)
+    m = tser.dt.minute.fillna(0).astype(int)
+
+    def _bucket(hi: int, mi: int) -> str:
+        mins = hi * 60 + mi
+        if mins < 9 * 60 + 25:
+            return "09:25–10:00"
+        if 9 * 60 + 25 <= mins < 10 * 60:
+            return "09:25–10:00"
+        if 10 * 60 <= mins < 11 * 60 + 30:
+            return "10:00–11:30"
+        if 11 * 60 + 30 <= mins < 13 * 60:
+            return "11:30–13:00"
+        if 13 * 60 <= mins < 14 * 60 + 30:
+            return "13:00–14:30"
+        if 14 * 60 + 30 <= mins <= 15 * 60:
+            return "14:30–15:00"
+        return "其他"
+
+    buckets: list[str] = []
+    for i in range(len(df_zt)):
+        if bool(valid.iloc[i]):
+            buckets.append(_bucket(int(h.iloc[i]), int(m.iloc[i])))
+    if not buckets:
+        return ""
+    vc = pd.Series(buckets).value_counts()
+    order = [
+        "09:25–10:00",
+        "10:00–11:30",
+        "11:30–13:00",
+        "13:00–14:30",
+        "14:30–15:00",
+        "其他",
+    ]
+    lines = [
+        "#### 首封时间分布（涨停家数·按时段）\n\n",
+        "| 时段 | 家数 | 占比 |\n|------|------|------|\n",
+    ]
+    total = len(buckets)
+    for b in order:
+        cnt = int(vc.get(b, 0))
+        if cnt == 0:
+            continue
+        pct = round(100.0 * cnt / total, 1)
+        lines.append(f"| {b} | {cnt} | {pct}% |\n")
+    lines.append(
+        "\n> 口径：按「首次封板时间」落在的时钟区间统计；与行情软件分时略有误差属正常。\n\n"
+    )
+    return "".join(lines)
+
+
+def _watchlist_spot_followup_md(
+    fetcher: "DataFetcher",
+    ref_yyyymmdd: str,
+    *,
+    max_codes: int = 15,
+) -> str:
+    """监控池涉及代码在全 A 快照中的 5 日/今日涨跌（减轻手工对照）。"""
+    try:
+        from app.services.watchlist_store import load_all_records
+        from app.services.market_style_indices import _find_5d_column
+    except Exception:
+        return ""
+    ref = str(ref_yyyymmdd)[:8]
+    recs = load_all_records()
+    if not recs:
+        return ""
+    latest_by_code: dict[str, dict] = {}
+    for r in recs:
+        c = _norm6(r.get("code"))
+        sd = str(r.get("signal_date") or "")[:8]
+        if not c or len(sd) != 8 or not sd.isdigit() or sd > ref:
+            continue
+        prev = latest_by_code.get(c)
+        if prev is None or sd > str(prev.get("signal_date") or "")[:8]:
+            latest_by_code[c] = r
+    codes: list[str] = []
+    seen: set[str] = set()
+    for r in sorted(
+        recs,
+        key=lambda x: (str(x.get("signal_date") or ""), str(x.get("code") or "")),
+        reverse=True,
+    ):
+        if str(r.get("signal_date") or "")[:8] > ref:
+            continue
+        c = _norm6(r.get("code"))
+        if c and c not in seen:
+            seen.add(c)
+            codes.append(c)
+        if len(codes) >= max(5, int(max_codes)):
+            break
+    if not codes:
+        return ""
+    try:
+        df = fetcher.get_stock_zh_a_spot_em_cached()
+    except Exception as e:
+        return f"- 监控池快照对照：行情获取失败（{_md_cell(str(e), 60)}）。\n\n"
+    if df is None or df.empty:
+        return "- 监控池快照对照：行情为空。\n\n"
+    col5 = _find_5d_column(df)
+    code_c = next((c for c in df.columns if str(c).strip() == "代码"), None)
+    if not code_c:
+        code_c = next((c for c in df.columns if "代码" in str(c)), None)
+    name_c = next((c for c in df.columns if str(c).strip() == "名称"), None)
+    if not name_c:
+        name_c = next((c for c in df.columns if "名称" in str(c)), None)
+    pct1 = next((c for c in df.columns if str(c) == "涨跌幅"), None)
+    if not pct1:
+        pct1 = next((c for c in df.columns if "涨跌幅" in str(c)), None)
+    if not code_c or not name_c:
+        return ""
+    work = df.copy()
+    work["_c6"] = work[code_c].map(_norm6)
+    sub = work[work["_c6"].isin(codes)].drop_duplicates("_c6")
+    if sub.empty:
+        return "- 监控池快照对照：全 A 表中未匹配到上述代码（或数据源未覆盖）。\n\n"
+    lines = [
+        "#### 监控池标的·行情快照（5 日 / 今日）\n\n",
+        "> 与上表档案联动：取最近监控涉及的代码在东财全 A 快照中的涨跌（**非**严格自然区间）。\n\n",
+        "| 代码 | 名称 |5日涨跌幅% | 今日涨跌% | 标签（档案） |\n",
+        "|------|------|------------|-----------|-------------|\n",
+    ]
+    want = {c: None for c in codes}
+    for _, row in sub.iterrows():
+        c6 = _norm6(row.get(code_c))
+        if c6 in want:
+            want[c6] = row
+    for c6 in codes:
+        row = want.get(c6)
+        if row is None:
+            continue
+        nm = row.get(name_c)
+        p5 = None
+        if col5 and col5 in row.index:
+            try:
+                p5 = float(pd.to_numeric(row[col5], errors="coerce"))
+            except Exception:
+                p5 = None
+        p1v = None
+        if pct1 and pct1 in row.index:
+            try:
+                p1v = float(pd.to_numeric(row[pct1], errors="coerce"))
+            except Exception:
+                p1v = None
+        tag = str(latest_by_code.get(c6, {}).get("tag") or "")[:10]
+        lines.append(
+            f"| {_md_cell(c6, 8)} | {_md_cell(nm, 8)} | "
+            f"{(f'{p5:.2f}' if p5 is not None and pd.notna(p5) else '—')} | "
+            f"{(f'{p1v:.2f}' if p1v is not None and pd.notna(p1v) else '—')} | "
+            f"{_md_cell(tag, 10)} |\n"
+        )
+    lines.append(
+        "\n> **走势曲线**请在终端查看；邮件内以表代图。\n\n"
+    )
+    return "".join(lines)
+
+
 def _lhb_institution_md(date: str, fetcher: "DataFetcher") -> str:
     ds = str(date)[:8].replace("-", "")
     try:
@@ -616,6 +784,7 @@ def build_six_section_catalog(
         lines.append("- 结构：" + "，".join(f"{k}连×{int(v)}只" for k, v in vc.items()) + "\n")
         lines.append(f"- 最高连板：**{max_lb}** 板\n\n")
         lines.append(_ascii_lb_bars(df_zt))
+        lines.append(_zt_first_seal_hour_buckets_md(df_zt))
     else:
         lines.append("- 涨停池为空。\n\n")
 
@@ -850,6 +1019,16 @@ def build_six_section_catalog(
                     monitor_span=int(cm5.get("replay_watchlist_monitor_span", 5)),
                 )
             )
+            if bool(cm5.get("enable_replay_watchlist_spot_followup", True)):
+                lines.append(
+                    _watchlist_spot_followup_md(
+                        fetcher,
+                        ds,
+                        max_codes=int(
+                            cm5.get("replay_watchlist_spot_followup_max_codes", 15)
+                        ),
+                    )
+                )
         else:
             lines.append(
                 "> 已按配置跳过龙头池档案（`enable_replay_watchlist_snapshot: false`）。\n\n"

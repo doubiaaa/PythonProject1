@@ -97,6 +97,9 @@ DEFAULT_CONFIG = {
     "replay_watchlist_max_rows": 40,
     # 监控窗口长度：自 signal_date 起连续交易日数（含首日），用于推算「监控结束」
     "replay_watchlist_monitor_span": 5,
+    # 监控池档案下方是否附「池内代码·5日/今日」快照表
+    "enable_replay_watchlist_spot_followup": True,
+    "replay_watchlist_spot_followup_max_codes": 15,
     # 复盘目录：全 A 快照五日涨跌幅榜（复用 get_stock_zh_a_spot_em_cached，无列或失败则降级）
     "enable_replay_spot_5d_leaderboard": True,
     "replay_spot_5d_top_n": 19,

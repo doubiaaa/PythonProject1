@@ -176,6 +176,22 @@ flowchart LR
 | `enable_weekly_weight_anomaly_email` | 权重异常是否单独发信。 |
 | `use_multi_week_decay_for_strategy` 等 | 多周衰减、平滑、单桶上下限、周间变动惩罚等（策略偏好）。 |
 
+### 6.3 复盘目录与摘要（节选）
+
+| 键 | 含义 |
+|----|------|
+| `enable_replay_lhb_catalog` | 篇首目录是否请求龙虎榜东财接口。 |
+| `enable_replay_concept_fund_snapshot` | 是否拉取概念主力净流入 TOP（与行业榜并列）。 |
+| `enable_replay_watchlist_snapshot` | 是否生成程序龙头池档案表（`watchlist_records.json`）。 |
+| `replay_watchlist_max_rows` / `replay_watchlist_monitor_span` | 档案最大行数、监控窗口交易日数。 |
+| `enable_replay_watchlist_spot_followup` | 档案下是否附池内代码的 5 日/今日快照表。 |
+| `replay_watchlist_spot_followup_max_codes` | 快照表最多代码数。 |
+| `enable_replay_spot_5d_leaderboard` / `replay_spot_5d_top_n` | 全 A 五日涨幅榜开关与 TOP N。 |
+| `enable_replay_sim_account_summary` | 目录中是否附模拟账户绩效（需 `enable_simulated_account`）。 |
+| `enable_replay_checkpoint` / `resume_replay_if_available` | 断点落盘与续跑；`meta.json` 含 `zt_pool_records` 等。 |
+
+**市场阶段**（程序 `compute_short_term_market_phase`）：在情绪温度基础上结合最高连板、炸板率、涨跌结构、昨日溢价等，输出 **主升期 / 高位震荡期 / 退潮·冰点期 / 混沌·试错期** 及对应建议仓位区间。
+
 ---
 
 ## 7. 单次复盘流水线
@@ -184,8 +200,10 @@ flowchart LR
 
 | 步骤 | 动作 |
 |------|------|
-| 1 | `get_market_summary(date)` → 得到 `actual_date`、Markdown 市场正文、`_last_auction_meta`（含 `top_pool`、`program_completed`、`abort_reason`）。 |
+| 1 | `get_market_summary(date)` → 得到 `actual_date`、Markdown 市场正文、`_last_auction_meta`（含 `top_pool`、`program_completed`、`abort_reason`）、`_last_zt_pool`；篇首目录含首封时段分布、监控池档案等；**基础数据**与板块排名在正文中改为引用目录以免重复。 |
+| 1b | （可选）断点续跑：从 `data/replay_status/` 恢复 `market.txt`、`meta.json`（含 `zt_pool_records`、要闻前缀等），跳过步骤 1 的数据拉取。 |
 | 2 | （可选）`probe_style_stability` → `effective_weights_from_stability`，供 prompt 侧重。 |
+| 2b | `perform_separation_confirmation`（分时异动 +同板块/同梯队候选）；`analyze_finance_news` 叠加 **龙头池字面命中**；结果写入 prompt `meta_block`。 |
 | 3 | `build_prompt`：固定章节 + `build_prompt_addon` + 市场数据。 |
 | 4 | `call_zhipu`；`_ensure_summary_line` 规范首行【摘要】。 |
 | 5 | （可选）拼接 `_last_news_push_prefix`。 |

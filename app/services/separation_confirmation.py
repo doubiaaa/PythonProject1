@@ -21,6 +21,40 @@ def _ensure_tick_cache_dir() -> None:
     os.makedirs(TICK_CACHE_DIR, exist_ok=True)
 
 
+def _infer_limit_ratio(code: object, name: object = "") -> float:
+    c = str(code or "").zfill(6)[:6]
+    nm = str(name or "")
+    un = nm.upper()
+    if "ST" in un or nm.startswith("*"):
+        return 0.05
+    if c.startswith(("300", "688")):
+        return 0.20
+    if c and (c[0] in ("8", "4") or c[:2] in ("43", "83", "87", "88", "92")):
+        return 0.30
+    return 0.10
+
+
+def _limit_and_pre_close(stock_info: Dict[str, Any]) -> Tuple[float, float]:
+    """依据快照涨跌幅估计昨收，并给出理论涨停价（用于炸板/跳水启发式）。"""
+    px = float(stock_info.get("price") or stock_info.get("close") or 0)
+    code = str(stock_info.get("code", ""))
+    name = str(stock_info.get("name", ""))
+    ratio = _infer_limit_ratio(code, name)
+    pct = stock_info.get("pct_chg")
+    try:
+        pcf = float(pct)
+    except (TypeError, ValueError):
+        pcf = None
+    if px <= 0:
+        return 0.0, 0.0
+    if pcf is not None and abs(pcf) > 1e-6:
+        pre = px / (1.0 + pcf / 100.0)
+    else:
+        pre = px / (1.0 + ratio)
+    lim = pre * (1.0 + ratio)
+    return lim, pre
+
+
 def get_tick_cache_file_path(stock_code: str, date: str) -> str:
     """获取分时数据缓存文件路径"""
     _ensure_tick_cache_dir()
@@ -81,9 +115,14 @@ def identify_leading_stock(df_zt: pd.DataFrame) -> Optional[Dict[str, Any]]:
     highest_lb = df_zt_sorted['lb'].iloc[0]
     candidates = df_zt_sorted[df_zt_sorted['lb'] == highest_lb]
     
-    # 若有多个，按成交额排序取最大的
+    # 若有多个：优先成交额（若列存在），否则首封时间早的优先
     if len(candidates) > 1:
-        candidates = candidates.sort_values('amount', ascending=False)
+        if "amount" in candidates.columns:
+            candidates = candidates.sort_values("amount", ascending=False)
+        elif "first_time" in candidates.columns:
+            candidates = candidates.sort_values("first_time", ascending=True, na_position="last")
+        else:
+            candidates = candidates.sort_values("code", ascending=True)
     
     leading_stock = candidates.iloc[0].to_dict()
     return leading_stock
@@ -97,21 +136,17 @@ def detect_volatility_timepoints(df: pd.DataFrame, stock_info: Dict[str, Any]) -
         return []
     
     volatility_points = []
-    
-    # 计算涨停价（简化计算，实际应该根据前收盘价计算）
-    close_price = stock_info.get('close', 0)
-    if close_price > 0:
-        limit_up_price = close_price * 1.1  # 涨停价
-    else:
-        limit_up_price = 0
-    
+
+    limit_up_price, pre_close = _limit_and_pre_close(stock_info)
+    tol = max(limit_up_price * 0.002, 0.02) if limit_up_price > 0 else 0.02
+
     # 检测炸板
     for i in range(1, len(df)):
         prev_price = df['price'].iloc[i-1]
         curr_price = df['price'].iloc[i]
         
         # 炸板：从涨停价附近快速下跌
-        if limit_up_price > 0 and abs(prev_price - limit_up_price) < 0.01:
+        if limit_up_price > 0 and abs(prev_price - limit_up_price) <= tol:
             if curr_price < limit_up_price * 0.99:
                 volatility_points.append({
                     'type': '炸板',
@@ -129,8 +164,7 @@ def detect_volatility_timepoints(df: pd.DataFrame, stock_info: Dict[str, Any]) -
         if five_min_ago_price > 0:
             drop_pct = (curr_price - five_min_ago_price) / five_min_ago_price * 100
             if drop_pct < -3:
-                # 检查当时涨幅是否在7%以上
-                if curr_price > close_price * 1.07:
+                if pre_close > 0 and curr_price > pre_close * 1.07:
                     volatility_points.append({
                         'type': '跳水',
                         'time': df['time'].iloc[i],
@@ -217,9 +251,10 @@ def calculate_separation_score(
 
 
 def get_candidate_stocks(
-    leading_stock: Dict[str, Any], 
-    date: str, 
-    trade_days: List[str]
+    leading_stock: Dict[str, Any],
+    date: str,
+    trade_days: List[str],
+    df_zt_all: Optional[pd.DataFrame] = None,
 ) -> List[Dict[str, Any]]:
     """
     获取候选股列表（同板块或同梯队的个股）
@@ -227,8 +262,11 @@ def get_candidate_stocks(
     candidates = []
     
     try:
-        # 获取同板块个股
-        sector = leading_stock.get('sector', '')
+        # 获取同板块个股（涨停池列为 industry，兼容 sector）
+        sector = (
+            str(leading_stock.get("sector") or "").strip()
+            or str(leading_stock.get("industry") or "").strip()
+        )
         if sector:
             cons = ak.stock_board_industry_cons_em(symbol=sector)
             if cons is not None and not cons.empty:
@@ -242,10 +280,64 @@ def get_candidate_stocks(
                             'sector': sector
                         })
         
-        # 限制候选股数量
-        return candidates[:20]  # 最多20只
+        if (
+            len(candidates) < 3
+            and df_zt_all is not None
+            and not df_zt_all.empty
+            and "lb" in df_zt_all.columns
+        ):
+            lb = int(leading_stock.get("lb") or 0)
+            ind = str(
+                leading_stock.get("industry")
+                or leading_stock.get("sector")
+                or ""
+            ).strip()
+            code0 = str(leading_stock.get("code") or "").strip()
+            sub = df_zt_all[df_zt_all["lb"] == lb].copy()
+            if code0 and "code" in sub.columns:
+                sub = sub[sub["code"].astype(str).str.strip() != code0]
+            if ind and "industry" in sub.columns:
+                sub = sub[sub["industry"].astype(str).str.strip() == ind]
+            got: set[str] = {str(c["code"]) for c in candidates}
+            for _, r in sub.head(25).iterrows():
+                code = str(r.get("code") or "").strip()
+                name = str(r.get("name") or "").strip()
+                if code and code not in got:
+                    got.add(code)
+                    candidates.append(
+                        {"code": code, "name": name, "sector": ind or ""}
+                    )
+        return candidates[:20]
     except Exception:
-        return candidates
+        out: list[dict[str, Any]] = []
+        if (
+            df_zt_all is not None
+            and not df_zt_all.empty
+            and "lb" in df_zt_all.columns
+        ):
+            try:
+                lb = int(leading_stock.get("lb") or 0)
+                ind = str(
+                    leading_stock.get("industry")
+                    or leading_stock.get("sector")
+                    or ""
+                ).strip()
+                code0 = str(leading_stock.get("code") or "").strip()
+                sub = df_zt_all[df_zt_all["lb"] == lb].copy()
+                if code0 and "code" in sub.columns:
+                    sub = sub[sub["code"].astype(str).str.strip() != code0]
+                if ind and "industry" in sub.columns:
+                    sub = sub[sub["industry"].astype(str).str.strip() == ind]
+                for _, r in sub.head(20).iterrows():
+                    code = str(r.get("code") or "").strip()
+                    name = str(r.get("name") or "").strip()
+                    if code:
+                        out.append(
+                            {"code": code, "name": name, "sector": ind or ""}
+                        )
+            except Exception:
+                pass
+        return out[:20]
 
 
 def perform_separation_confirmation(
@@ -256,11 +348,12 @@ def perform_separation_confirmation(
     """
     执行分离确认分析
     """
-    result = {
-        'date': date,
-        'leading_stock': None,
-        'volatility_points': [],
-        'candidates': []
+    result: Dict[str, Any] = {
+        "date": date,
+        "leading_stock": None,
+        "volatility_points": [],
+        "candidates": [],
+        "notes": [],
     }
     
     # 识别总龙头
@@ -271,8 +364,9 @@ def perform_separation_confirmation(
     result['leading_stock'] = leading_stock
     
     # 获取总龙头分时数据
-    leading_tick_df = get_tick_data(leading_stock.get('code', ''), date)
+    leading_tick_df = get_tick_data(leading_stock.get("code", ""), date)
     if leading_tick_df is None:
+        result["notes"].append("总龙头分时数据未获取（接口或缓存为空），跳过分离确认。")
         return result
     
     # 识别异动时间点
@@ -280,10 +374,16 @@ def perform_separation_confirmation(
     result['volatility_points'] = volatility_points
     
     if not volatility_points:
+        result["notes"].append("未识别到总龙头炸板/跳水异动点（或涨跌停比例与快照不匹配）。")
         return result
-    
-    # 获取候选股
-    candidates = get_candidate_stocks(leading_stock, date, trade_days)
+
+    candidates = get_candidate_stocks(
+        leading_stock, date, trade_days, df_zt_all=df_zt
+    )
+    if not candidates:
+        result["notes"].append(
+            "同板块成分股未取到且无同梯队备选；请检查行业名称与东财板块是否一致。"
+        )
     
     # 计算每个候选股的分离得分
     for candidate in candidates:

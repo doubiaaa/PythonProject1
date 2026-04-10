@@ -263,6 +263,49 @@ def _append_ai_context(
     return "".join(lines)
 
 
+def compute_short_term_market_phase(
+    sentiment_temp: int,
+    zt_count: int,
+    dt_count: int,
+    zhaban_rate: float,
+    max_lb: int,
+    premium: float,
+) -> tuple[str, str]:
+    """
+    短线复盘四象限：主升 / 高位震荡 / 退潮·冰点 / 混沌·试错。
+    premium 为 -99 表示昨日涨停溢价不可用，内部不按溢价判冰点。
+    """
+    prem_ok = premium != -99
+    prem = float(premium) if prem_ok else 0.0
+
+    if sentiment_temp < 32:
+        return "退潮·冰点期", "0-10%"
+    if zt_count < 14 and dt_count > zt_count + 15:
+        return "退潮·冰点期", "0-10%"
+    if max_lb <= 2 and zt_count < 20 and prem_ok and prem < -0.8:
+        return "退潮·冰点期", "0-10%"
+
+    if sentiment_temp >= 80:
+        return "主升期", "80%"
+    if max_lb >= 6 and zt_count >= 25:
+        return "主升期", "80%"
+    if max_lb >= 5 and zhaban_rate <= 36 and zt_count >= 32:
+        return "主升期", "80%"
+
+    if 36 <= sentiment_temp <= 74 and zhaban_rate >= 44:
+        return "混沌·试错期", "15-25%"
+    if (
+        34 <= sentiment_temp <= 70
+        and prem_ok
+        and -0.3 <= prem <= 1.0
+        and max_lb in (2, 3)
+        and zt_count >= 18
+    ):
+        return "混沌·试错期", "15-25%"
+
+    return "高位震荡期", "30%"
+
+
 class DataFetcher:
     """数据获取类（含冗余、重试、缓存）"""
 
@@ -1922,6 +1965,8 @@ class DataFetcher:
 
         # 获取基础数据
         df_zt = self.get_zt_pool(date)
+        # 供 replay_task 分离确认等复用（须为当日涨停池 DataFrame）
+        self._last_zt_pool = df_zt.copy() if df_zt is not None else pd.DataFrame()
         df_dt = self.get_dt_pool(date)
         df_zb = self.get_zb_pool(date)
         df_sector = self.get_sector_rank(date)
@@ -1962,16 +2007,20 @@ class DataFetcher:
 
         sentiment_temp = min(sentiment_temp, 100)
 
-        # 市场阶段判断 - 统一使用"高位震荡期"而非"震荡期"
-        market_phase = "高位震荡期"
-        position_suggestion = "30%"
-        if sentiment_temp > 80:
-            market_phase = "主升期"
-            position_suggestion = "80%"
-        elif sentiment_temp < 30:
-            market_phase = "退潮期"
-            position_suggestion = "0-10%"
-        
+        max_lb_phase = (
+            int(df_zt["lb"].max())
+            if not df_zt.empty and "lb" in df_zt.columns
+            else 0
+        )
+        market_phase, position_suggestion = compute_short_term_market_phase(
+            sentiment_temp,
+            zt_count,
+            dt_count,
+            zhaban_rate,
+            max_lb_phase,
+            float(premium),
+        )
+
         # 存储市场阶段到实例变量，供其他方法使用
         self._last_market_phase = market_phase
         self._last_position_suggestion = position_suggestion
@@ -1985,7 +2034,8 @@ class DataFetcher:
         # 计算情绪周期量化评分
         try:
             from app.services.sentiment_scorer import calculate_sentiment_score
-            max_lb = int(df_zt['lb'].max()) if not df_zt.empty and 'lb' in df_zt.columns else 0
+
+            max_lb = max_lb_phase
             sentiment_score, sentiment_md = calculate_sentiment_score(
                 yest_zt_premium=premium if premium != -99 else 0,
                 max_lb_height=max_lb,
@@ -2018,44 +2068,23 @@ class DataFetcher:
             df_sector=df_sector,
         )
 
-        summary += "## 基础数据\n"
-        if up_n is not None and down_n is not None:
-            summary += f"- 涨跌家数：上涨约 **{up_n}** 家，下跌约 **{down_n}** 家\n"
-        summary += f"- 涨停数：{zt_count}\n"
-        summary += f"- 跌停数：{dt_count}\n"
-        summary += f"- 炸板数：{zb_count}\n"
-        summary += f"- 炸板率：{zhaban_rate}%\n"
-        summary += f"- 昨日涨停溢价：{premium if premium != -99 else premium_note}\n"
-        
-        # 添加情绪周期量化评分
-        if hasattr(self, '_last_sentiment_markdown') and self._last_sentiment_markdown:
+        summary += "## 基础数据（补遗）\n"
+        summary += (
+            "> **涨跌结构、涨跌停、北向、情绪温度/阶段/建议仓位** 见篇首目录 **§1.2 市场数据概括**；"
+            "此处避免重复占用上下文。\n\n"
+        )
+        summary += f"- 昨日涨停溢价：{premium if premium != -99 else premium_note}\n\n"
+        if hasattr(self, "_last_sentiment_markdown") and self._last_sentiment_markdown:
             summary += self._last_sentiment_markdown
-        if north_status == "fetch_failed":
-            summary += "- 北向资金净流入：**获取失败**（网络或接口原因，勿作为核心依据）\n"
-        elif north_status == "empty_df":
-            summary += "- 北向资金：**返回空表**（可信度低）\n"
-        elif north_status == "ok_zero":
-            summary += (
-                "- 北向资金净流入：**0 亿**（接口口径；可能为当日无成交或统计为零，请结合其它指标）\n"
-            )
-        else:
-            summary += f"- 北向资金净流入：{north_money}亿\n"
-        summary += f"- 情绪温度：{sentiment_temp}°C\n"
-        summary += f"- 市场阶段：{market_phase}\n"
-        summary += f"- 建议仓位：{position_suggestion}\n\n"
+        summary += (
+            "\n> **口径**：正文叙事以目录 **§1.2** 的 **情绪温度、市场阶段、建议仓位** 为主轴；"
+            "上表 **情绪周期量化评分（0～10）** 为辅助刻度，勿与主轴打架。\n\n"
+        )
 
-        # 板块排名
-        if not df_sector.empty:
-            summary += "## 板块资金流向排名（前五）\n"
-            summary += (
-                f"> **口径说明**：以下为东财等行业资金流相关接口的快照，与复盘日 **{date}** "
-                "的严格对齐可能存在偏差，仅作板块强弱结构参考。\n\n"
-            )
-            for _, row in df_sector.iterrows():
-                summary += f"- {row['sector']}：涨幅 {row['pct']}%，主力净流入 {row['money']:.2f}亿\n"
-            summary += "\n"
-        else:
-            summary += "## 板块资金流向\n- 暂无板块资金流向数据\n\n"
+        summary += "## 板块资金流向\n"
+        summary += (
+            "> 行业 **主力净流入 TOP** 已列于篇首 **§0 盘面总览**；本节不重复展开。\n\n"
+        )
 
         # 个股主力净流入排名、概念板块成分（可选，见 replay_config.json）
         try:
@@ -2088,25 +2117,11 @@ class DataFetcher:
         except Exception as e:
             summary += f"\n## 扩展行情数据\n- 个股资金流/概念快照跳过：{e!s}\n\n"
 
-        # 连板/题材/涨停明细已收入篇首「六大目录」，此处仅保留核心龙头速览
-        if not df_zt.empty and "lb" in df_zt.columns:
-            df_top = df_zt[df_zt["lb"] >= 2].sort_values(
-                ["lb", "first_time"], ascending=[False, True]
-            )
-            if not df_top.empty:
-                summary += "## 核心龙头（摘要）\n"
-                summary += (
-                    "> 连板结构、分行业涨停、按时间排序个股见篇首 **"
-                    "【程序生成】复盘数据目录** 第 1～2、6 节。\n\n"
-                )
-                for _, row in df_top.head(5).iterrows():
-                    industry = row.get("industry", "未知")
-                    first_time = row.get("first_time", "")
-                    summary += (
-                        f"- {row['name']}（{row['code']}）{row['lb']}连板，"
-                        f"行业：{industry}，首封：{first_time}\n"
-                    )
-                summary += "\n"
+        summary += (
+            "## 核心龙头（摘要）\n"
+            "> 连板结构、分行业涨停、首封时段分布、按时间排序个股见篇首 **"
+            "【程序生成】复盘数据目录** 第 **1.1 / 1.2 / 6** 节。\n\n"
+        )
 
         try:
             snap_md, snap_meta = self.build_dragon_trader_snapshot(

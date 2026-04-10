@@ -4,6 +4,8 @@ import threading
 import time
 from typing import Any, Optional
 
+import pandas as pd
+
 from config.replay_prompt_templates import build_main_replay_prompt
 from app.services.email_notify import has_email_config, send_report_email
 from app.utils.email_template import truncate_finance_news_push_prefix
@@ -154,23 +156,36 @@ class ReplayTask:
                 f"```json\n{meta_json}\n```\n"
             )
         
-        # 添加分离确认结果
         separation_block = ""
-        if separation_result and separation_result.get('candidates'):
-            separation_block = "\n## 【分离确认·候选】\n"
-            separation_block += "- 总龙头：{name}({code}) 连板{lb}\n".format(
-                name=separation_result['leading_stock'].get('name', ''),
-                code=separation_result['leading_stock'].get('code', ''),
-                lb=separation_result['leading_stock'].get('lb', 0)
-            )
-            if separation_result.get('volatility_points'):
-                points = separation_result['volatility_points']
-                separation_block += f"- 异动时间点：{len(points)} 个（{points[0]['type']}等）\n"
-            separation_block += "- 分离确认候选（含判断依据）：\n"
-            for i, candidate in enumerate(separation_result['candidates'][:5], 1):
-                separation_block += f"  {i}. {candidate['name']}({candidate['code']}) 得分：{candidate.get('separation_score', 0):.2f}\n"
-                if candidate.get('remark'):
-                    separation_block += f"     备注：{candidate['remark']}\n"
+        if separation_result:
+            notes = separation_result.get("notes") or []
+            if notes:
+                separation_block += "\n## 【分离确认·说明】\n"
+                for n in notes:
+                    separation_block += f"- {n}\n"
+            if separation_result.get("candidates"):
+                separation_block += "\n## 【分离确认·候选】\n"
+                ls = separation_result.get("leading_stock") or {}
+                separation_block += "- 总龙头：{name}({code}) 连板{lb}\n".format(
+                    name=ls.get("name", ""),
+                    code=ls.get("code", ""),
+                    lb=ls.get("lb", 0),
+                )
+                if separation_result.get("volatility_points"):
+                    points = separation_result["volatility_points"]
+                    separation_block += (
+                        f"- 异动时间点：{len(points)} 个（{points[0]['type']}等）\n"
+                    )
+                separation_block += "- 分离确认候选（含判断依据）：\n"
+                for i, candidate in enumerate(
+                    separation_result["candidates"][:5], 1
+                ):
+                    separation_block += (
+                        f"  {i}. {candidate['name']}({candidate['code']}) "
+                        f"得分：{candidate.get('separation_score', 0):.2f}\n"
+                    )
+                    if candidate.get("remark"):
+                        separation_block += f"     备注：{candidate['remark']}\n"
         
         # 添加要闻映射
         news_block = news_mapping if news_mapping else ""
@@ -219,6 +234,12 @@ class ReplayTask:
                     data_fetcher._last_news_push_prefix = str(
                         bundle.get("news_prefix") or ""
                     )
+                    zrec = bundle.get("zt_pool_records")
+                    if zrec:
+                        try:
+                            data_fetcher._last_zt_pool = pd.DataFrame(zrec)
+                        except Exception:
+                            pass
                     actual_date = str(date)[:8]
                     self.log("断点续跑：已加载市场摘要与程序缓存（跳过 get_market_summary）")
                     self.progress = 90
@@ -243,15 +264,27 @@ class ReplayTask:
             stab_hint = ""
             separation_result = None
             
-            # 执行分离确认分析
+            # 执行分离确认分析（断点续跑时可能未经过 get_market_summary，须补拉涨停池）
             try:
                 df_zt = getattr(data_fetcher, "_last_zt_pool", None)
-                if df_zt is not None:
+                _need_zt = df_zt is None or (
+                    hasattr(df_zt, "empty") and bool(df_zt.empty)
+                )
+                if _need_zt:
+                    df_zt = data_fetcher.get_zt_pool(actual_date)
+                    if df_zt is not None and not getattr(df_zt, "empty", True):
+                        data_fetcher._last_zt_pool = df_zt.copy()
+                if df_zt is not None and not getattr(df_zt, "empty", True):
                     _td = data_fetcher.get_trade_cal()
                     if _td:
-                        separation_result = perform_separation_confirmation(actual_date, df_zt, _td)
-                        if separation_result and separation_result.get('candidates'):
-                            self.log(f"分离确认完成，找到 {len(separation_result['candidates'])} 个候选股")
+                        separation_result = perform_separation_confirmation(
+                            actual_date, df_zt, _td
+                        )
+                        if separation_result and separation_result.get("candidates"):
+                            self.log(
+                                "分离确认完成，找到 "
+                                f"{len(separation_result['candidates'])} 个候选股"
+                            )
             except Exception as ex:
                 self.log(f"分离确认分析失败：{ex}")
             
@@ -260,7 +293,11 @@ class ReplayTask:
             try:
                 finance_news = getattr(data_fetcher, "_last_finance_news", [])
                 if finance_news:
-                    news_mapping = analyze_finance_news(finance_news)
+                    ah_meta = getattr(data_fetcher, "_last_auction_meta", None) or {}
+                    news_mapping = analyze_finance_news(
+                        finance_news,
+                        top_pool=ah_meta.get("top_pool"),
+                    )
                     if news_mapping:
                         self.log("要闻映射分析完成")
             except Exception as ex:

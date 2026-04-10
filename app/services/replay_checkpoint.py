@@ -61,11 +61,21 @@ def read_status(date: str) -> dict[str, Any]:
 def save_fetcher_bundle(date: str, market_data: str, fetcher: Any) -> None:
     """数据获取成功后写入，供 resume 时恢复 fetcher 侧变量。"""
     save_market_data_cache(date, market_data)
+    zt_pool_records = None
+    zt_df = getattr(fetcher, "_last_zt_pool", None)
+    if zt_df is not None and not getattr(zt_df, "empty", True):
+        try:
+            zt_pool_records = json.loads(
+                zt_df.to_json(orient="records", date_format="iso")
+            )
+        except Exception:
+            zt_pool_records = None
     bundle = {
         "dragon": getattr(fetcher, "_last_dragon_trader_meta", None),
         "auction": getattr(fetcher, "_last_auction_meta", None),
         "email_kpi": getattr(fetcher, "_last_email_kpi", None),
         "news_prefix": getattr(fetcher, "_last_news_push_prefix", None),
+        "zt_pool_records": zt_pool_records,
     }
     p = _path_for(date, "meta.json")
     tmp = p + ".tmp"

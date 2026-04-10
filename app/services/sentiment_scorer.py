@@ -211,8 +211,14 @@ class SentimentScorer:
         if not self.details:
             return ""
         
-        lines = ["\n### 【情绪周期量化评分】\n"]
-        lines.append(f"**情绪评分：{self.details['total_score']}/10**（{self.details['interpretation']}）\n")
+        lines = ["\n### 【情绪周期量化评分】（辅助）\n"]
+        lines.append(
+            "> **主轴**：请以市场数据中 **§1.2 情绪温度、市场阶段、建议仓位** 为准；"
+            "本块为 0～10 分刻度，用于交叉验证，勿与主轴矛盾叙述。\n\n"
+        )
+        lines.append(
+            f"**情绪评分：{self.details['total_score']}/10**（{self.details['interpretation']}）\n"
+        )
         lines.append("\n评分构成：\n")
         lines.append("| 指标 | 原始值 | 单项得分 | 权重 | 加权得分 |\n")
         lines.append("|------|--------|----------|------|----------|\n")
