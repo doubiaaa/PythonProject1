@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Any
 
 import requests
@@ -25,6 +26,9 @@ ZHIPU_API_URL = os.environ.get(
 DEFAULT_MODEL = os.environ.get("ZHIPU_MODEL", "glm-4-flash")
 DEFAULT_TIMEOUT = float(os.environ.get("ZHIPU_TIMEOUT_SEC", "120"))
 ZHIPU_RETRIES = max(1, int(os.environ.get("ZHIPU_RETRY_ATTEMPTS", "3")))
+# 429 限速：在单次 chat内额外重试（与传输层重试独立）
+ZHIPU_429_RETRIES = max(0, int(os.environ.get("ZHIPU_RETRY_429", "4")))
+ZHIPU_429_WAIT_SEC = max(5, int(os.environ.get("ZHIPU_RETRY_429_WAIT_SEC", "25")))
 
 
 class ZhipuClient:
@@ -74,26 +78,54 @@ class ZhipuClient:
             "temperature": temperature,
             "max_tokens": max_tokens,
         }
-        try:
-            response = self._post_with_transport_retry(data)
-        except (requests.Timeout, requests.ConnectionError) as e:
-            _log.warning("智谱请求传输失败（已重试）：%s", e)
-            return f"调用智谱API异常：{e!s}"
-        except requests.RequestException as e:
-            return f"调用智谱API异常：{e!s}"
-
-        if response.status_code == 200:
+        attempt_429 = 0
+        while True:
             try:
-                result = response.json()
-            except ValueError:
-                return "API 返回异常：非 JSON"
-            choices = result.get("choices") or []
-            if not choices:
-                return "API 返回异常：无 choices 字段"
-            msg = (choices[0].get("message") or {}).get("content")
-            if msg is None:
-                return "API 返回异常：无 content"
-            return str(msg)
-        if response.status_code == 402:
-            return "错误：智谱API账户余额不足，请充值后重试。"
-        return f"API请求失败（{response.status_code}）：{response.text}"
+                response = self._post_with_transport_retry(data)
+            except (requests.Timeout, requests.ConnectionError) as e:
+                _log.warning("智谱请求传输失败（已重试）：%s", e)
+                return f"调用智谱API异常：{e!s}"
+            except requests.RequestException as e:
+                return f"调用智谱API异常：{e!s}"
+
+            if response.status_code == 200:
+                try:
+                    result = response.json()
+                except ValueError:
+                    return "API 返回异常：非 JSON"
+                choices = result.get("choices") or []
+                if not choices:
+                    return "API 返回异常：无 choices 字段"
+                msg = (choices[0].get("message") or {}).get("content")
+                if msg is None:
+                    return "API 返回异常：无 content"
+                return str(msg)
+
+            if response.status_code == 429 and attempt_429 < ZHIPU_429_RETRIES:
+                attempt_429 += 1
+                wait = ZHIPU_429_WAIT_SEC
+                try:
+                    ra = response.headers.get("Retry-After")
+                    if ra is not None:
+                        wait = max(wait, int(float(ra)))
+                except (TypeError, ValueError):
+                    pass
+                wait = min(wait, 120)
+                _log.warning(
+                    "智谱 API 返回 429（限速），%s/%s 次，等待 %ss 后重试",
+                    attempt_429,
+                    ZHIPU_429_RETRIES,
+                    wait,
+                )
+                time.sleep(wait)
+                continue
+
+            if response.status_code == 402:
+                return "错误：智谱API账户余额不足，请充值后重试。"
+            if response.status_code == 429:
+                return (
+                    "调用智谱API：速率限制（429），已在程序内多次退避重试仍失败。"
+                    "请数分钟后再跑复盘，或登录智谱控制台查看并发/配额。"
+                    f"\n\n原始响应：{response.text}"
+                )
+            return f"API请求失败（{response.status_code}）：{response.text}"

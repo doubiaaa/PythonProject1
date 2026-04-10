@@ -48,10 +48,34 @@ _DRAGON_HEADINGS = (
 )
 
 
+def _is_llm_failure_payload(text: str) -> bool:
+    """返回内容实为智谱错误串（无模型正文），避免误报「缺章节」。"""
+    s = (text or "").strip()[:1200]
+    markers = (
+        "API请求失败（",
+        "调用智谱API异常",
+        "调用智谱API：速率限制",
+        "错误：智谱API",
+        "API 返回异常",
+        "您的账户已达到速率限制",
+        '"code":"1302"',
+        "请求频率",
+        "账户余额不足",
+    )
+    return any(m in s for m in markers)
+
+
 def _ensure_dragon_report_sections(text: str) -> str:
     """若缺少龙头模板关键章节标题，在文末追加系统提示（不重试 API）。"""
     if not text or not str(text).strip():
         return text
+    if _is_llm_failure_payload(text):
+        note = (
+            "\n\n---\n\n> **【系统提示】** 本次 **未生成 AI 复盘长文**（上方为智谱接口报错或限速），"
+            "**并非** 章节未写全。请间隔数分钟后重试，或检查 API Key、配额与并发；"
+            "程序数据目录仍在上方市场摘要中可阅。\n"
+        )
+        return text.rstrip() + note
     missing = [h for h in _DRAGON_HEADINGS if h not in text]
     if not missing:
         return text
@@ -82,6 +106,11 @@ def _ensure_summary_line(text: str, market_phase: str = "高位震荡期") -> st
     first = str(text).strip().split("\n")[0].strip()
     if first.startswith("【摘要】"):
         return text
+    if _is_llm_failure_payload(text):
+        return (
+            f"【摘要】周期阶段：{market_phase}｜适宜度：—｜置信度：低（未生成正文：智谱限速或服务异常，见下方）\n\n"
+            + text
+        )
     return (
         f"【摘要】周期阶段：{market_phase}｜适宜度：中｜置信度：低（系统补全：模型未输出规范首行摘要）\n\n"
         + text
@@ -331,7 +360,10 @@ class ReplayTask:
             # 从 data_fetcher 获取市场阶段，确保摘要一致性
             market_phase = getattr(data_fetcher, "_last_market_phase", "高位震荡期")
             result = _ensure_dragon_report_sections(_ensure_summary_line(result, market_phase))
-            self.log("报告首行与龙头模板章节已校验（必要时已补全/提示）")
+            if _is_llm_failure_payload(result):
+                self.log("智谱未返回模型长文（限速/余额/网络等），已附加说明；请勿将「缺章节」提示理解为模型漏写")
+            else:
+                self.log("报告首行与龙头模板章节已校验（必要时已补全/提示）")
             sum_line = _extract_summary_line(result)
             news_pre = (getattr(data_fetcher, "_last_news_push_prefix", None) or "").strip()
             if news_pre:

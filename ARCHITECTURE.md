@@ -354,6 +354,8 @@ flowchart LR
 | 变量 | 用途 |
 |------|------|
 | `ZHIPU_API_KEY` | 智谱 API Key。 |
+| `ZHIPU_RETRY_429` / `ZHIPU_RETRY_429_WAIT_SEC` | 主复盘 `chat/completions` 遇 **429 限速** 时的额外重试次数与基准等待秒数（默认 4 次、25s，另尊重 `Retry-After`）。 |
+| `ZHIPU_RETRY_ATTEMPTS` | 传输层超时/断连重试（`tenacity`，与 429 独立）。 |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` | SMTP。 |
 | `SMTP_FROM` / `MAIL_TO` | 发件人与收件人（可多地址逗号分隔）。 |
 | `SERVERCHAN_SENDKEY` | Server酱。 |
