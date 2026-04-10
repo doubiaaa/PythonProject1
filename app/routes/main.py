@@ -1,6 +1,8 @@
 from flask import render_template, request, jsonify
 from datetime import datetime
+import os
 import threading
+from typing import Any, Optional, Tuple
 from app import app
 from app.utils.config import ConfigManager
 from app.services.data_fetcher import DataFetcher
@@ -16,6 +18,28 @@ data_fetcher = DataFetcher(
 
 # 全局任务实例
 task = ReplayTask()
+
+
+def _replay_token_error() -> Optional[Tuple[Any, int]]:
+    """
+    若环境变量 REPLAY_API_TOKEN 已设置，则要求 Header X-Replay-Token
+    或 JSON 字段 replay_api_token 与其一致。
+    """
+    expected = (os.environ.get("REPLAY_API_TOKEN") or "").strip()
+    if not expected:
+        return None
+    data = request.get_json(silent=True) or {}
+    got = (request.headers.get("X-Replay-Token") or data.get("replay_api_token") or "").strip()
+    if got != expected:
+        return (
+            jsonify(
+                {
+                    "error": "未授权：口令无效或未携带（Header X-Replay-Token 或 JSON replay_api_token）",
+                }
+            ),
+            401,
+        )
+    return None
 
 
 def _apply_smtp_from_request(data: dict) -> None:
@@ -46,16 +70,21 @@ def index():
 
 @app.route('/api/start_replay', methods=['POST'])
 def start_replay():
+    err = _replay_token_error()
+    if err is not None:
+        return err
     data = request.get_json(silent=True) or {}
     date = data.get('date')
-    api_key = data.get('api_key')
+    api_key = (data.get('api_key') or '').strip()
     serverchan_sendkey = (data.get('serverchan_sendkey') or '').strip()
 
     if not date or len(date) != 8:
         return jsonify({"error": "日期格式应为YYYYMMDD，如20260309"}), 400
 
     if not api_key:
-        return jsonify({"error": "请输入智谱API Key"}), 400
+        api_key = (config_mgr.get("zhipu_api_key") or "").strip()
+    if not api_key:
+        return jsonify({"error": "请输入智谱 API Key，或在 replay_config.json 中保存 zhipu_api_key后留空提交"}), 400
 
     if not task.try_begin():
         return jsonify({"error": "复盘任务进行中，请稍后再试"}), 409
@@ -90,9 +119,12 @@ def task_status():
 
 @app.route('/api/get_defaults')
 def get_defaults():
+    zk = (config_mgr.get("zhipu_api_key") or "").strip()
     return jsonify({
         "default_date": datetime.now().strftime("%Y%m%d"),
-        "default_api_key": config_mgr.get("zhipu_api_key"),
+        "has_zhipu_api_key": bool(zk),
+        "zhipu_api_key_preview": (f"****{zk[-4:]}" if len(zk) >= 4 else ("****" if zk else "")),
+        "replay_api_auth_enabled": bool((os.environ.get("REPLAY_API_TOKEN") or "").strip()),
         "default_serverchan_sendkey": config_mgr.get("serverchan_sendkey", ""),
         "smtp_host": config_mgr.get("smtp_host", ""),
         "smtp_port": config_mgr.get("smtp_port", 587),
@@ -110,6 +142,9 @@ def send_result_email():
     将当前内存中最近一次「已完成」的复盘结果以 HTML 模板发信，用于预览邮件样式。
     请求体可带 smtp_* / mail_to（与页面表单一致）；须已填写有效 SMTP。
     """
+    err = _replay_token_error()
+    if err is not None:
+        return err
     data = request.get_json(silent=True) or {}
     snap = task.snapshot()
     if snap.get("status") != "completed":

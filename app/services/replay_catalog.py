@@ -437,13 +437,24 @@ def build_six_section_catalog(
         lines.append("- 未匹配到创业板指行，请见 **1.3 市场指数** 全表。\n\n")
 
     lines.append("---\n\n## 4. 龙虎榜数据\n\n")
-    lines.append("> 东财/新浪口径差异大，**仅供资金关注度参考**。\n\n")
-    lines.append("### 4.1 游资追踪（营业部统计·节选）\n\n")
-    lines.append(_lhb_trader_md(fetcher))
-    lines.append("### 4.2 机构买卖（上榜日统计·节选）\n\n")
-    lines.append(_lhb_institution_md(date, fetcher))
-    lines.append("### 4.3 营业部买入榜（排行·节选）\n\n")
-    lines.append(_lhb_yyb_md(fetcher))
+    try:
+        from app.utils.config import ConfigManager
+
+        _lhb_on = bool(ConfigManager().get("enable_replay_lhb_catalog", True))
+    except Exception:
+        _lhb_on = True
+    if not _lhb_on:
+        lines.append(
+            "> 已按配置 **跳过** 龙虎榜接口（`enable_replay_lhb_catalog: false`）。\n\n"
+        )
+    else:
+        lines.append("> 东财/新浪口径差异大，**仅供资金关注度参考**。\n\n")
+        lines.append("### 4.1 游资追踪（营业部统计·节选）\n\n")
+        lines.append(_lhb_trader_md(fetcher))
+        lines.append("### 4.2 机构买卖（上榜日统计·节选）\n\n")
+        lines.append(_lhb_institution_md(date, fetcher))
+        lines.append("### 4.3 营业部买入榜（排行·节选）\n\n")
+        lines.append(_lhb_yyb_md(fetcher))
 
     lines.append("---\n\n## 5. 情绪指数\n\n")
     lines.append("### 5.1 热点强度（程序）\n\n")

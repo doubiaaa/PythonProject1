@@ -145,6 +145,10 @@ def check_env_keys() -> None:
         _warn("未设置 ZHIPU_API_KEY（调用智谱时需要）")
     else:
         _ok("已设置 ZHIPU_API_KEY")
+    if (os.environ.get("REPLAY_API_TOKEN") or "").strip():
+        _ok("已设置 REPLAY_API_TOKEN（Web 复盘 API 将校验口令）")
+    else:
+        _skip("未设置 REPLAY_API_TOKEN（公网部署 Flask 时建议设置）")
 
 
 def check_imports() -> None:

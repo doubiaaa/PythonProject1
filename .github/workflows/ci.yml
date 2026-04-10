@@ -37,6 +37,11 @@ jobs:
       - name: Run pytest
         run: pytest tests/ -q
 
+      - name: Ruff (核心模块静态检查)
+        run: |
+          pip install ruff
+          ruff check app/routes/main.py app/services/replay_catalog.py app/services/replay_task.py app/utils/config.py app/services/data_fetcher.py tests/test_replay_catalog.py
+
       - name: Validate configs and data
         run: python scripts/validate.py
 

@@ -1,6 +1,7 @@
 from datetime import datetime
 import json
 import threading
+import time
 from typing import Any, Optional
 
 from config.replay_prompt_templates import build_main_replay_prompt
@@ -24,8 +25,14 @@ from app.services.zhipu_client import ZhipuClient
 from app.services.separation_confirmation import perform_separation_confirmation
 from app.services.news_mapper import analyze_finance_news
 
-MODEL_NAME = "glm-4-flash"  # 智谱免费模型
+DEFAULT_ZHIPU_MODEL = "glm-4-flash"
+MODEL_NAME = DEFAULT_ZHIPU_MODEL  # 兼容旧引用；实际以配置 zhipu_model_name 为准
 MAX_LOG_ENTRIES = 200
+
+
+def _resolve_zhipu_model() -> str:
+    raw = (ConfigManager().get("zhipu_model_name") or "").strip()
+    return raw or DEFAULT_ZHIPU_MODEL
 
 MODE_NAME = "次日竞价半路模式"
 
@@ -183,13 +190,14 @@ class ReplayTask:
         conn = float(ds.get("zhipu_connect_timeout", 10))
         read = float(ds.get("zhipu_read_timeout", 120))
         timeout = (conn, read)
-        client = ZhipuClient(api_key, model=MODEL_NAME, timeout=timeout)
+        client = ZhipuClient(api_key, model=_resolve_zhipu_model(), timeout=timeout)
         return client.chat_completion(
             prompt, temperature=temperature, max_tokens=max_tokens
         )
 
     def run(self, date, api_key, data_fetcher, serverchan_sendkey=None, email_cfg=None):
         actual_date = date
+        _t0 = time.monotonic()
         try:
             data_fetcher.set_current_task(self)
 
@@ -218,6 +226,7 @@ class ReplayTask:
             if market_data is None:
                 self.log("正在获取市场数据与次日竞价半路选股…")
                 market_data, actual_date = data_fetcher.get_market_summary(date)
+                self.log(f"阶段 get_market_summary 耗时 {time.monotonic() - _t0:.1f}s")
                 self.progress = 90
                 if _cfg.get("enable_replay_checkpoint", True):
                     try:
@@ -279,7 +288,9 @@ class ReplayTask:
                 separation_result=separation_result,
                 news_mapping=news_mapping,
             )
+            _t_ai = time.monotonic()
             result = self.call_zhipu(api_key, prompt)
+            self.log(f"阶段 zhipu_chat耗时 {time.monotonic() - _t_ai:.1f}s")
             # 从 data_fetcher 获取市场阶段，确保摘要一致性
             market_phase = getattr(data_fetcher, "_last_market_phase", "高位震荡期")
             result = _ensure_dragon_report_sections(_ensure_summary_line(result, market_phase))

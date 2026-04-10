@@ -233,6 +233,11 @@
                                 </button>
                             </div>
                         </div>
+                        <div id="replay-api-token-wrap" class="hidden">
+                            <label class="block text-xs font-medium uppercase tracking-wider text-gray-500 mb-2">复盘服务口令（可选）</label>
+                            <p class="text-xs text-gray-600 mb-2">服务端若设置环境变量 <code class="text-gray-400">REPLAY_API_TOKEN</code>，须在此填写相同口令</p>
+                            <input type="password" id="replay-api-token-input" class="input-premium w-full font-mono text-sm" placeholder="与服务器环境变量一致" autocomplete="off">
+                        </div>
                     </div>
                 </div>
                 <div class="glass-panel rounded-2xl sm:rounded-3xl p-6 sm:p-8">
@@ -442,6 +447,9 @@
             var smtpPort = smtpPortRaw ? parseInt(smtpPortRaw, 10) : 587;
             return {
                 date: document.getElementById('date-input').value.trim(),
+                replay_api_token: document.getElementById('replay-api-token-input')
+                    ? document.getElementById('replay-api-token-input').value.trim()
+                    : '',
                 smtp_host: document.getElementById('smtp-host-input').value.trim(),
                 smtp_port: smtpPort,
                 smtp_user: document.getElementById('smtp-user-input').value.trim(),
@@ -495,6 +503,8 @@
             document.getElementById('progress-percentage').textContent = pct + '%';
         }
 
+        var hasSavedZhipuKey = false;
+
         document.addEventListener('DOMContentLoaded', function () {
             const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
             document.getElementById('date-input').value = today;
@@ -502,8 +512,14 @@
             fetch('/api/get_defaults')
                 .then(function (r) { return r.json(); })
                 .then(function (data) {
-                    if (data.default_api_key) {
-                        document.getElementById('api-key-input').value = data.default_api_key;
+                    hasSavedZhipuKey = !!data.has_zhipu_api_key;
+                    var apiInput = document.getElementById('api-key-input');
+                    if (data.zhipu_api_key_preview) {
+                        apiInput.placeholder = '已保存 ' + data.zhipu_api_key_preview + ' · 可留空沿用本地配置';
+                    }
+                    if (data.replay_api_auth_enabled) {
+                        var rw = document.getElementById('replay-api-token-wrap');
+                        if (rw) { rw.classList.remove('hidden'); }
                     }
                     if (data.default_serverchan_sendkey) {
                         document.getElementById('serverchan-input').value = data.default_serverchan_sendkey;
@@ -641,8 +657,8 @@
                 showToast('日期须为 8 位数字', 'error');
                 return;
             }
-            if (!apiKey) {
-                showToast('请输入智谱 API Key', 'error');
+            if (!apiKey && !hasSavedZhipuKey) {
+                showToast('请输入智谱 API Key，或先在页面保存过一次配置后留空沿用', 'error');
                 return;
             }
 
@@ -663,6 +679,7 @@
                 body: JSON.stringify({
                     date: date,
                     api_key: apiKey,
+                    replay_api_token: document.getElementById('replay-api-token-input').value.trim(),
                     serverchan_sendkey: serverchanSendkey,
                     smtp_host: document.getElementById('smtp-host-input').value.trim(),
                     smtp_port: smtpPort,

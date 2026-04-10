@@ -88,6 +88,10 @@ DEFAULT_CONFIG = {
     "simulated_buy_price_type": "next_day_open",
     # 模拟账户每笔买卖成交通知（与复盘共用 SMTP / MAIL_TO）
     "enable_simulated_trade_notification": False,
+    # 复盘 Markdown 目录中「4. 龙虎榜数据」是否请求东财接口（关则可省多次外网调用）
+    "enable_replay_lhb_catalog": True,
+    # 智谱对话模型名（如 glm-4-flash）；空则使用程序内置默认
+    "zhipu_model_name": "",
     # 复盘断点：成功后写入 data/replay_status/；resume 为 True 时优先用缓存跳过数据拉取
     "enable_replay_checkpoint": True,
     "resume_replay_if_available": False,

@@ -241,8 +241,10 @@ flowchart LR
 | GET | `/` | 复盘首页模板。 |
 | POST | `/api/start_replay` | JSON：`date`、`api_key`；可选 SMTP/Server酱；异步执行 `ReplayTask.run`。 |
 | GET | `/api/task_status` | `status`、`result`、`logs`、`progress`。 |
-| GET | `/api/get_defaults` | 默认日期、已保存配置片段等。 |
+| GET | `/api/get_defaults` | 默认日期、SMTP 片段、`has_zhipu_api_key` / `zhipu_api_key_preview`（不回传完整 Key）、`replay_api_auth_enabled`。 |
 | POST | `/api/send_result_email` | JSON：可选 `date`、与复盘相同的 SMTP 字段；将**内存中最近一次成功复盘**的 Markdown 以 HTML 邮件发出（用于预览邮件样式）。 |
+
+**可选鉴权**：若设置环境变量 `REPLAY_API_TOKEN`，则 `POST /api/start_replay` 与 `POST /api/send_result_email` 须在 Header `X-Replay-Token` 或 JSON `replay_api_token` 中携带相同值。
 
 **并发**：`ReplayTask.try_begin()` 保证同时仅一个复盘任务。
 

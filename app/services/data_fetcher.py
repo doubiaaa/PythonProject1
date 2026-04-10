@@ -314,14 +314,14 @@ class DataFetcher:
         try:
             df = ak.stock_zh_a_spot_em()
         except Exception as e:
-            print(f"stock_zh_a_spot_em 失败，将尝试新浪备用源: {e}")
+            _log.warning("stock_zh_a_spot_em 失败，将尝试新浪备用源: %s", e)
         if df is None or df.empty:
             try:
                 df = ak.stock_zh_a_spot()
                 if df is not None and not df.empty:
-                    print("已使用新浪 stock_zh_a_spot 作为全市场行情备用源")
+                    _log.info("已使用新浪 stock_zh_a_spot 作为全市场行情备用源")
             except Exception as e2:
-                print(f"stock_zh_a_spot 备用源失败: {e2}")
+                _log.warning("stock_zh_a_spot 备用源失败: %s", e2)
                 df = pd.DataFrame()
         self._spot_em_df = df
         self._spot_em_cache_ts = now
@@ -341,7 +341,7 @@ class DataFetcher:
             if df is None:
                 df = pd.DataFrame()
         except Exception as e:
-            print(f"个股主力净流入排名获取失败: {e}")
+            _log.warning("个股主力净流入排名获取失败: %s", e)
             df = pd.DataFrame()
         self.cache[key] = (time.time(), df)
         return df
@@ -408,7 +408,7 @@ class DataFetcher:
             if df is None:
                 df = pd.DataFrame()
         except Exception as e:
-            print(f"概念板块成分获取失败 ({sym}): {e}")
+            _log.warning("概念板块成分获取失败 (%s): %s", sym, e)
             df = pd.DataFrame()
         self.cache[key] = (time.time(), df)
         return df
@@ -453,7 +453,7 @@ class DataFetcher:
         try:
             df = self.fetch_with_retry(ak.stock_zh_a_tick_tx_js, symbol=sym)
         except Exception as e:
-            print(f"分笔数据获取失败 ({sym}): {e}")
+            _log.warning("分笔数据获取失败 (%s): %s", sym, e)
             df = None
         self._tick_js_cache[sym] = (now, df)
         return df
@@ -683,7 +683,7 @@ class DataFetcher:
             )
 
             if df.empty:
-                print("获取板块资金流向数据为空")
+                _log.info("获取板块资金流向数据为空")
                 self._set_cache(cache_key, pd.DataFrame())
                 return pd.DataFrame()
 
@@ -710,7 +710,7 @@ class DataFetcher:
                 self._set_cache(cache_key, df_result)
                 return df_result
             else:
-                print(f"标准列名不存在，可用列: {df.columns.tolist()}")
+                _log.warning("标准列名不存在，可用列: %s", df.columns.tolist())
                 # 尝试模糊匹配（简单处理）
                 # 查找包含'名称'、'涨跌幅'、'主力净流入'的列
                 name_col = next((col for col in df.columns if '名称' in col), None)
@@ -731,10 +731,10 @@ class DataFetcher:
                     return pd.DataFrame()
 
         except Exception as e:
-            print(f"获取板块排名失败: {e}")
+            _log.warning("获取板块排名失败: %s", e)
             # 尝试备用接口：stock_fund_flow_industry
             try:
-                print("尝试备用接口: stock_fund_flow_industry")
+                _log.info("尝试备用接口: stock_fund_flow_industry")
                 df = ak.stock_fund_flow_industry(symbol="今日")
                 if not df.empty:
                     # 尝试模糊匹配列名
@@ -757,9 +757,9 @@ class DataFetcher:
                             self._set_cache(cache_key, df_result)
                             return df_result
                         except Exception as e3:
-                            print(f"数据转换失败: {e3}")
+                            _log.warning("数据转换失败: %s", e3)
             except Exception as e2:
-                print(f"备用接口也失败: {e2}")
+                _log.warning("备用接口也失败: %s", e2)
 
             self._set_cache(cache_key, pd.DataFrame())
             return pd.DataFrame()
@@ -838,7 +838,7 @@ class DataFetcher:
                 return 0.0, "无匹配数据"
             return round(avg_premium, 2), "正常"
         except Exception as e:
-            print(f"计算溢价异常: {e}")
+            _log.warning("计算溢价异常: %s", e)
             return -99.0, f"异常:{str(e)[:20]}"
 
     def _norm_code(self, c) -> str:
@@ -1884,9 +1884,9 @@ class DataFetcher:
             self._last_dragon_trader_meta = {}
             return summary, date
         if date not in trade_days:
-            print(f"{date} 非交易日，将自动调整")
+            _log.info("%s 非交易日，将自动调整", date)
             date = self.get_last_trade_day(date, trade_days)
-            print(f"调整为最近交易日: {date}")
+            _log.info("调整为最近交易日: %s", date)
 
         # 获取基础数据
         df_zt = self.get_zt_pool(date)
@@ -1985,7 +1985,7 @@ class DataFetcher:
             df_zb=df_zb,
         )
 
-        summary += f"## 基础数据\n"
+        summary += "## 基础数据\n"
         if up_n is not None and down_n is not None:
             summary += f"- 涨跌家数：上涨约 **{up_n}** 家，下跌约 **{down_n}** 家\n"
         summary += f"- 涨停数：{zt_count}\n"
