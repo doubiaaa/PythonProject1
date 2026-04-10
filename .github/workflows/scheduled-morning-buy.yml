@@ -9,7 +9,7 @@ name: Simulated morning buy (~9:31 CST)
 
 on:
   schedule:
-     - cron: "31 1 * * 1-5"
+    - cron: "31 1 * * 1-5"
   workflow_dispatch:
 
 concurrency:

@@ -1,4 +1,4 @@
-# 北京时间每天约 19:30 触发（相对原 21:00 提早 1.5h，缓解 GitHub Actions 常见延迟 1h+）。
+# 北京时间每天约 18:00 触发（在 19:30 基础上再提早 1.5h，进一步抵消 Actions 常见1h+ 延迟）。
 # 仅当「当日为 A 股交易日」时才跑复盘并发微信，周末/节假日直接跳过（成功退出）。
 # 须在仓库 Secrets 中配置（Settings → Secrets and variables → Actions）：
 #   ZHIPU_API_KEY       智谱 API Key
@@ -9,13 +9,13 @@
 #   SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASSWORD SMTP_FROM MAIL_TO
 #   SMTP_SSL  填 true / 1 表示 SMTPS（465）；留空则默认 STARTTLS（587）
 #
-# 说明：cron 使用 UTC。北京时间 19:30 = UTC 11:30。GitHub 可能对定时任务有几分钟到超 1 小时抖动。（schedule wake-up touch: 2026-03-30）
+# 说明：cron 使用 UTC。北京时间 18:00 = UTC 10:00。GitHub 可能对定时任务有几分钟到超 1 小时抖动。
 # 仅默认分支会按计划执行；并发组避免定时与手动同时跑两套任务。
-name: Nightly replay (~19:30 CST)
+name: Nightly replay (~18:00 CST)
 
 on:
   schedule:
-     - cron: "30 11 * * *"
+    - cron: "0 10 * * *"
   workflow_dispatch:
     inputs:
       date:
