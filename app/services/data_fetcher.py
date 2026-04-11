@@ -421,13 +421,13 @@ class DataFetcher:
                 return self._spot_em_df
             df = None
             try:
-                df = ak.stock_zh_a_spot_em()
+                df = self.fetch_with_retry(ak.stock_zh_a_spot_em)
             except Exception as e:
                 _log.warning("stock_zh_a_spot_em 失败，将尝试新浪备用源: %s", e)
-            if df is None or df.empty:
+            if df is None or getattr(df, "empty", True):
                 try:
-                    df = ak.stock_zh_a_spot()
-                    if df is not None and not df.empty:
+                    df = self.fetch_with_retry(ak.stock_zh_a_spot)
+                    if df is not None and not getattr(df, "empty", True):
                         _log.info("已使用新浪 stock_zh_a_spot 作为全市场行情备用源")
                 except Exception as e2:
                     _log.warning("stock_zh_a_spot 备用源失败: %s", e2)
@@ -687,7 +687,7 @@ class DataFetcher:
             self._set_cache(cache_key, disk["days"])
             return disk["days"]
         try:
-            cal = ak.tool_trade_date_hist_sina()
+            cal = self.fetch_with_retry(ak.tool_trade_date_hist_sina)
             self._validate_required_columns(cal, _dsc.REQUIRED_TRADE_CAL_COLUMNS, "交易日历")
             trade_days = sorted(
                 pd.to_datetime(cal["trade_date"]).dt.strftime("%Y%m%d").tolist()
@@ -873,12 +873,13 @@ class DataFetcher:
             # 使用正确的板块资金流向排名接口
             # indicator: "今日"、"3日"、"5日"、"10日"、"20日"
             # sector_type: "行业资金流"、"概念资金流"、"地域资金流"
-            df = ak.stock_sector_fund_flow_rank(
+            df = self.fetch_with_retry(
+                ak.stock_sector_fund_flow_rank,
                 indicator="今日",
-                sector_type="行业资金流"
+                sector_type="行业资金流",
             )
 
-            if df.empty:
+            if df is None or df.empty:
                 _log.info("获取板块资金流向数据为空")
                 self._set_cache(cache_key, pd.DataFrame())
                 return pd.DataFrame()
@@ -895,8 +896,10 @@ class DataFetcher:
             # 尝试备用接口：stock_fund_flow_industry
             try:
                 _log.info("尝试备用接口: stock_fund_flow_industry")
-                df = ak.stock_fund_flow_industry(symbol="今日")
-                if not df.empty:
+                df = self.fetch_with_retry(
+                    ak.stock_fund_flow_industry, symbol="今日"
+                )
+                if df is not None and not df.empty:
                     # 尝试模糊匹配列名
                     # 查找包含'行业'或'名称'的列
                     name_col = next((col for col in df.columns if '行业' in col or '名称' in col), None)
@@ -956,7 +959,8 @@ class DataFetcher:
         def one(code):
             c = re.sub(r"[^0-9]", "", str(code))[:6].zfill(6)
             try:
-                df = ak.stock_zh_a_hist(
+                df = self.fetch_with_retry(
+                    ak.stock_zh_a_hist,
                     symbol=c,
                     period="daily",
                     start_date=date_str,
@@ -983,8 +987,12 @@ class DataFetcher:
         """全市场行情过滤（涨停家数过多时的回退方案）"""
         norm = [re.sub(r"[^0-9]", "", str(x))[:6].zfill(6) for x in yest_codes]
         all_df = self.get_stock_zh_a_spot_em_cached()
-        if all_df.empty:
-            all_df = ak.stock_zh_a_spot()
+        if all_df is None or getattr(all_df, "empty", True):
+            try:
+                all_df = self.fetch_with_retry(ak.stock_zh_a_spot)
+            except Exception as e:
+                _log.warning("stock_zh_a_spot 备用失败: %s", e)
+                return None
         all_df["code"] = all_df["代码"].apply(
             lambda x: re.sub(r"[^0-9]", "", str(x))[:6]
         )
@@ -1037,7 +1045,8 @@ class DataFetcher:
         def one(raw):
             c = self._norm_code(raw)
             try:
-                df = ak.stock_zh_a_hist(
+                df = self.fetch_with_retry(
+                    ak.stock_zh_a_hist,
                     symbol=c,
                     period="daily",
                     start_date=date_str,

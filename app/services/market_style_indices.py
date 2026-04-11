@@ -21,11 +21,13 @@ from typing import Any, Optional
 import akshare as ak
 import pandas as pd
 
-_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
-DATA_DIR = os.path.join(_PROJECT_ROOT, "data")
-INDICES_FILE = os.path.join(DATA_DIR, "market_style_indices.json")
+from app.utils.config_paths import data_dir, market_style_indices_file
 
 _lock = threading.Lock()
+
+
+def _indices_path() -> str:
+    return market_style_indices_file()
 
 
 def norm_code(c: str) -> str:
@@ -33,14 +35,15 @@ def norm_code(c: str) -> str:
 
 
 def _ensure_dir() -> None:
-    os.makedirs(DATA_DIR, exist_ok=True)
+    os.makedirs(data_dir(), exist_ok=True)
 
 
 def _load_store() -> dict[str, Any]:
-    if not os.path.isfile(INDICES_FILE):
+    path = _indices_path()
+    if not os.path.isfile(path):
         return {"version": 1, "by_date": {}, "week_strict": {}}
     try:
-        with open(INDICES_FILE, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         if not isinstance(data, dict):
             return {"version": 1, "by_date": {}, "week_strict": {}}
@@ -53,10 +56,11 @@ def _load_store() -> dict[str, Any]:
 
 def _save_store(data: dict[str, Any]) -> None:
     _ensure_dir()
-    tmp = INDICES_FILE + ".tmp"
+    path = _indices_path()
+    tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, INDICES_FILE)
+    os.replace(tmp, path)
 
 
 def _find_trend_column(df: pd.DataFrame) -> Optional[str]:
@@ -156,13 +160,16 @@ def get_indices_for_dates(dates: list[str]) -> dict[str, dict[str, Any]]:
     return {d: bd[d] for d in dates if d in bd}
 
 
-def weekly_return_qfq(code: str, week_days: list[str]) -> Optional[float]:
-    """自然周内：首交易日开盘 → 末交易日收盘，前复权。"""
+def weekly_return_qfq(
+    code: str, week_days: list[str], fetcher: Any,
+) -> Optional[float]:
+    """自然周内：首交易日开盘 → 末交易日收盘，前复权（经 fetcher 统一熔断/重试）。"""
     if len(week_days) < 1:
         return None
     start, end = week_days[0], week_days[-1]
     try:
-        df = ak.stock_zh_a_hist(
+        df = fetcher.fetch_with_retry(
+            ak.stock_zh_a_hist,
             symbol=norm_code(code),
             period="daily",
             start_date=start,
@@ -185,8 +192,10 @@ def weekly_return_qfq(code: str, week_days: list[str]) -> Optional[float]:
         return None
 
 
-def _one_code_return(code: str, week_days: list[str]) -> tuple[str, Optional[float]]:
-    return code, weekly_return_qfq(code, week_days)
+def _one_code_return(
+    code: str, week_days: list[str], fetcher: Any,
+) -> tuple[str, Optional[float]]:
+    return code, weekly_return_qfq(code, week_days, fetcher)
 
 
 def compute_strict_week_top20_profile(
@@ -227,7 +236,9 @@ def compute_strict_week_top20_profile(
             codes = codes[:max_universe]
         rets: list[tuple[str, float]] = []
         with ThreadPoolExecutor(max_workers=max_workers) as ex:
-            futs = [ex.submit(_one_code_return, c, week_days) for c in codes]
+            futs = [
+                ex.submit(_one_code_return, c, week_days, fetcher) for c in codes
+            ]
             for fut in as_completed(futs):
                 c, r = fut.result()
                 if r is not None:

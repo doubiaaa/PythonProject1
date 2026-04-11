@@ -8,22 +8,25 @@ import os
 import threading
 from typing import Any
 
-_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
-DATA_DIR = os.path.join(_PROJECT_ROOT, "data")
-RECORDS_FILE = os.path.join(DATA_DIR, "watchlist_records.json")
+from app.utils.config_paths import data_dir, watchlist_records_file
 
 _lock = threading.Lock()
 
 
+def _records_path() -> str:
+    return watchlist_records_file()
+
+
 def _ensure_dir() -> None:
-    os.makedirs(DATA_DIR, exist_ok=True)
+    os.makedirs(data_dir(), exist_ok=True)
 
 
 def _load() -> dict[str, Any]:
-    if not os.path.isfile(RECORDS_FILE):
+    path = _records_path()
+    if not os.path.isfile(path):
         return {"version": 1, "records": []}
     try:
-        with open(RECORDS_FILE, "r", encoding="utf-8") as f:
+        with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
         if not isinstance(data, dict) or "records" not in data:
             return {"version": 1, "records": []}
@@ -36,10 +39,11 @@ def _load() -> dict[str, Any]:
 
 def _save(data: dict[str, Any]) -> None:
     _ensure_dir()
-    tmp = RECORDS_FILE + ".tmp"
+    path = _records_path()
+    tmp = path + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, RECORDS_FILE)
+    os.replace(tmp, path)
 
 
 def append_daily_top_pool(signal_date: str, top_pool: list[dict[str, Any]]) -> None:

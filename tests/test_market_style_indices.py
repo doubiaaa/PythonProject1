@@ -1,5 +1,5 @@
 """风格指数：周涨跌计算逻辑（mock 行情，不访问网络）。"""
-from unittest.mock import patch
+from unittest.mock import MagicMock
 
 import pandas as pd
 
@@ -15,11 +15,8 @@ def test_weekly_return_qfq_basic():
             "收盘": [10.2, 10.8, 11.5],
         }
     )
-
-    def fake_hist(*args, **kwargs):
-        return fake_df
-
-    with patch("app.services.market_style_indices.ak.stock_zh_a_hist", fake_hist):
-        r = weekly_return_qfq("600000", week_days)
+    fetcher = MagicMock()
+    fetcher.fetch_with_retry.return_value = fake_df
+    r = weekly_return_qfq("600000", week_days, fetcher)
     assert r is not None
     assert abs(r - (11.5 - 10.0) / 10.0 * 100) < 0.01
