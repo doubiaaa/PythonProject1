@@ -25,6 +25,7 @@ from app.services.replay_checkpoint import (
 from app.services.llm_client import get_llm_client
 from app.services.separation_confirmation import perform_separation_confirmation
 from app.services.news_mapper import analyze_finance_news
+from app.services.report_builder import append_core_stocks_and_plan_if_missing
 
 MAX_LOG_ENTRIES = 200
 
@@ -351,23 +352,44 @@ class ReplayTask:
             self.log(f"阶段 llm_chat 耗时 {time.monotonic() - _t_ai:.1f}s")
             # 从 data_fetcher 获取市场阶段，确保摘要一致性
             market_phase = getattr(data_fetcher, "_last_market_phase", "高位震荡期")
-            result = _ensure_dragon_report_sections(_ensure_summary_line(result, market_phase))
+            result = _ensure_summary_line(result, market_phase)
+            if not _is_llm_failure_payload(result):
+                _cm_rb = ConfigManager()
+                result = append_core_stocks_and_plan_if_missing(
+                    result,
+                    actual_date=actual_date,
+                    data_fetcher=data_fetcher,
+                    api_key=api_key,
+                    enable=bool(
+                        _cm_rb.get("enable_report_builder_core_stocks_plan", True)
+                    ),
+                    use_llm=bool(_cm_rb.get("enable_report_core_stocks_llm", False)),
+                )
+            result = _ensure_dragon_report_sections(result)
             if _is_llm_failure_payload(result):
                 self.log("大模型未返回正文（限速/余额/网络等），已附加说明；请勿将「缺章节」提示理解为模型漏写")
             else:
                 self.log("报告首行与龙头模板章节已校验（必要时已补全/提示）")
                 _cm_en = ConfigManager()
-                if _cm_en.get("enable_replay_llm_enhancements", True):
+                main_report_for_qc = result
+                _en_main = bool(_cm_en.get("enable_replay_llm_enhancements", True))
+                _en_qc = bool(_cm_en.get("enable_replay_llm_chapter_qc", True))
+                _en_cmp = bool(_cm_en.get("enable_replay_llm_comparison_narrative", True))
+                _en_news = bool(_cm_en.get("enable_replay_llm_news_deep", True))
+                if _en_main or _en_qc or _en_cmp or _en_news:
                     try:
                         from app.services.replay_llm_enhancements import (
                             collect_program_facts_snapshot,
+                            run_replay_chapter_quality,
+                            run_replay_comparison_narrative,
                             run_replay_deepseek_enhancements,
+                            run_replay_news_event_chain,
                         )
 
                         gap_en = float(
                             _cm_en.get("replay_llm_enhancements_spacing_sec", 8) or 0
                         )
-                        if gap_en > 0:
+                        if _en_main and gap_en > 0:
                             self.log(
                                 f"DeepSeek 增强块前等待 {gap_en:.0f}s（降低连发限速）"
                             )
@@ -378,21 +400,69 @@ class ReplayTask:
                             data_fetcher,
                             separation_result,
                         )
-                        mt = int(
-                            _cm_en.get("replay_llm_enhancements_max_tokens", 4096)
-                            or 4096
-                        )
-                        extra = run_replay_deepseek_enhancements(
-                            api_key,
-                            actual_date,
-                            pf,
-                            result,
-                            max_tokens=mt,
-                        )
-                        result = result + extra
-                        self.log("DeepSeek 增强块已附加")
+                        if _en_main:
+                            mt = int(
+                                _cm_en.get("replay_llm_enhancements_max_tokens", 6144)
+                                or 6144
+                            )
+                            extra = run_replay_deepseek_enhancements(
+                                api_key,
+                                actual_date,
+                                pf,
+                                result,
+                                max_tokens=mt,
+                            )
+                            result = result + extra
+                            self.log("DeepSeek 增强块已附加")
+                        gap_x = float(_cm_en.get("replay_llm_extra_spacing_sec", 8) or 0)
+                        if _en_qc:
+                            if gap_x > 0:
+                                time.sleep(gap_x)
+                            result = result + run_replay_chapter_quality(
+                                api_key,
+                                actual_date,
+                                pf,
+                                main_report_for_qc,
+                            )
+                            self.log("章节质控（周期/明日）已附加")
+                        if _en_cmp:
+                            if gap_x > 0:
+                                time.sleep(gap_x)
+                            result = result + run_replay_comparison_narrative(
+                                api_key,
+                                actual_date,
+                                market_data,
+                            )
+                            self.log("近5日变化叙事已附加")
+                        if _en_news:
+                            rel_n = getattr(
+                                data_fetcher, "_last_finance_news_related", None
+                            ) or []
+                            gen_n = getattr(
+                                data_fetcher, "_last_finance_news_general", None
+                            ) or []
+                            if rel_n or gen_n:
+                                if gap_x > 0:
+                                    time.sleep(gap_x)
+                                mi = int(_cm_en.get("email_news_max_items", 3) or 3)
+                                result = result + run_replay_news_event_chain(
+                                    api_key,
+                                    actual_date,
+                                    data_fetcher,
+                                    max_items_push=mi,
+                                )
+                                self.log("要闻深化（事件链）已附加")
                     except Exception as ex:
                         self.log(f"DeepSeek 增强块失败：{ex}")
+            try:
+                from app.services.historical_matcher import append_historical_similarity_block
+
+                result = append_historical_similarity_block(
+                    result, data_fetcher, actual_date
+                )
+            except Exception as ex:
+                self.log(f"历史相似形态回溯附加失败：{ex}")
+
             sum_line = _extract_summary_line(result)
             news_pre = (getattr(data_fetcher, "_last_news_push_prefix", None) or "").strip()
             if news_pre:
@@ -440,6 +510,11 @@ class ReplayTask:
                 )
                 _kpi = getattr(data_fetcher, "_last_email_kpi", None) or {}
                 _dm = getattr(data_fetcher, "_last_dragon_trader_meta", None) or {}
+                _title_tpl = str(
+                    _cm.get("report_title_template")
+                    or "T+0 竞价复盘 · 对 {trade_date} 的复盘"
+                )
+                _banner = _title_tpl.replace("{trade_date}", str(actual_date))
                 eok, emsg = send_report_email(
                     email_cfg,
                     subj,
@@ -447,6 +522,10 @@ class ReplayTask:
                     extra_vars={
                         "header_date": f"交易日 {actual_date}",
                         "title": subj,
+                        "report_banner_title": _banner,
+                        "system_name": str(
+                            _cm.get("email_system_name") or "T+0 竞价复盘系统"
+                        ),
                         "email_kpi": _kpi,
                         "email_dragon_meta": _dm,
                     },

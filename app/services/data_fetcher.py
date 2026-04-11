@@ -20,6 +20,7 @@ from tenacity import (
 from config import data_source_config as _dsc
 from app.services.data_source_errors import DataSourceExhaustedError, DataSourceInvalidError
 from app.utils.disk_cache import df_to_payload, payload_to_df
+from app.utils.ladder_utils import ladder_level_count, max_lb_from_ladder_dict
 from app.utils.logger import get_logger
 
 # 板块接口为「今日」行业资金流，与复盘日无关；缓存键勿绑定 date，避免误判
@@ -322,7 +323,12 @@ class DataFetcher:
         # 程序选股 meta（龙头池等），供存档与周度统计
         self._last_auction_meta: dict = {}
         self._last_email_kpi: dict = {}
+        self._last_premium_analysis: dict = {}
+        self._last_big_face_count: int = 0
+        self._last_sentiment_forecast: str = ""
         self._last_dragon_trader_meta: dict = {}
+        self._last_finance_news_related: list = []
+        self._last_finance_news_general: list = []
         self._tick_js_cache: dict[str, tuple[float, Optional[pd.DataFrame]]] = {}
 
     def _is_cache_valid(self, key):
@@ -638,7 +644,9 @@ class DataFetcher:
                 '连板数': 'lb', '炸板次数': 'zb_count', '所属行业': 'industry',
                 '涨停原因': 'reason', '最后封板时间': 'fb_time', '首次封板时间': 'first_time'
             })
-            df['lb'] = pd.to_numeric(df['lb'], errors='coerce').fillna(1).astype(int)
+            # 连板数：缺失→1；≤0 归一为 1（部分源用 0 表示首板，避免「最高连板」被算成 0）
+            _lb = pd.to_numeric(df["lb"], errors="coerce").fillna(1).astype(int)
+            df["lb"] = _lb.mask(_lb <= 0, 1)
             self._set_cache(cache_key, df)
             try:
                 _write_cache("zt_pool_em", str(date)[:8], df_to_payload(df))
@@ -1487,6 +1495,10 @@ class DataFetcher:
         multi_series: list[int] = []
         for d in days:
             df = self.get_zt_pool(d)
+            if df is not None and not df.empty and "lb" in df.columns:
+                _lb = pd.to_numeric(df["lb"], errors="coerce").fillna(1).astype(int)
+                df = df.copy()
+                df["lb"] = _lb.mask(_lb <= 0, 1)
             if df is None or df.empty or "lb" not in df.columns:
                 rows.append(
                     {
@@ -1502,7 +1514,9 @@ class DataFetcher:
             lb_stats = df["lb"].value_counts().sort_index()
             ladder = {int(k): int(v) for k, v in lb_stats.items()}
             total = len(df)
+            # 最高连板 = 当日连板数的最大值（与分档表一致），不用 0/1 类标记
             max_lb = int(df["lb"].max())
+            max_lb = max(max_lb, max_lb_from_ladder_dict(ladder))
             multi = sum(int(v) for k, v in ladder.items() if int(k) >= 2)
             rows.append(
                 {
@@ -1540,12 +1554,85 @@ class DataFetcher:
         for r in rows:
             lad = r.get("ladder") or {}
             ge5 = sum(int(lad[k]) for k in lad if int(k) >= 5)
+            mx = int(r.get("max_lb") or 0)
+            if mx <= 0:
+                mx = max_lb_from_ladder_dict(lad)
             lines.append(
                 f"| {r.get('date','')} | {r.get('total_zt',0)} | {r.get('multi_board_sum',0)} "
-                f"| {lad.get(2, 0)} | {lad.get(3, 0)} | {lad.get(4, 0)} | {ge5} | {r.get('max_lb',0)}板 |\n"
+                f"| {ladder_level_count(lad, 2)} | {ladder_level_count(lad, 3)} | {ladder_level_count(lad, 4)} | {ge5} | {mx}板 |\n"
             )
         lines.append(f"\n- **情绪倾向（程序口径）**：{trend}\n")
         return "".join(lines)
+
+    def compute_big_face_count(
+        self, date: str, trade_days: list[str], df_dt: pd.DataFrame
+    ) -> int:
+        """
+        大面家数：昨日涨停股中，今日跌幅 < -5% 或 跌停（计入跌停池）。
+        与「龙头选手·程序量化快照」口径一致。
+        """
+        if not trade_days or date not in trade_days:
+            return 0
+        idx = trade_days.index(date)
+        if idx == 0:
+            return 0
+        yest_date = trade_days[idx - 1]
+        yest_zt = self.get_zt_pool(yest_date)
+        if yest_zt is None or yest_zt.empty:
+            return 0
+        yest_codes = [self._norm_code(c) for c in yest_zt["code"].tolist()]
+        pct_map: dict[str, float] = {}
+        if len(yest_codes) <= YEST_PREMIUM_HIST_MAX_CODES:
+            pct_map = self._pct_map_for_codes_on_date(yest_codes, date)
+        if len(pct_map) < max(3, len(yest_codes) // 3):
+            pct_map = self._pct_map_from_spot_for_codes(yest_codes)
+        dt_codes: set[str] = set()
+        if df_dt is not None and not df_dt.empty and "code" in df_dt.columns:
+            dt_codes = {self._norm_code(x) for x in df_dt["code"].tolist()}
+        big_face = 0
+        for c in yest_codes:
+            pv = pct_map.get(c)
+            in_dt = c in dt_codes
+            if in_dt or (pv is not None and float(pv) < -5.0):
+                big_face += 1
+        return int(big_face)
+
+    def _zt_zhaban_percentiles(
+        self,
+        date: str,
+        trade_days: list[str],
+        zt_count: int,
+        zhaban_rate: float,
+        lookback: int = 15,
+    ) -> tuple[Optional[float], Optional[float]]:
+        """近 lookback 个交易日内，涨停家数与炸板率的经验分位（0～100）。"""
+        if not trade_days or date not in trade_days:
+            return None, None
+        idx = trade_days.index(date)
+        start = max(0, idx - lookback)
+        past_days = trade_days[start:idx]
+        if not past_days:
+            return None, None
+        zts: list[int] = []
+        zhrs: list[float] = []
+        for d in past_days:
+            dz = self.get_zt_pool(d)
+            db = self.get_zb_pool(d)
+            zn = len(dz) if dz is not None and not dz.empty else 0
+            bn = len(db) if db is not None and not db.empty else 0
+            tot = zn + bn
+            zr = round(bn / tot * 100, 2) if tot > 0 else 0.0
+            zts.append(zn)
+            zhrs.append(zr)
+        if not zts:
+            return None, None
+        bz = sum(1 for x in zts if zt_count > x)
+        ez = sum(1 for x in zts if zt_count == x)
+        zt_pct = round((bz + 0.5 * ez) / len(zts) * 100.0, 0)
+        bb = sum(1 for x in zhrs if zhaban_rate > x)
+        eb = sum(1 for x in zhrs if zhaban_rate == x)
+        zb_pct = round((bb + 0.5 * eb) / len(zhrs) * 100.0, 0)
+        return zt_pct, zb_pct
 
     def build_dragon_trader_snapshot(
         self,
@@ -1679,15 +1766,10 @@ class DataFetcher:
         if len(pct_map) < max(3, len(yest_codes) // 3):
             pct_map = self._pct_map_from_spot_for_codes(yest_codes)
 
-        big_face = 0
+        big_face = self.compute_big_face_count(date, trade_days, df_dt)
         dt_codes: set[str] = set()
         if df_dt is not None and not df_dt.empty and "code" in df_dt.columns:
             dt_codes = {self._norm_code(x) for x in df_dt["code"].tolist()}
-        for c in yest_codes:
-            pv = pct_map.get(c)
-            in_dt = c in dt_codes
-            if in_dt or (pv is not None and float(pv) < -5.0):
-                big_face += 1
         meta["big_face_count"] = big_face
         lines.append(
             f"- **大面数（程序口径）**：昨日涨停股中今日 **跌幅 < -5%** 或 **跌停** 计 **{big_face}** 只（每票最多计一次）\n"
@@ -1875,20 +1957,21 @@ class DataFetcher:
                 "\n## 【财经要闻·与程序观察标的】\n"
                 "- 要闻接口暂不可用或为空，今日不复述外围消息。\n\n"
             )
+            self._last_finance_news_related = []
+            self._last_finance_news_general = []
             return line, ""
 
         codes, names = _news_keywords_from_meta(ah_meta or {})
         related: list[tuple[str, str, str]] = []
         general: list[tuple[str, str]] = []
-        
-        # 存储新闻数据到实例变量，供要闻映射使用
-        news_list = []
+
+        # 存储新闻数据到实例变量，供要闻映射使用（原始抓取，供宽匹配）
+        news_list_raw: list[str] = []
         for _, row in df.head(20).iterrows():
             summary = str(row.get("summary") or "").strip()
             if summary:
-                news_list.append(summary)
-        self._last_finance_news = news_list
-        
+                news_list_raw.append(summary)
+
         for _, row in df.head(100).iterrows():
             tag = str(row.get("tag") or "").strip()
             summary = str(row.get("summary") or "").strip()
@@ -1899,6 +1982,31 @@ class DataFetcher:
                 related.append((tag, summary, hint))
             else:
                 general.append((tag, summary))
+
+        try:
+            from app.services.news_fetcher import filter_news
+
+            rel_dicts = filter_news(
+                [{"tag": t, "summary": s, "hint": h} for t, s, h in related],
+                min_score=0.6,
+                max_items=10,
+                related_boost=True,
+            )
+            gen_dicts = filter_news(
+                [{"tag": t, "summary": s} for t, s in general],
+                min_score=0.6,
+                max_items=3,
+                related_boost=False,
+            )
+            related = [
+                (d["tag"], d["summary"], d.get("hint") or "") for d in rel_dicts
+            ]
+            general = [(d["tag"], d["summary"]) for d in gen_dicts]
+        except Exception as ex:
+            _log.warning("要闻相关性过滤失败，使用原始列表：%s", ex)
+
+        fin_list: list[str] = [s for _, s, __ in related] + [s for _, s in general]
+        self._last_finance_news = fin_list if fin_list else news_list_raw
 
         lines = ["\n## 【财经要闻·与程序观察标的】\n"]
         lines.append(
@@ -1937,11 +2045,19 @@ class DataFetcher:
         push_text = "\n".join(push_lines).strip()
         if len(push_text) > 2400:
             push_text = push_text[:2380] + "\n…（要闻已截断）"
+        self._last_finance_news_related = [
+            {"tag": t, "summary": s, "hint": h} for t, s, h in related
+        ]
+        self._last_finance_news_general = [
+            {"tag": t, "summary": s} for t, s in general
+        ]
         if not related and not general:
             block = (
                 "\n## 【财经要闻·与程序观察标的】\n"
                 "- 今日未解析到有效要闻条目。\n\n"
             )
+            self._last_finance_news_related = []
+            self._last_finance_news_general = []
             return block, ""
         return block, push_text + "\n\n---\n\n"
 
@@ -1950,12 +2066,20 @@ class DataFetcher:
         self._last_news_push_prefix = ""
         self._last_auction_meta = {}
         self._last_email_kpi = {}
+        self._last_premium_analysis = {}
+        self._last_big_face_count = 0
+        self._last_sentiment_forecast = ""
         self._last_dragon_trader_meta = {}
+        self._last_finance_news_related = []
+        self._last_finance_news_general = []
         summary = ""
         trade_days = self.get_trade_cal()
         if not trade_days:
             summary += "## 基础数据\n- 无法获取交易日历，请检查网络或数据源。\n\n"
             self._last_email_kpi = {}
+            self._last_premium_analysis = {}
+            self._last_big_face_count = 0
+            self._last_sentiment_forecast = ""
             self._last_dragon_trader_meta = {}
             return summary, date
         if date not in trade_days:
@@ -1971,6 +2095,21 @@ class DataFetcher:
         df_zb = self.get_zb_pool(date)
         df_sector = self.get_sector_rank(date)
         premium, premium_note = self.get_yest_zt_premium(date, trade_days)
+        try:
+            from app.services.market_kpi import premium_analysis
+
+            self._last_premium_analysis = premium_analysis(
+                premium, premium_note, date, trade_days, self
+            )
+        except Exception as e:
+            _log.warning("premium_analysis 失败: %s", e)
+            self._last_premium_analysis = {
+                "display_line": (
+                    f"{premium if premium != -99 else premium_note}"
+                ),
+                "premium": premium,
+                "premium_note": premium_note,
+            }
         north_money, north_status = self.get_north_money(date)
 
         zt_count = len(df_zt)
@@ -1978,6 +2117,13 @@ class DataFetcher:
         zb_count = len(df_zb)
         total = zt_count + zb_count
         zhaban_rate = round(zb_count / total * 100, 2) if total > 0 else 0
+
+        try:
+            self._last_big_face_count = int(
+                self.compute_big_face_count(str(date)[:8], trade_days, df_dt)
+            )
+        except Exception:
+            self._last_big_face_count = 0
 
         # 计算情绪温度
         sentiment_temp = 0
@@ -1993,7 +2139,19 @@ class DataFetcher:
         elif dt_count < 10:
             sentiment_temp += 10
 
-        if premium > 3:
+        pa = getattr(self, "_last_premium_analysis", None) or {}
+        m5 = pa.get("mean_5")
+        past_n = int(pa.get("past_sample_n") or 0)
+        if premium != -99 and m5 is not None and past_n >= 2:
+            diff = float(premium) - float(m5)
+            band = max(0.4, abs(float(m5)) * 0.12)
+            if diff > band:
+                sentiment_temp += 25
+            elif diff > 0:
+                sentiment_temp += 15
+            elif float(premium) > 0:
+                sentiment_temp += 5
+        elif premium > 3:
             sentiment_temp += 25
         elif premium > 1:
             sentiment_temp += 15
@@ -2012,7 +2170,7 @@ class DataFetcher:
             if not df_zt.empty and "lb" in df_zt.columns
             else 0
         )
-        market_phase, position_suggestion = compute_short_term_market_phase(
+        market_phase, _legacy_position = compute_short_term_market_phase(
             sentiment_temp,
             zt_count,
             dt_count,
@@ -2020,6 +2178,24 @@ class DataFetcher:
             max_lb_phase,
             float(premium),
         )
+        try:
+            zt_pct, zb_pct = self._zt_zhaban_percentiles(
+                str(date)[:8], trade_days, zt_count, zhaban_rate
+            )
+        except Exception:
+            zt_pct, zb_pct = None, None
+        try:
+            from app.services.position_sizer import calc_position
+
+            position_suggestion = calc_position(
+                market_phase,
+                zhaban_rate,
+                zt_count,
+                zt_percentile=zt_pct,
+                zb_percentile=zb_pct,
+            )
+        except Exception:
+            position_suggestion = _legacy_position
 
         # 存储市场阶段到实例变量，供其他方法使用
         self._last_market_phase = market_phase
@@ -2073,13 +2249,52 @@ class DataFetcher:
             "> **涨跌结构、涨跌停、北向、情绪温度/阶段/建议仓位** 见篇首目录 **§1.2 市场数据概括**；"
             "此处避免重复占用上下文。\n\n"
         )
-        summary += f"- 昨日涨停溢价：{premium if premium != -99 else premium_note}\n\n"
+        _pa_line = (pa.get("display_line") if isinstance(pa, dict) else None) or (
+            f"{premium if premium != -99 else premium_note}"
+        )
+        summary += f"- 昨日涨停溢价：{_pa_line}\n\n"
         if hasattr(self, "_last_sentiment_markdown") and self._last_sentiment_markdown:
             summary += self._last_sentiment_markdown
         summary += (
             "\n> **口径**：正文叙事以目录 **§1.2** 的 **情绪温度、市场阶段、建议仓位** 为主轴；"
             "上表 **情绪周期量化评分（0～10）** 为辅助刻度，勿与主轴打架。\n\n"
         )
+
+        try:
+            from app.services.ladder_stats import compute_promotion_rates_md
+
+            summary += compute_promotion_rates_md(self, str(date)[:8], trade_days, df_zt)
+        except Exception as ex:
+            _log.warning("连板晋级率块跳过：%s", ex)
+
+        try:
+            from app.services.cycle_analyzer import sentiment_forecast
+
+            ix = trade_days.index(str(date)[:8])
+            zhaban_rate_prev = None
+            if ix > 0:
+                pd_ = trade_days[ix - 1]
+                pzt = self.get_zt_pool(pd_)
+                pzb = self.get_zb_pool(pd_)
+                zn = len(pzt) if pzt is not None and not getattr(pzt, "empty", True) else 0
+                bbn = len(pzb) if pzb is not None and not getattr(pzb, "empty", True) else 0
+                totp = zn + bbn
+                zhaban_rate_prev = (
+                    round(bbn / totp * 100, 2) if totp > 0 else None
+                )
+            sf = sentiment_forecast(
+                zhaban_rate=zhaban_rate,
+                zhaban_rate_prev=zhaban_rate_prev,
+                premium=float(premium),
+                dt_count=int(dt_count),
+                market_phase=str(market_phase),
+            )
+            self._last_sentiment_forecast = sf
+            summary += "## 【程序·明日情绪推演】\n\n"
+            summary += f"> {sf}\n\n"
+        except Exception as ex:
+            self._last_sentiment_forecast = ""
+            _log.warning("明日情绪推演跳过：%s", ex)
 
         summary += "## 板块资金流向\n"
         summary += (
@@ -2189,13 +2404,23 @@ class DataFetcher:
             summary += f"\n## 分时成交探测\n- 跳过：{e!s}\n\n"
 
         _ty, _rp, _ = self._spot_turnover_rise_rate_flat()
+        _pa = getattr(self, "_last_premium_analysis", None) or {}
+        _bf = int(getattr(self, "_last_big_face_count", 0) or 0)
         self._last_email_kpi = {
             "zt_count": int(zt_count),
             "dt_count": int(dt_count),
             "zb_count": int(zb_count),
             "zhaban_rate": float(zhaban_rate),
+            "big_loss_count": _bf,
+            "big_loss_display": f"大面: {_bf}只（昨涨停今跌超5%或跌停）",
             "premium": float(premium) if premium != -99 else None,
             "premium_note": str(premium_note),
+            "premium_display": (_pa.get("display_line") if isinstance(_pa, dict) else None)
+            or "",
+            "premium_mean_5": _pa.get("mean_5") if isinstance(_pa, dict) else None,
+            "premium_percentile": _pa.get("percentile") if isinstance(_pa, dict) else None,
+            "premium_rating": (_pa.get("rating") if isinstance(_pa, dict) else None)
+            or "",
             "position_suggestion": str(position_suggestion),
             "turnover_yi_est": _ty,
             "rise_rate_pct": _rp,

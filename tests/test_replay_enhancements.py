@@ -36,4 +36,6 @@ def test_build_enhancement_prompt_has_sections():
     )
     assert "一致性核对" in p
     assert "多空对照" in p
-    assert "龙头池观察清单" in p
+    assert "龙头池逐票观察清单" in p
+    assert "程序异常与假设验证" in p
+    assert "主线与题材结构" in p

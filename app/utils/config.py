@@ -31,6 +31,11 @@ DEFAULT_CONFIG = {
     # 要闻摘要中需剔除的固定前缀（正则字面替换）
     "email_news_filter_prefix": "【本文系数据通用户提前专享】",
     "email_app_version": "1.0",
+    # 邮件/HTML 页眉主标题；{trade_date} 替换为 YYYYMMDD 交易日
+    "report_title_template": "T+0 竞价复盘 · 对 {trade_date} 的复盘",
+    "email_system_name": "T+0 竞价复盘系统",
+    # 复盘长文末尾是否附加「历史相似形态回溯」（额外拉取多日涨停池，略慢）
+    "enable_historical_similarity": True,
     # 周报邮件是否尝试内嵌项目根目录下的权重/净值图（需先生成 png）
     "weekly_email_attach_charts": True,
     "cache_expire": 3600,  # 缓存过期时间（秒）
@@ -84,14 +89,24 @@ DEFAULT_CONFIG = {
     "enable_style_stability_probe": False,
     # 启用风格探测时，探测完成后再等待秒数再调主长文（降低连续请求被限流）
     "replay_llm_spacing_sec": 15,
+    # 主文若漏写「五、核心股聚焦」「七、明日预案」，由 report_builder 在免责声明前插入程序补充
+    "enable_report_builder_core_stocks_plan": True,
+    "enable_report_core_stocks_llm": False,
     # 主文生成后追加 DeepSeek 增强块（一致性核对、多空对照、龙头观察、待验证点；多一次 API）
     "enable_replay_llm_enhancements": True,
-    "replay_llm_enhancements_max_tokens": 4096,
+    "replay_llm_enhancements_max_tokens": 6144,
     "replay_llm_enhancements_spacing_sec": 8,
+    # 增强块之后的独立 DeepSeek 调用（各多一次 API，注意 429）
+    "enable_replay_llm_chapter_qc": True,
+    "enable_replay_llm_comparison_narrative": True,
+    "enable_replay_llm_news_deep": True,
+    "replay_llm_extra_spacing_sec": 8,
     # 周报在风格诊断之后再追加「周度节奏与变化叙事」（多一次 API）
     "enable_weekly_llm_trend_narrative": True,
     # 周报权重更新后异常时额外发一封提醒邮件
     "enable_weekly_weight_anomaly_email": True,
+    # 周末更新五桶权重后，追加 DeepSeek 白话解释（多一次 API）
+    "enable_weekly_weight_llm_explanation": True,
     # 复盘 Markdown 目录中「4. 龙虎榜数据」是否请求东财接口（关则可省多次外网调用）
     "enable_replay_lhb_catalog": True,
     # 复盘目录是否拉取「概念资金流」TOP（与行业榜并列，偏题材向；多一次东财请求）

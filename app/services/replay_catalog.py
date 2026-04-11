@@ -93,15 +93,17 @@ def _index_pct_row(df: Optional[pd.DataFrame], name_subs: tuple[str, ...]) -> Op
     return None
 
 
-def _ascii_lb_bars(df_zt: pd.DataFrame, max_width: int = 28) -> str:
+def _ascii_lb_bars(df_zt: pd.DataFrame, max_width: int = 30) -> str:
     if df_zt is None or df_zt.empty or "lb" not in df_zt.columns:
         return "- （无涨停池）\n"
+    from app.utils.output_formatter import draw_text_bar
+
     vc = df_zt["lb"].value_counts().sort_index()
-    mx = max(int(vc.max()), 1)
+    total = max(len(df_zt), 1)
     lines = []
     for lb, cnt in vc.items():
-        w = max(1, int(round(cnt / mx * max_width)))
-        lines.append(f"- {int(lb)} 连板 │{'█' * w} {int(cnt)} 只\n")
+        line = draw_text_bar(f"{int(lb)}连板", int(cnt), total, max_len=max_width)
+        lines.append(f"- {line}\n")
     return "".join(lines) + "\n"
 
 
@@ -669,6 +671,14 @@ def build_six_section_catalog(
         )
         lines.append(f"| 成交额（估） | **{ty}** |\n")
     lines.append(f"| 北向 | {north_s} |\n")
+    pa = getattr(fetcher, "_last_premium_analysis", None) or {}
+    if isinstance(pa, dict) and (pa.get("display_line") or "").strip():
+        lines.append(f"| 昨日涨停溢价 | {pa['display_line']} |\n")
+    bf = getattr(fetcher, "_last_big_face_count", None)
+    if bf is not None and int(bf) >= 0:
+        lines.append(
+            f"| 大面（亏钱效应） | **{int(bf)}** 只（昨涨停今跌超 **5%** 或跌停） |\n"
+        )
     lines.append(
         f"| 情绪温度 / 阶段 | **{sentiment_temp}°C** · **{market_phase}** · 建议仓位 **{position_suggestion}** |\n"
     )

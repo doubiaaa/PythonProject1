@@ -604,6 +604,9 @@ def build_auction_halfway_report(
             "tech_score": round(float(r["tech_score"]), 2),
             "sector": r["sector"],
             "tag": r["tag"],
+            "lb": int(r.get("lb", 0) or 0),
+            "pct": round(float(r.get("pct") or 0.0), 2),
+            "turn": round(float(r.get("turn") or 0.0), 2),
             "s1_main": int(r.get("s1", 0)),
             "close": round(
                 float(spot_full.get(r["code"], {}).get("close") or 0.0), 4

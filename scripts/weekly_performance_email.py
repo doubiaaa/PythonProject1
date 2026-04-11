@@ -45,7 +45,8 @@ def _call_llm_weekly_style(api_key: str, md: str) -> str:
         "- **情绪阶段**（四选一：主升期 / 震荡分歧 / 退潮期 / 数据不足）：简述依据（1～2 点）。\n"
         "- **占优模式**（四选一：打板接力 / 趋势抱团 / 低吸反包 / 混沌难辨）：结合涨停家数、炸板率、溢价、连板高度、标签归因等简述。\n"
         "- **体量风格**（大盘 / 小盘 / 数据不足）：参考文中「锚点日涨幅前 20」的市值与换手。\n"
-        "- **与上周对比**：若文中有上周溢价对比，写一句；若无则写「本周数据未提供上周对比」。\n\n"
+        "- **本周 vs 上周（必填）**：从 **风格赚钱效应**、**涨停溢价环境**、**连板高度** 三方面各写一句「变 / 不变」；"
+        "若文中无上周数据则写「未提供上周对照」。\n\n"
         "### 策略归因摘要\n"
         "- 用一句话概括：本周程序龙头池样本中，哪类标签（若有）平均表现相对更好/更差（统计向，非荐股）。\n\n"
         "### 下周侧重（观察向，非投资建议）\n"
@@ -205,6 +206,28 @@ def main() -> int:
                     "策略偏好已更新（data/strategy_preference.json，供次日复盘动态侧重）",
                     flush=True,
                 )
+                if cm.get("enable_weekly_weight_llm_explanation", True) and api_key_w:
+                    try:
+                        from app.services.replay_llm_enhancements import (
+                            run_weekly_weight_explanation,
+                        )
+
+                        md += run_weekly_weight_explanation(
+                            api_key_w,
+                            previous_weights=dict(
+                                upd.get("previous_weights") or {}
+                            ),
+                            merged_weights=dict(
+                                upd.get("strategy_weights") or {}
+                            ),
+                            suggested=dict(upd.get("last_suggested") or {}),
+                            counts=dict(upd.get("last_bucket_counts") or {}),
+                            iso_year=iso_year,
+                            iso_week=iso_week,
+                            anchor=anchor,
+                        )
+                    except Exception as e:
+                        md += f"\n\n（五桶权重白话说明生成失败：{e}）\n"
                 alerts = upd.get("weight_alerts") or []
                 if alerts and cm.get("enable_weekly_weight_anomaly_email", True):
                     from app.services.email_notify import (

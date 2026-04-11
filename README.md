@@ -1,9 +1,13 @@
-# 次日竞价半路 · A 股收盘复盘系统（完整说明）
+# T+0 竞价复盘 · A 股收盘智能简报（完整说明）
 
-本仓库是一套**命令行驱动的 A 股收盘复盘流水线**：程序侧通过 **akshare** 等拉取交易日历与行情，按「次日竞价半路」策略生成**主线、龙头池（top_pool）**、情绪阶段、篇首程序目录与市场摘要；再调用 **DeepSeek**（OpenAI 兼容 `chat/completions`）生成固定章节结构的 Markdown 长文，并可追加多段 **LLM 增强**；结果可 **SMTP 邮件**投递。系统**无 Web 前端**（`run.py` 仅提示已移除 Flask）。
+本仓库是一套**命令行驱动的 A 股收盘复盘流水线**：在**当日收盘后**拉取交易日历、涨跌停池、板块与资金流等，按「**次日竞价半路**」策略（见 `auction_halfway_strategy`）生成**主线、龙头池（`top_pool`）**、市场阶段与篇首程序目录；再调用 **DeepSeek**（OpenAI 兼容 `chat/completions`）按固定章节输出 Markdown 长文，并可叠加多段 **LLM 增强**与**程序补全块**；结果支持 **SMTP 邮件**投递。页眉标题默认强调 **「对某一交易日的复盘」**（`report_title_template`），避免与「次日竞价」字面混淆。系统**无 Web 前端**（`run.py` 仅提示已移除 Flask）。
+
+**你能得到什么**：一份「程序算清量、模型写得像」的复盘材料——上半部分是可核对的数据表与 KPI，下半部分是可读的周期叙事与预案；二者用同一套交易日与池子对齐，减少口径漂移。
+
+**阅读建议**：先扫 **[程序侧量化与报告增强（能力清单）](#程序侧量化与报告增强能力清单)** 建立模块地图；再按 **[日度复盘：`ReplayTask` 逐步](#日度复盘replaytask-逐步)** 理解一次完整跑数；配置项以 **[配置：`DEFAULT_CONFIG` 全量说明](#配置default_config-全量说明)** 为索引。
 
 > **声明**：输出仅供研究或自用记录，不构成投资建议。程序不对第三方数据源（如 akshare）的准确性、实时性作担保。  
-> **维护**：实现细节以源码与 `tests/` 为准；架构级约定另见根目录 **`ARCHITECTURE.md`**。
+> **维护**：实现细节以源码与 `tests/` 为准；模块边界与排错另见 **`ARCHITECTURE.md`**。
 
 ---
 
@@ -12,24 +16,25 @@
 1. [核心理念与术语](#核心理念与术语)  
 2. [技术栈](#技术栈)  
 3. [业务全景](#业务全景)  
-4. [日度复盘：`ReplayTask` 逐步](#日度复盘replaytask-逐步)  
-5. [数据与策略：`DataFetcher` 与关联模块](#数据与策略datafetcher-与关联模块)  
-6. [篇首目录：`replay_catalog`](#篇首目录replay_catalog)  
-7. [分离确认、要闻映射、Prompt](#分离确认要闻映射prompt)  
-8. [大模型客户端与限流](#大模型客户端与限流)  
-9. [复盘增强与周报叙事](#复盘增强与周报叙事)  
-10. [邮件、模板与推送块](#邮件模板与推送块)  
-11. [持久化：档案、风格指数、断点](#持久化档案风格指数断点)  
-12. [周度闭环与策略偏好](#周度闭环与策略偏好)  
-13. [配置：`DEFAULT_CONFIG` 全量说明](#配置default_config-全量说明)  
-14. [嵌套 `data_source` 与数据源环境变量](#嵌套-data_source-与数据源环境变量)  
-15. [环境变量总表（LLM / SMTP / 策略 / 校验）](#环境变量总表llm--smtp--策略--校验)  
-16. [数据文件、缓存与断点目录](#数据文件缓存与断点目录)  
-17. [脚本一览](#脚本一览)  
-18. [测试、CI、GitHub Actions](#测试cigithub-actions)  
-19. [部署](#部署)  
-20. [仓库顶层结构（补充）](#仓库顶层结构补充)  
-21. [辅助文档与排错索引](#辅助文档与排错索引)
+4. [程序侧量化与报告增强（能力清单）](#程序侧量化与报告增强能力清单)  
+5. [日度复盘：`ReplayTask` 逐步](#日度复盘replaytask-逐步)  
+6. [数据与策略：`DataFetcher` 与关联模块](#数据与策略datafetcher-与关联模块)  
+7. [篇首目录：`replay_catalog`](#篇首目录replay_catalog)  
+8. [分离确认、要闻映射、Prompt](#分离确认要闻映射prompt)  
+9. [大模型客户端与限流](#大模型客户端与限流)  
+10. [复盘增强与周报叙事](#复盘增强与周报叙事)  
+11. [邮件、模板与推送块](#邮件模板与推送块)  
+12. [持久化：档案、风格指数、断点](#持久化档案风格指数断点)  
+13. [周度闭环与策略偏好](#周度闭环与策略偏好)  
+14. [配置：`DEFAULT_CONFIG` 全量说明](#配置default_config-全量说明)  
+15. [嵌套 `data_source` 与数据源环境变量](#嵌套-data_source-与数据源环境变量)  
+16. [环境变量总表（LLM / SMTP / 策略 / 校验）](#环境变量总表llm--smtp--策略--校验)  
+17. [数据文件、缓存与断点目录](#数据文件缓存与断点目录)  
+18. [脚本一览](#脚本一览)  
+19. [测试、CI、GitHub Actions](#测试cigithub-actions)  
+20. [部署](#部署)  
+21. [仓库顶层结构（补充）](#仓库顶层结构补充)  
+22. [辅助文档与排错索引](#辅助文档与排错索引)
 
 ---
 
@@ -43,8 +48,10 @@
 | **信号日** | 复盘成功写入 `watchlist_records.json` 的 `signal_date`（一般为程序完成的交易日）。 |
 | **五桶权重** | 打板、低吸、趋势、龙头、其他；存于 `strategy_preference.json`，经 `build_prompt_addon` 注入主复盘 Prompt。 |
 | **自然周** | 周报以 ISO 周（年-周）与锚点交易日组织，细节以 `weekly_performance.py` 为准。 |
-| **市场阶段** | `compute_short_term_market_phase` 等逻辑输出的阶段文案（如主升期、高位震荡期、退潮·冰点期、混沌·试错期），与建议仓位区间一并供模型对齐。 |
-| **情绪量化评分** | `sentiment_scorer.calculate_sentiment_score` 基于溢价、连板高度、炸板率、涨跌比等的 0～10 辅助分（与阶段叙事并存）。 |
+| **市场阶段** | `compute_short_term_market_phase` 输出的四象限文案（主升 / 高位震荡 / 退潮·冰点 / 混沌·试错）；与模型 **§1.2** 须对齐。 |
+| **建议仓位（程序）** | `position_sizer.calc_position` 给出的**区间**（如 `20-35%`），由阶段 + 炸板率与涨停家数分位等共同决定；**非**固定百分比。 |
+| **情绪量化评分** | `sentiment_scorer.calculate_sentiment_score`：溢价、连板高度、炸板率、涨跌比等加权 0～10 分，**辅助**刻度，不覆盖 §1.2 主轴。 |
+| **大面（亏钱效应）** | 昨日涨停、今日 **跌幅低于 -5%** 或 **跌停** 计数；与龙头快照、邮件 KPI、§1.2 表一致。 |
 
 ---
 
@@ -94,6 +101,28 @@ flowchart TB
 
 ---
 
+## 程序侧量化与报告增强（能力清单）
+
+以下能力均在 **`get_market_summary`** 或 **复盘任务** 中落地，写入 `market_data` 或邮件 `extra_vars`，供模型与读者**同一口径**引用。若某条依赖外网或缓存，失败时多降级为「—」或跳过，不阻断主流程。
+
+| 能力 | 模块 / 入口 | 一句话说明 |
+|------|----------------|------------|
+| 昨日涨停溢价 | `app/services/market_kpi.py` → `premium_analysis` | 相对近 5 个交易日均值的偏离、历史分位与 **偏低 / 正常 / 偏高** 文案；非静态「正常」标签。 |
+| 亏钱效应（大面） | `DataFetcher.compute_big_face_count`、`market_kpi.big_loss_metrics` | 昨日涨停股今日 **跌超 5%** 或 **跌停** 的家数；篇首 §1.2、邮件 KPI 与龙头快照一致。 |
+| 要闻噪声过滤 | `app/services/news_fetcher.py` → `relevance_scoring`、`filter_news` | 宏观/关联摘要 **相关性 > 0.6**；龙头池命中项略抬分，避免误杀纯个股公告；宏观摘录 **最多 3 条**。 |
+| 连板梯队条形图 | `app/utils/output_formatter.py` → `draw_text_bar` | `replay_catalog` 中 **「2连板: N ███░ (x.x%)」** 式文本条，占涨停池比例一目了然。 |
+| 建议仓位（动态） | `app/services/position_sizer.py` → `calc_position` | 与 **市场阶段**、近窗 **涨停家数 / 炸板率分位**、绝对炸板率挂钩的区间字符串（非固定 30%）。 |
+| 明日情绪推演 | `app/services/cycle_analyzer.py` → `sentiment_forecast` | 结合炸板率变化、溢价、跌停数的**定性**预判句，摘要中单列 **「程序·明日情绪推演」**。 |
+| 连板晋级率 | `app/services/ladder_stats.py` → `compute_promotion_rates_md` | **1→2 / 2→3 / 3→4** 文本表（昨日涨停池与今日涨停池对齐）。 |
+| 历史相似形态 | `app/services/historical_matcher.py` | 约半年窗口内 **3 个**最相似交易日及 **T+1～T+3** 结构快照；默认在免责声明前插入（`enable_historical_similarity`）。 |
+| 五 / 七节补全 | `app/services/report_builder.py` | 模型漏写 **「五、核心股聚焦」「七、明日预案」** 时按程序事实补块（可选 LLM 润色）。 |
+| 主 Prompt 与别名 | `config/replay_prompt_templates.py`、`app/services/llm_section_generator.py` | 固定章节与 **总龙头须来自 `top_dragon`/涨停池** 等硬性约束；后者为模板 re-export，便于检索。 |
+| 邮件标题与系统名 | `app/utils/config.py` | **`report_title_template`**（支持 `{trade_date}`）、**`email_system_name`**（如「T+0 竞价复盘系统」），与正文「当日复盘」语义一致。 |
+
+**近 5 日连板历史表「最高」列**：由 `ladder_utils.display_max_lb_row` 等与 `compute_ladder_history_5d` 对齐，避免 `max_lb` 为 0/1 时与分档表矛盾（详见 `tests/test_ladder_utils.py`）。
+
+---
+
 ## 日度复盘：`ReplayTask` 逐步
 
 实现类：`app/services/replay_task.py` 中 **`ReplayTask.run(date, api_key, data_fetcher, email_cfg)`**。类内另有 `build_prompt`、`call_llm`、`try_begin`/`snapshot`/`log` 等（`snapshot` 供轮询形态使用，当前无 Web 亦可用于调试）。
@@ -108,17 +137,18 @@ flowchart TB
 | 6 | **风格稳定性探测**（`enable_style_stability_probe`，默认关）：`probe_style_stability` → `effective_weights_from_stability`；随后 **`replay_llm_spacing_sec` 睡眠**，再构建 Prompt。 |
 | 7 | **`build_prompt`**：含 `build_prompt_addon`（五桶）、`dragon_meta` JSON 块、分离块、要闻块、主模板 **`MAIN_REPLAY_PROMPT`**。 |
 | 8 | **`call_llm`** → **`_ensure_summary_line`**（用 `_last_market_phase`）→ **`_ensure_dragon_report_sections`**；若返回体被识别为 API 失败载荷，附加说明而不误判为「缺章节」。 |
-| 9 | **`enable_replay_llm_enhancements`**：`collect_program_facts_snapshot` + `run_replay_deepseek_enhancements`，**`replay_llm_enhancements_spacing_sec`** 间隔；`replay_llm_enhancements_max_tokens` 控制长度。 |
-| 10 | **`_last_news_push_prefix`**：经 **`truncate_finance_news_push_prefix`**（`email_news_max_items`、`email_news_filter_prefix`）拼到正文**最前**。 |
-| 11 | **`program_completed` 且 `top_pool`**：`append_daily_top_pool` → **`data/watchlist_records.json`**。 |
-| 12 | **`enable_daily_style_indices_persist`**：`persist_daily_indices` → **`data/market_style_indices.json`**。 |
-| 13 | **邮件**：`has_email_config` 时 **`send_report_email`**，主题含 **`_extract_summary_line`**；附带 `email_kpi`、`email_dragon_meta` 等 `extra_vars`。失败路径同样可发信。 |
+| 9 | 若开启任一复盘 LLM 附加项：`collect_program_facts_snapshot`（含程序异常标签、龙头池字段）；可选依次：**`run_replay_deepseek_enhancements`**（主增强块）、**`run_replay_chapter_quality`**（周期/明日量表）、**`run_replay_comparison_narrative`**（近5日变化）、**`run_replay_news_event_chain`**（要闻事件链与噪声相关度）；间隔见 **`replay_llm_enhancements_spacing_sec`** / **`replay_llm_extra_spacing_sec`**。 |
+| 10 | **`append_historical_similarity_block`**（默认开）：在 **免责声明** 前插入「历史相似形态回溯」（依赖多日涨停池拉取，略增耗时；见 **`enable_historical_similarity`**）。 |
+| 11 | **`_last_news_push_prefix`**：经 **`truncate_finance_news_push_prefix`**（`email_news_max_items`、`email_news_filter_prefix`）拼到正文**最前**（含上述 LLM 输出之后）。 |
+| 12 | **`program_completed` 且 `top_pool`**：`append_daily_top_pool` → **`data/watchlist_records.json`**。 |
+| 13 | **`enable_daily_style_indices_persist`**：`persist_daily_indices` → **`data/market_style_indices.json`**。 |
+| 14 | **邮件**：`has_email_config` 时 **`send_report_email`**；`extra_vars` 含 **`report_banner_title`**（来自 `report_title_template`）、**`email_kpi`**（含大面、溢价文案、动态仓位等）、**`email_dragon_meta`**。失败路径同样可发信。 |
 
 ---
 
 ## 数据与策略：`DataFetcher` 与关联模块
 
-- **`app/services/data_fetcher.py`**：交易日历、指数与个股快照、涨跌停池、板块与资金流、财联社要闻、龙虎榜（目录用）、概念/行业资金快照、`get_market_summary` 组装**完整市场 Markdown**（含 **`replay_catalog`** 注入的篇首目录、情绪仪表盘、连板条形图等）。  
+- **`app/services/data_fetcher.py`**：交易日历、指数与个股快照、涨跌停池、板块与资金流、财联社要闻（经 **`news_fetcher`** 过滤）、龙虎榜（目录用）、概念/行业资金快照；**`get_market_summary`** 串联篇首目录、**溢价分析、大面计数、晋级率表、明日情绪推演**、龙头快照、半路选股与 AI 提示块，形成注入主 Prompt 的 **`market_data`**。  
 - **`app/services/auction_halfway_strategy.py`**：主线与 **`top_pool`** 核心逻辑；与 `meta.program_completed`、`abort_reason` 等配合。  
 - **`app/services/sentiment_scorer.py`**：情绪周期量化评分（多因子加权），由 `data_fetcher` 在合适位置调用 **`calculate_sentiment_score`**。  
 - **`app/services/technical_indicators.py`**、**`trend_momentum_strategy.py`**：技术面与动量相关计算（供策略/摘要使用，具体调用链见源码）。  
@@ -131,6 +161,8 @@ flowchart TB
 ## 篇首目录：`replay_catalog`
 
 - **`app/services/replay_catalog.py`**：按业务约定拼装 **「【程序生成】复盘数据目录」**（**0 盘面总览** + **1～6** 复盘总结块：首封时段、涨停原因、特色数据、龙虎榜、情绪指数与龙头池档案/快照、两市五日涨幅等；数据源不足时仍保留小节标题与说明）。  
+- **§1.1 连板梯队**：除文字结构外，使用 **`output_formatter.draw_text_bar`** 生成分档 **文本条形图**（占涨停池比例）。  
+- **§1.2 市场数据概括**：表格中含 **昨日涨停溢价（带分档文案）**、**大面家数**、北向与情绪温度等（具体以当日数据为准）。  
 - 与 `DataFetcher` 内 `get_market_summary` 紧耦合；板块/概念资金流、监控池行数、五日榜 TOP N 等均受 **`replay_config.json`** 中 `enable_replay_*`、`replay_watchlist_*`、`replay_spot_5d_*` 控制。
 
 ---
@@ -141,7 +173,9 @@ flowchart TB
 |------|------|------|
 | 分离确认 | `app/services/separation_confirmation.py` | 基于涨停池与交易日历，分时异动与同梯队候选，输出 **`perform_separation_confirmation`** 结构体。 |
 | 要闻映射 | `app/services/news_mapper.py` | **`analyze_finance_news`**：关键词与板块映射、与 **龙头池** 字面命中等，生成可嵌入 Prompt 的 Markdown 段。 |
-| 主模板 | `config/replay_prompt_templates.py` | **`MAIN_REPLAY_PROMPT`**、`build_main_replay_prompt`：固定章节（一至九章结构等），与程序目录约定对齐。 |
+| 要闻抓取后过滤 | `app/services/news_fetcher.py` | 在 `get_finance_news_bundle` 内对关联/宏观列表做 **相关性打分** 与条数限制，压低 OCR/弱关联噪声。 |
+| 主模板 | `config/replay_prompt_templates.py` | **`MAIN_REPLAY_PROMPT`**、`build_main_replay_prompt`：固定章节（一至九章）、**总龙头事实来源**、**明日情绪推演** 等与程序块对齐。 |
+| 模板别名 | `app/services/llm_section_generator.py` | 对主模板 re-export，便于按「章节生成器」关键词检索。 |
 | 策略附加 | `app/services/strategy_preference.py` | **`build_prompt_addon`**、**`load_strategy_preference`**、**`probe_style_stability`**、**`effective_weights_from_stability`**。 |
 
 ---
@@ -170,8 +204,9 @@ flowchart TB
 ## 邮件、模板与推送块
 
 - **`app/services/email_notify.py`**：**`resolve_email_config`**（环境变量优先于配置文件）、**`has_email_config`**、**`send_report_email`**、**`send_simple_email`**。  
-- **`app/utils/email_template.py`**：**`markdown_to_email_html`**、**`truncate_finance_news_push_prefix`**、**`embed_image_cid`**（周报内嵌 `weights_trend.png`）等。  
-- 配置项：**`email_html_template_enabled`**、**`email_content_prefix`**、**`email_news_max_items`**、**`email_news_filter_prefix`**、**`email_app_version`**、**`weekly_email_attach_charts`**。
+- **`app/utils/email_template.py`**：**`markdown_to_email_html`**、**`build_email_content_prefix`**（页眉标题、**MARKET KPI 卡**、连板历史模块、说明段）、**`truncate_finance_news_push_prefix`**、**`embed_image_cid`**（周报内嵌 `weights_trend.png`）等。  
+- **KPI 卡**（`build_kpi_card_html`）：涨停/跌停、炸板率、昨日溢价（可含近 5 日对比句）、**大面家数**、**建议仓位区间**——与 `get_market_summary` 末尾写入的 **`_last_email_kpi`** 一致。  
+- 配置项：**`email_html_template_enabled`**、**`email_content_prefix`**、**`email_news_max_items`**、**`email_news_filter_prefix`**、**`email_app_version`**、**`weekly_email_attach_charts`**；页眉主标题见 **`report_title_template`**（`{trade_date}`），页脚系统名见 **`email_system_name`**。
 
 ---
 
@@ -222,6 +257,9 @@ flowchart TB
 | `email_news_max_items` | 邮件顶部要闻块最多条数。 |
 | `email_news_filter_prefix` | 要闻摘要剔除的前缀（字面替换）。 |
 | `email_app_version` | 邮件展示版本号。 |
+| `report_title_template` | 邮件/HTML 页眉主标题；支持占位符 **`{trade_date}`**（YYYYMMDD）。默认强调「对某日复盘」，与「次日竞价」策略名区分。 |
+| `email_system_name` | 页脚与模板中的系统展示名（如 **T+0 竞价复盘系统**）。 |
+| `enable_historical_similarity` | 是否在长文 **免责声明** 前插入「历史相似形态回溯」（会多拉历史日涨停池，略增耗时）。 |
 | `weekly_email_attach_charts` | 周报是否尝试附 `weights_trend.png`。 |
 | `cache_expire` | 通用缓存过期（秒）。 |
 | `retry_times` | DataFetcher 等网络重试（语义见代码）。 |
@@ -266,10 +304,15 @@ flowchart TB
 |----|------|
 | `enable_style_stability_probe` | 主文前风格探测（多一次 API）。 |
 | `replay_llm_spacing_sec` | 探测后与主文之间的等待秒数。 |
-| `enable_replay_llm_enhancements` | 主文后增强块。 |
-| `replay_llm_enhancements_max_tokens` | 增强块 max_tokens。 |
+| `enable_replay_llm_enhancements` | 主文后增强块（一致性、多空、异常假设验证、主线结构、龙头逐票观察等）。 |
+| `replay_llm_enhancements_max_tokens` | 增强块 max_tokens（默认 6144）。 |
 | `replay_llm_enhancements_spacing_sec` | 主文与增强块间隔秒数。 |
-| `enable_weekly_llm_trend_narrative` | 周报周度叙事。 |
+| `enable_replay_llm_chapter_qc` | 独立调用：周期定性 / 明日预案 **1～5 分量表与缺口分析**。 |
+| `enable_replay_llm_comparison_narrative` | 独立调用：**相对昨日与近 5 日**变化叙事。 |
+| `enable_replay_llm_news_deep` | 独立调用：要闻 **事件—板块—情绪**链 + 未推送要闻 **相关度一句**（依赖 `enable_finance_news`）。 |
+| `replay_llm_extra_spacing_sec` | 上述独立调用之间的间隔秒数（降 429）。 |
+| `enable_weekly_llm_trend_narrative` | 周报周度叙事（含本周 vs 上周：风格/溢价/连板高度）。 |
+| `enable_weekly_weight_llm_explanation` | 周末五桶权重更新后 **白话解释**（多一次 API）。 |
 | `enable_weekly_weight_anomaly_email` | 权重异常单独发信。 |
 
 ### 复盘目录与监控池
@@ -367,10 +410,15 @@ flowchart TB
 | `test_replay_llm_failure.py` | LLM 失败载荷识别等。 |
 | `test_replay_summary.py` | 摘要行。 |
 | `test_finance_news.py` / `test_news_mapper_pool.py` | 要闻与映射。 |
+| `test_news_fetcher.py` | 要闻相关性打分与过滤。 |
+| `test_market_kpi.py` | 溢价分档、大面指标等。 |
+| `test_output_formatter.py` | 文本条形图 `draw_text_bar`。 |
+| `test_ladder_utils.py` | 连板「最高」列与分档解析。 |
 | `test_market_phase.py` | 市场阶段。 |
 | `test_market_style_indices.py` | 风格指数。 |
 | `test_strategy_preference.py` | 策略偏好。 |
 | `test_weekly_performance.py` / `test_weekly_attribution.py` | 周报与归因。 |
+| `test_report_builder.py` | 五/七节补全等。 |
 
 ### CI（`.github/workflows/ci.yml`）
 
@@ -403,7 +451,7 @@ flowchart TB
 
 | 路径 | 说明 |
 |------|------|
-| `app/` | 业务包：`services/`（复盘、数据、策略、邮件等）、`utils/`（`config`、`email_template`、`logger`、`disk_cache`）。 |
+| `app/` | 业务包：`services/`（复盘、`data_fetcher`、策略、邮件；以及 **`market_kpi`**、**`news_fetcher`**、**`position_sizer`**、**`cycle_analyzer`**、**`ladder_stats`**、**`historical_matcher`** 等量化辅助）、`utils/`（`config`、`email_template`、`output_formatter`、`logger`、`disk_cache`）。 |
 | `config/` | `replay_prompt_templates.py`、`data_source_config.py`、`strategy_preference_config.py` 及包初始化。 |
 | `tests/` | `pytest` 用例。 |
 | `.github/workflows/` | `ci.yml`、`scheduled-nightly.yml`、`weekly-report.yml`、`deploy.yml`。 |
@@ -422,4 +470,4 @@ flowchart TB
 
 ---
 
-*行为以主分支源码与 `pytest` 为准；配置项增减请同步更新 `app/utils/config.py` 与本 README / `ARCHITECTURE.md`。*
+*行为以主分支源码与 `pytest` 为准。新增程序侧能力时，请同步更新 **`app/utils/config.py`**、本 README 的 [能力清单](#程序侧量化与报告增强能力清单) 与 **`ARCHITECTURE.md`**（若涉及模块边界）。*

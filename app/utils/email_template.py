@@ -13,6 +13,8 @@ from typing import Any, Optional
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from app.utils.ladder_utils import display_max_lb_row, ladder_level_count
+
 _PROJECT_ROOT = os.path.abspath(
     os.path.join(os.path.dirname(__file__), os.pardir, os.pardir)
 )
@@ -168,6 +170,7 @@ def build_kpi_card_html(kpi: dict[str, Any]) -> str:
     zb = kpi.get("zhaban_rate")
     prem = kpi.get("premium")
     prem_note = kpi.get("premium_note") or ""
+    prem_disp = (kpi.get("premium_display") or "").strip()
 
     def cell(label: str, val_html: str, *, accent: str = "#0f172a") -> str:
         return (
@@ -181,13 +184,25 @@ def build_kpi_card_html(kpi: dict[str, Any]) -> str:
     zt_html = f'<span style="color:#15803d;">{html.escape(str(zt))}</span>'
     dt_html = f'<span style="color:#b91c1c;">{html.escape(str(dt))}</span>'
     zb_html = html.escape(f"{zb}%" if zb is not None else "—")
-    if prem is not None:
+    if prem_disp:
+        prem_plain = prem_disp.replace("**", "")
+        pcol = "#15803d" if prem is not None and float(prem) > 0 else "#64748b"
+        prem_html = f'<span style="color:{pcol};font-size:18px;line-height:1.35;">{html.escape(prem_plain)}</span>'
+    elif prem is not None:
         pcol = "#15803d" if float(prem) > 0 else "#64748b"
         prem_html = f'<span style="color:{pcol};">{html.escape(str(prem))}</span>'
         if prem_note:
             prem_html += f' <span style="font-size:11px;color:#94a3b8;">{html.escape(str(prem_note))}</span>'
     else:
         prem_html = html.escape(str(prem_note) or "—")
+
+    bl_disp = (kpi.get("big_loss_display") or "").strip()
+    if bl_disp:
+        big_html = f'<span style="color:#b45309;">{html.escape(bl_disp)}</span>'
+    else:
+        nbl = kpi.get("big_loss_count")
+        big_html = html.escape(str(nbl)) if nbl is not None else "—"
+    pos_s = html.escape(str(kpi.get("position_suggestion") or "—"))
 
     return (
         '<div style="margin:0 0 16px;padding:0;">'
@@ -201,6 +216,9 @@ def build_kpi_card_html(kpi: dict[str, Any]) -> str:
         + "</tr><tr>"
         + cell("炸板率", zb_html)
         + cell("昨日涨停溢价", prem_html)
+        + "</tr><tr>"
+        + cell("大面家数（亏钱效应）", big_html, accent="#b45309")
+        + cell("建议仓位（程序区间）", f'<span style="font-size:18px;">{pos_s}</span>')
         + "</tr></table></div>"
     )
 
@@ -294,25 +312,26 @@ def build_ladder_distribution_email_html(
     for r in hist:
         lad = r.get("ladder") or {}
         ge5 = sum(int(lad[k]) for k in lad if int(k) >= 5)
+        mx_show = display_max_lb_row(r)
         rows_html.append(
             "<tr>"
             f'<td style="border:1px solid #e2e8f0;padding:6px 8px;font-size:12px;">{html.escape(str(r.get("date", "")))}</td>'
             f'<td style="border:1px solid #e2e8f0;padding:6px 8px;text-align:right;">{r.get("total_zt", 0)}</td>'
             f'<td style="border:1px solid #e2e8f0;padding:6px 8px;text-align:right;">{r.get("multi_board_sum", 0)}</td>'
-            f'<td style="border:1px solid #e2e8f0;padding:6px 8px;text-align:right;">{lad.get(2, 0)}</td>'
-            f'<td style="border:1px solid #e2e8f0;padding:6px 8px;text-align:right;">{lad.get(3, 0)}</td>'
-            f'<td style="border:1px solid #e2e8f0;padding:6px 8px;text-align:right;">{lad.get(4, 0)}</td>'
+            f'<td style="border:1px solid #e2e8f0;padding:6px 8px;text-align:right;">{ladder_level_count(lad, 2)}</td>'
+            f'<td style="border:1px solid #e2e8f0;padding:6px 8px;text-align:right;">{ladder_level_count(lad, 3)}</td>'
+            f'<td style="border:1px solid #e2e8f0;padding:6px 8px;text-align:right;">{ladder_level_count(lad, 4)}</td>'
             f'<td style="border:1px solid #e2e8f0;padding:6px 8px;text-align:right;">{ge5}</td>'
-            f'<td style="border:1px solid #e2e8f0;padding:6px 8px;text-align:center;">{r.get("max_lb", 0)}板</td>'
+            f'<td style="border:1px solid #e2e8f0;padding:6px 8px;text-align:center;">{mx_show}板</td>'
             "</tr>"
         )
     last = hist[-1]
     lad0 = last.get("ladder") or {}
     tot = int(last.get("total_zt") or 0) or 1
     levels = [
-        ("2 连板", int(lad0.get(2, 0))),
-        ("3 连板", int(lad0.get(3, 0))),
-        ("4 连板", int(lad0.get(4, 0))),
+        ("2 连板", ladder_level_count(lad0, 2)),
+        ("3 连板", ladder_level_count(lad0, 3)),
+        ("4 连板", ladder_level_count(lad0, 4)),
         ("5 连及以上", sum(int(lad0[k]) for k in lad0 if int(k) >= 5)),
     ]
     mx = max((x[1] for x in levels), default=1)

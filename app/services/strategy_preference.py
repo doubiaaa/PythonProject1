@@ -437,6 +437,7 @@ def update_from_recent_returns(
     out = {
         **cur,
         "strategy_weights": merged,
+        "previous_weights": dict(old),
         "effective_date": anchor_date,
         "notes": notes,
         "last_suggested": suggested,
@@ -446,7 +447,13 @@ def update_from_recent_returns(
         "weight_history": hist,
     }
     with _lock:
-        _save_pref({k: v for k, v in out.items() if k != "weight_alerts"})
+        _save_pref(
+            {
+                k: v
+                for k, v in out.items()
+                if k not in ("weight_alerts", "previous_weights")
+            }
+        )
         _append_log(
             {
                 "time": datetime.now().isoformat(timespec="seconds"),
