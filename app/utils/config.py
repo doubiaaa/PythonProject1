@@ -3,7 +3,7 @@ import os
 from functools import lru_cache
 from typing import Any, Optional
 
-from app.infrastructure.config_defaults import DEFAULT_CONFIG, frozen_defaults
+from app.infrastructure.config_defaults import frozen_defaults
 from app.infrastructure.unified_config import build_effective_config
 
 # config.py 位于 app/utils/，项目根需上溯三级
