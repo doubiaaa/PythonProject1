@@ -24,17 +24,18 @@
 9. [大模型客户端与限流](#大模型客户端与限流)  
 10. [复盘增强与周报叙事](#复盘增强与周报叙事)  
 11. [邮件、模板与推送块](#邮件模板与推送块)  
-12. [持久化：档案、风格指数、断点](#持久化档案风格指数断点)  
-13. [周度闭环与策略偏好](#周度闭环与策略偏好)  
-14. [配置：`DEFAULT_CONFIG` 全量说明](#配置default_config-全量说明)  
-15. [嵌套 `data_source` 与数据源环境变量](#嵌套-data_source-与数据源环境变量)  
-16. [环境变量总表（LLM / SMTP / 策略 / 校验）](#环境变量总表llm--smtp--策略--校验)  
-17. [数据文件、缓存与断点目录](#数据文件缓存与断点目录)  
-18. [脚本一览](#脚本一览)  
-19. [测试、CI、GitHub Actions](#测试cigithub-actions)  
-20. [部署](#部署)  
-21. [仓库顶层结构（补充）](#仓库顶层结构补充)  
-22. [辅助文档与排错索引](#辅助文档与排错索引)
+12. [复盘文末五人理论与每周温习](#复盘文末五人理论与每周温习)  
+13. [持久化：档案、风格指数、断点](#持久化档案风格指数断点)  
+14. [周度闭环与策略偏好](#周度闭环与策略偏好)  
+15. [配置：`DEFAULT_CONFIG` 全量说明](#配置default_config-全量说明)  
+16. [嵌套 `data_source` 与数据源环境变量](#嵌套-data_source-与数据源环境变量)  
+17. [环境变量总表（LLM / SMTP / 策略 / 校验）](#环境变量总表llm--smtp--策略--校验)  
+18. [数据文件、缓存与断点目录](#数据文件缓存与断点目录)  
+19. [脚本一览](#脚本一览)  
+20. [测试、CI、GitHub Actions](#测试cigithub-actions)  
+21. [部署](#部署)  
+22. [仓库顶层结构（补充）](#仓库顶层结构补充)  
+23. [辅助文档与排错索引](#辅助文档与排错索引)
 
 ---
 
@@ -142,7 +143,8 @@ flowchart TB
 | 11 | **`_last_news_push_prefix`**：经 **`truncate_finance_news_push_prefix`**（`email_news_max_items`、`email_news_filter_prefix`）拼到正文**最前**（含上述 LLM 输出之后）。 |
 | 12 | **`program_completed` 且 `top_pool`**：`append_daily_top_pool` → **`data/watchlist_records.json`**。 |
 | 13 | **`enable_daily_style_indices_persist`**：`persist_daily_indices` → **`data/market_style_indices.json`**。 |
-| 14 | **邮件**：`has_email_config` 时 **`send_report_email`**；`extra_vars` 含 **`report_banner_title`**（来自 `report_title_template`）、**`email_kpi`**（含大面、溢价文案、动态仓位等）、**`email_dragon_meta`**。失败路径同样可发信。 |
+| 14 | **`append_replay_viewpoint_footer`**：在要闻前缀拼入之后，为定稿追加 **「每日必看 吾日三省吾身」** 区块（五人 PNG + **`replay_footer_commentary`** 解读 + 附录；邮件 **`inline_images`** 见 `replay_footer_inline_images`）。 |
+| 15 | **邮件**：`has_email_config` 时 **`send_report_email`**；`extra_vars` 含 **`report_banner_title`**（来自 `report_title_template`）、**`email_kpi`**（含大面、溢价文案、动态仓位等）、**`email_dragon_meta`**。失败路径同样可发信。 |
 
 ---
 
@@ -207,6 +209,24 @@ flowchart TB
 - **`app/utils/email_template.py`**：**`markdown_to_email_html`**、**`build_email_content_prefix`**（页眉标题、**MARKET KPI 卡**、连板历史模块、说明段）、**`truncate_finance_news_push_prefix`**、**`embed_image_cid`**（周报内嵌 `weights_trend.png`）等。  
 - **KPI 卡**（`build_kpi_card_html`）：涨停/跌停、炸板率、昨日溢价（可含近 5 日对比句）、**大面家数**、**建议仓位区间**——与 `get_market_summary` 末尾写入的 **`_last_email_kpi`** 一致。  
 - 配置项：**`email_html_template_enabled`**、**`email_content_prefix`**、**`email_news_max_items`**、**`email_news_filter_prefix`**、**`email_app_version`**、**`weekly_email_attach_charts`**；页眉主标题见 **`report_title_template`**（`{trade_date}`），页脚系统名见 **`email_system_name`**。
+
+---
+
+## 复盘文末五人理论与每周温习
+
+日复盘主文在邮件发出前，会在末尾追加**固定附图区**（与正文由 `---` 分隔），用于温习短线名家框架；**每周六**还可单独再发一封**仅含该温习内容**的邮件，与当日复盘无关。
+
+| 项目 | 说明 |
+|------|------|
+| **五人顺序** | **炒股养家** → **退学炒股** → **Asking（邱宝裕）** → **92科比** → **涅槃重升**。 |
+| **附图文件** | 五张 PNG 放在 **`assets/`**（如 `replay_footer_yangjia.png`、`replay_footer_tuixue.png`、`replay_viewpoint_footer_asking.png`、`replay_footer_kebi.png`、`replay_footer_niepan.png`）。 |
+| **邮件内嵌** | Markdown 使用 `![说明文字](cid:xxx)`，**`send_report_email(..., inline_images=...)`** 按 CID 附加 MIME 图片（见 `replay_footer_inline_images()`）。 |
+| **解读与附录** | **`app/utils/replay_footer_commentary.py`**：每张图下配 **Markdown 解读**，文末附 **四大框架 / 五维对照** 表。日复盘小节标题为 **「每日必看 吾日三省吾身」**。 |
+| **拼接入口** | **`app/utils/replay_viewpoint_footer.py`**：`append_replay_viewpoint_footer(md)`；`ReplayTask` 在定稿后调用。 |
+| **绘图脚本** | 通用流程图：**`app/utils/replay_footer_chart_draw.py`**（`save_flowchart_png`、`save_kebi_framework_png` 等）。重绘示例：`scripts/generate_replay_footer_charts_extended.py`、`generate_replay_footer_kebi.py`、`generate_replay_footer_tuixue.py`、`generate_replay_viewpoint_footer_asking.py`（依赖 matplotlib）。 |
+| **每周温习邮件** | **`scripts/weekly_theory_review_email.py`**：调用 **`build_theory_review_markdown()`** 生成独立正文，主题形如 **`【温习】五人理论框架 · YYYY-MM-DD`**，SMTP 配置与日复盘相同。 |
+| **GitHub 定时** | **`.github/workflows/weekly-theory-review.yml`**：`cron: "0 1 * * 6"` → **北京时间每周六 09:00**（与 `scheduled-nightly`、`weekly-report` 一样使用 `SMTP_*`、`MAIL_TO` 等 Secrets）。支持 **`workflow_dispatch`** 手动触发。 |
+| **Windows 本机定时** | **`scripts/register_weekly_theory_review_task.ps1`**：注册计划任务 **每周六 09:00**（本地时区）执行上述 Python 脚本；需已配置 SMTP 且能访问项目目录。 |
 
 ---
 
@@ -373,6 +393,7 @@ flowchart TB
 | 路径 | 说明 |
 |------|------|
 | `replay_config.json` | 用户配置（建议敏感仓库不入库或仅环境变量）。 |
+| `assets/replay_footer_*.png` 等 | 文末五人理论附图（温习邮件与日复盘共用 CID）。 |
 | `data/watchlist_records.json` | 龙头池周度统计输入。 |
 | `data/strategy_preference.json` | 五桶权重。 |
 | `data/strategy_evolution_log.jsonl` | 权重演进审计。 |
@@ -390,6 +411,9 @@ flowchart TB
 |------|------|
 | **`scripts/nightly_replay.py`** | 夜间复盘：默认北京时间当日，非交易日退出 0；**`--date YYYYMMDD`** 指定交易日。Key：`DEEPSEEK_API_KEY` 或配置。 |
 | **`scripts/weekly_performance_email.py`** | 周报：**`--anchor`**、**`--dry-run`**、**`--plot`**（`weights_trend.png`）。 |
+| **`scripts/weekly_theory_review_email.py`** | **每周温习**：单独发送五人理论附图 + 解读 + 附录（需 SMTP；与日复盘独立）。 |
+| **`scripts/generate_replay_footer_charts_extended.py`** 等 | 重绘文末名家流程图 PNG（matplotlib）；见 [复盘文末五人理论与每周温习](#复盘文末五人理论与每周温习)。 |
+| **`scripts/register_weekly_theory_review_task.ps1`** | Windows **任务计划程序**：注册每周六 09:00 跑 **`weekly_theory_review_email.py`**。 |
 | **`scripts/validate.py`** | 依赖导入、`strategy_preference` 权重和、`strategy_evolution_log.jsonl` 行 JSON、环境变量提示。 |
 | **`scripts/health_check.py`** | 依赖与 ConfigManager、部分服务导入探测。 |
 | **`scripts/backtest_weights.py`** | 离线网格搜索权重相关参数（**`--start`/`--end`/`--param-file`/`--plot`** 等，见脚本 docstring）。 |
@@ -431,6 +455,7 @@ flowchart TB
 |----------|------|
 | **`scheduled-nightly.yml`** | 北京时间约 **18:00**（UTC 10:00）cron；**`workflow_dispatch`** 可选输入 **`date`**；需 Secrets：`DEEPSEEK_API_KEY`，可选 SMTP。 |
 | **`weekly-report.yml`** | 北京时间 **周日 10:00**（UTC 周日 02:00）；周报脚本；依赖仓库内或 Runner 上 **`watchlist_records`**。 |
+| **`weekly-theory-review.yml`** | 北京时间 **周六 09:00**（UTC 周六 01:00）；**`scripts/weekly_theory_review_email.py`**；需 Secrets：`SMTP_HOST` + **`MAIL_TO`** 等（与日复盘相同）。 |
 
 ### 部署（`.github/workflows/deploy.yml`）
 
@@ -451,10 +476,10 @@ flowchart TB
 
 | 路径 | 说明 |
 |------|------|
-| `app/` | 业务包：`services/`（复盘、`data_fetcher`、策略、邮件；以及 **`market_kpi`**、**`news_fetcher`**、**`position_sizer`**、**`cycle_analyzer`**、**`ladder_stats`**、**`historical_matcher`** 等量化辅助）、`utils/`（`config`、`email_template`、`output_formatter`、`logger`、`disk_cache`）。 |
+| `app/` | 业务包：`services/`（复盘、`data_fetcher`、策略、邮件；以及 **`market_kpi`**、**`news_fetcher`**、**`position_sizer`**、**`cycle_analyzer`**、**`ladder_stats`**、**`historical_matcher`** 等量化辅助）、`utils/`（`config`、`email_template`、`output_formatter`、`replay_viewpoint_footer`、`replay_footer_commentary`、`replay_footer_chart_draw`、`logger`、`disk_cache`）。 |
 | `config/` | `replay_prompt_templates.py`、`data_source_config.py`、`strategy_preference_config.py` 及包初始化。 |
 | `tests/` | `pytest` 用例。 |
-| `.github/workflows/` | `ci.yml`、`scheduled-nightly.yml`、`weekly-report.yml`、`deploy.yml`。 |
+| `.github/workflows/` | `ci.yml`、`scheduled-nightly.yml`、`weekly-report.yml`、**`weekly-theory-review.yml`**、`deploy.yml`。 |
 | `docs/` | 如 `smtp_env.md`（SMTP 环境变量说明）。 |
 
 ---
@@ -470,4 +495,4 @@ flowchart TB
 
 ---
 
-*行为以主分支源码与 `pytest` 为准。新增程序侧能力时，请同步更新 **`app/utils/config.py`**、本 README 的 [能力清单](#程序侧量化与报告增强能力清单) 与 **`ARCHITECTURE.md`**（若涉及模块边界）。*
+*行为以主分支源码与 `pytest` 为准。新增程序侧能力时，请同步更新 **`app/utils/config.py`**、本 README 的 [能力清单](#程序侧量化与报告增强能力清单)、[复盘文末五人理论与每周温习](#复盘文末五人理论与每周温习) 与 **`ARCHITECTURE.md`**（若涉及模块边界）。*
