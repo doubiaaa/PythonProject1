@@ -4,6 +4,11 @@ import threading
 import time
 from typing import Any, Optional
 
+from app.utils.replay_viewpoint_footer import (
+    append_replay_viewpoint_footer,
+    replay_footer_inline_images,
+)
+
 import pandas as pd
 
 from config.replay_prompt_templates import build_main_replay_prompt
@@ -480,6 +485,8 @@ class ReplayTask:
                 result = news_pre + result
                 self.log("已附加财经要闻摘要（推送与正文顶部）")
 
+            result = append_replay_viewpoint_footer(result)
+
             self.progress = 100
             self.result = result
             self.log("分析完成")
@@ -529,6 +536,7 @@ class ReplayTask:
                         "email_kpi": _kpi,
                         "email_dragon_meta": _dm,
                     },
+                    inline_images=replay_footer_inline_images(),
                 )
                 if eok and emsg != "skipped":
                     self.log("邮件通知已发送")
