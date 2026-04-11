@@ -38,6 +38,12 @@ DEFAULT_CONFIG = {
     "enable_historical_similarity": True,
     # 相似形态回溯窗口（交易日）：过大时逐日拉涨停/炸板池极慢，默认 60 约三月
     "historical_similarity_lookback": 60,
+    # get_market_summary 首阶段并行拉取涨跌停/板块/北向/溢价/涨跌家数（显著缩短墙钟时间）
+    "market_summary_parallel_fetch": True,
+    # 并行拉取线程上限（涨跌停池、分位历史、相似形态等共用）
+    "fetch_parallel_max_workers": 8,
+    # 情绪分位对比的回溯交易日数（5～30）
+    "zhaban_percentile_lookback": 15,
     # 周报邮件是否尝试内嵌项目根目录下的权重/净值图（需先生成 png）
     "weekly_email_attach_charts": True,
     "cache_expire": 3600,  # 缓存过期时间（秒）

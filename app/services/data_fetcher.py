@@ -2,6 +2,7 @@ import io
 import json
 import os
 import re
+import threading
 import time
 from contextlib import redirect_stdout
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -44,6 +45,26 @@ INTRADAY_TICK_CACHE_TTL_SEC = 60
 ZB_POOL_EM_LOOKBACK_TRADING_DAYS = 30
 
 _log = get_logger(__name__)
+
+
+def _parallel_fetch_workers() -> int:
+    """并行拉取涨跌停池等时的线程数上限（配置 fetch_parallel_max_workers）。"""
+    try:
+        from app.utils.config import ConfigManager
+
+        w = int(ConfigManager().get("fetch_parallel_max_workers", 8) or 8)
+        return max(2, min(16, w))
+    except Exception:
+        return 8
+
+
+def _market_summary_parallel_enabled() -> bool:
+    try:
+        from app.utils.config import ConfigManager
+
+        return bool(ConfigManager().get("market_summary_parallel_fetch", True))
+    except Exception:
+        return True
 
 _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
 
@@ -334,21 +355,25 @@ class DataFetcher:
         self._tick_js_cache: dict[str, tuple[float, Optional[pd.DataFrame]]] = {}
         self._north_hist_em_df: Optional[pd.DataFrame] = None
         self._north_hist_em_ts: float = 0.0
+        self._cache_lock = threading.Lock()
+        self._spot_fetch_lock = threading.Lock()
 
     def _is_cache_valid(self, key):
-        if key in self.cache:
-            ts, _ = self.cache[key]
-            if time.time() - ts < self.cache_expire:
-                return True
-            else:
+        with self._cache_lock:
+            if key in self.cache:
+                ts, _ = self.cache[key]
+                if time.time() - ts < self.cache_expire:
+                    return True
                 del self.cache[key]
         return False
 
     def _get_cache(self, key):
-        return self.cache[key][1] if key in self.cache else None
+        with self._cache_lock:
+            return self.cache[key][1] if key in self.cache else None
 
     def _set_cache(self, key, data):
-        self.cache[key] = (time.time(), data)
+        with self._cache_lock:
+            self.cache[key] = (time.time(), data)
 
     def set_progress_callback(self, callback):
         self.progress_callback = callback
@@ -364,30 +389,42 @@ class DataFetcher:
             and now - self._spot_em_cache_ts < SPOT_EM_CACHE_TTL_SEC
         ):
             return self._spot_em_df
-        df = None
-        try:
-            df = ak.stock_zh_a_spot_em()
-        except Exception as e:
-            _log.warning("stock_zh_a_spot_em 失败，将尝试新浪备用源: %s", e)
-        if df is None or df.empty:
+        with self._spot_fetch_lock:
+            now = time.time()
+            if (
+                self._spot_em_df is not None
+                and now - self._spot_em_cache_ts < SPOT_EM_CACHE_TTL_SEC
+            ):
+                return self._spot_em_df
+            df = None
             try:
-                df = ak.stock_zh_a_spot()
-                if df is not None and not df.empty:
-                    _log.info("已使用新浪 stock_zh_a_spot 作为全市场行情备用源")
-            except Exception as e2:
-                _log.warning("stock_zh_a_spot 备用源失败: %s", e2)
-                df = pd.DataFrame()
-        self._spot_em_df = df
-        self._spot_em_cache_ts = now
-        return df
+                df = ak.stock_zh_a_spot_em()
+            except Exception as e:
+                _log.warning("stock_zh_a_spot_em 失败，将尝试新浪备用源: %s", e)
+            if df is None or df.empty:
+                try:
+                    df = ak.stock_zh_a_spot()
+                    if df is not None and not df.empty:
+                        _log.info("已使用新浪 stock_zh_a_spot 作为全市场行情备用源")
+                except Exception as e2:
+                    _log.warning("stock_zh_a_spot 备用源失败: %s", e2)
+                    df = pd.DataFrame()
+            self._spot_em_df = df
+            self._spot_em_cache_ts = time.time()
+            return df
 
     def get_individual_fund_flow_rank_df(self) -> pd.DataFrame:
         """当日个股主力净流入排名（东财）；独立短 TTL 缓存。"""
         key = INDIVIDUAL_FUND_FLOW_CACHE_KEY
-        if key in self.cache:
-            ts, data = self.cache[key]
-            if time.time() - ts < INDIVIDUAL_FUND_FLOW_CACHE_TTL_SEC:
-                return data.copy() if isinstance(data, pd.DataFrame) else pd.DataFrame()
+        with self._cache_lock:
+            if key in self.cache:
+                ts, data = self.cache[key]
+                if time.time() - ts < INDIVIDUAL_FUND_FLOW_CACHE_TTL_SEC:
+                    return (
+                        data.copy()
+                        if isinstance(data, pd.DataFrame)
+                        else pd.DataFrame()
+                    )
         try:
             df = self.fetch_with_retry(
                 ak.stock_individual_fund_flow_rank, indicator="今日"
@@ -397,7 +434,8 @@ class DataFetcher:
         except Exception as e:
             _log.warning("个股主力净流入排名获取失败: %s", e)
             df = pd.DataFrame()
-        self.cache[key] = (time.time(), df)
+        with self._cache_lock:
+            self.cache[key] = (time.time(), df)
         return df
 
     def format_individual_fund_flow_markdown(
@@ -453,10 +491,15 @@ class DataFetcher:
         if not sym:
             return pd.DataFrame()
         key = f"concept_cons_em_{sym}"
-        if key in self.cache:
-            ts, data = self.cache[key]
-            if time.time() - ts < CONCEPT_CONS_CACHE_TTL_SEC:
-                return data.copy() if isinstance(data, pd.DataFrame) else pd.DataFrame()
+        with self._cache_lock:
+            if key in self.cache:
+                ts, data = self.cache[key]
+                if time.time() - ts < CONCEPT_CONS_CACHE_TTL_SEC:
+                    return (
+                        data.copy()
+                        if isinstance(data, pd.DataFrame)
+                        else pd.DataFrame()
+                    )
         try:
             df = self.fetch_with_retry(ak.stock_board_concept_cons_em, symbol=sym)
             if df is None:
@@ -464,7 +507,8 @@ class DataFetcher:
         except Exception as e:
             _log.warning("概念板块成分获取失败 (%s): %s", sym, e)
             df = pd.DataFrame()
-        self.cache[key] = (time.time(), df)
+        with self._cache_lock:
+            self.cache[key] = (time.time(), df)
         return df
 
     def format_concept_cons_snapshot_markdown(self, symbols: list[str]) -> str:
@@ -1521,8 +1565,23 @@ class DataFetcher:
         start = max(0, idx - 4)
         days = trade_days[start : idx + 1]
         multi_series: list[int] = []
+        pool_by_day: dict[str, pd.DataFrame] = {}
+        if len(days) <= 1:
+            for d in days:
+                pool_by_day[d] = self.get_zt_pool(d)
+        else:
+            w = min(_parallel_fetch_workers(), len(days))
+
+            def _load_zt(d: str) -> tuple[str, pd.DataFrame]:
+                return d, self.get_zt_pool(d)
+
+            with ThreadPoolExecutor(max_workers=max(2, w)) as ex:
+                futs = [ex.submit(_load_zt, d) for d in days]
+                for fut in as_completed(futs):
+                    d, df = fut.result()
+                    pool_by_day[d] = df
         for d in days:
-            df = self.get_zt_pool(d)
+            df = pool_by_day.get(d)
             if df is not None and not df.empty and "lb" in df.columns:
                 _lb = pd.to_numeric(df["lb"], errors="coerce").fillna(1).astype(int)
                 df = df.copy()
@@ -1634,6 +1693,15 @@ class DataFetcher:
         lookback: int = 15,
     ) -> tuple[Optional[float], Optional[float]]:
         """近 lookback 个交易日内，涨停家数与炸板率的经验分位（0～100）。"""
+        try:
+            from app.utils.config import ConfigManager
+
+            cfg_lb = ConfigManager().get("zhaban_percentile_lookback")
+            if cfg_lb is not None:
+                lookback = int(cfg_lb)
+            lookback = max(5, min(30, lookback))
+        except Exception:
+            pass
         if not trade_days or date not in trade_days:
             return None, None
         idx = trade_days.index(date)
@@ -1641,17 +1709,35 @@ class DataFetcher:
         past_days = trade_days[start:idx]
         if not past_days:
             return None, None
-        zts: list[int] = []
-        zhrs: list[float] = []
-        for d in past_days:
+
+        def _one_past(d: str) -> tuple[str, int, float]:
             dz = self.get_zt_pool(d)
             db = self.get_zb_pool(d)
             zn = len(dz) if dz is not None and not dz.empty else 0
             bn = len(db) if db is not None and not db.empty else 0
             tot = zn + bn
             zr = round(bn / tot * 100, 2) if tot > 0 else 0.0
-            zts.append(zn)
-            zhrs.append(zr)
+            return d, zn, zr
+
+        merged: dict[str, tuple[int, float]] = {}
+        if len(past_days) == 1:
+            d0, zn0, zr0 = _one_past(past_days[0])
+            merged[d0] = (zn0, zr0)
+        else:
+            w = min(_parallel_fetch_workers(), len(past_days))
+            with ThreadPoolExecutor(max_workers=max(2, w)) as ex:
+                futs = [ex.submit(_one_past, d) for d in past_days]
+                for fut in as_completed(futs):
+                    d, zn, zr = fut.result()
+                    merged[d] = (zn, zr)
+        zts: list[int] = []
+        zhrs: list[float] = []
+        for d in past_days:
+            pair = merged.get(d)
+            if pair is None:
+                continue
+            zts.append(pair[0])
+            zhrs.append(pair[1])
         if not zts:
             return None, None
         bz = sum(1 for x in zts if zt_count > x)
@@ -1998,10 +2084,11 @@ class DataFetcher:
         if not _finance_news_enabled():
             return "", ""
         df = None
-        if FINANCE_NEWS_CACHE_KEY in self.cache:
-            ts, data = self.cache[FINANCE_NEWS_CACHE_KEY]
-            if time.time() - ts < FINANCE_NEWS_CACHE_TTL_SEC:
-                df = data
+        with self._cache_lock:
+            if FINANCE_NEWS_CACHE_KEY in self.cache:
+                ts, data = self.cache[FINANCE_NEWS_CACHE_KEY]
+                if time.time() - ts < FINANCE_NEWS_CACHE_TTL_SEC:
+                    df = data
         if df is None:
             disk = _read_cache("finance_news_cx", "latest")
             if disk is not None:
@@ -2155,14 +2242,61 @@ class DataFetcher:
             date = self.get_last_trade_day(date, trade_days)
             _log.info("调整为最近交易日: %s", date)
 
-        # 获取基础数据
-        df_zt = self.get_zt_pool(date)
+        # 获取基础数据（默认可并行：涨跌停/板块/北向/溢价/涨跌家数相互独立）
+        up_n: Optional[int] = None
+        down_n: Optional[int] = None
+        if _market_summary_parallel_enabled():
+            w = max(7, _parallel_fetch_workers())
+            futures_map = {}
+            with ThreadPoolExecutor(max_workers=w) as ex:
+                futures_map[ex.submit(self.get_zt_pool, date)] = "zt"
+                futures_map[ex.submit(self.get_dt_pool, date)] = "dt"
+                futures_map[ex.submit(self.get_zb_pool, date)] = "zb"
+                futures_map[ex.submit(self.get_sector_rank, date)] = "sector"
+                futures_map[ex.submit(self.get_north_money, date)] = "north"
+                futures_map[ex.submit(self.get_yest_zt_premium, date, trade_days)] = (
+                    "premium"
+                )
+                futures_map[ex.submit(self._spot_red_green_counts)] = "spot_ud"
+                raw: dict = {}
+                for fut in as_completed(futures_map):
+                    tag = futures_map[fut]
+                    try:
+                        raw[tag] = fut.result()
+                    except Exception as e:
+                        _log.warning("并行获取 %s 失败: %s", tag, e)
+                        raw[tag] = None
+            dz = raw.get("zt")
+            df_zt = dz if isinstance(dz, pd.DataFrame) else pd.DataFrame()
+            dd = raw.get("dt")
+            df_dt = dd if isinstance(dd, pd.DataFrame) else pd.DataFrame()
+            dzb = raw.get("zb")
+            df_zb = dzb if isinstance(dzb, pd.DataFrame) else pd.DataFrame()
+            ds = raw.get("sector")
+            df_sector = ds if isinstance(ds, pd.DataFrame) else pd.DataFrame()
+            pr = raw.get("premium")
+            if isinstance(pr, tuple) and len(pr) >= 2:
+                premium, premium_note = float(pr[0]), str(pr[1])
+            else:
+                premium, premium_note = -99.0, "并行获取失败"
+            nr = raw.get("north")
+            if isinstance(nr, tuple) and len(nr) >= 2:
+                north_money, north_status = float(nr[0]), str(nr[1])
+            else:
+                north_money, north_status = 0.0, "fetch_failed"
+            sud = raw.get("spot_ud")
+            if isinstance(sud, tuple) and len(sud) >= 2:
+                up_n, down_n = sud[0], sud[1]
+        else:
+            df_zt = self.get_zt_pool(date)
+            df_dt = self.get_dt_pool(date)
+            df_zb = self.get_zb_pool(date)
+            df_sector = self.get_sector_rank(date)
+            premium, premium_note = self.get_yest_zt_premium(date, trade_days)
+            north_money, north_status = self.get_north_money(date)
+
         # 供 replay_task 分离确认等复用（须为当日涨停池 DataFrame）
         self._last_zt_pool = df_zt.copy() if df_zt is not None else pd.DataFrame()
-        df_dt = self.get_dt_pool(date)
-        df_zb = self.get_zb_pool(date)
-        df_sector = self.get_sector_rank(date)
-        premium, premium_note = self.get_yest_zt_premium(date, trade_days)
         try:
             from app.services.market_kpi import premium_analysis
 
@@ -2178,7 +2312,6 @@ class DataFetcher:
                 "premium": premium,
                 "premium_note": premium_note,
             }
-        north_money, north_status = self.get_north_money(date)
 
         zt_count = len(df_zt)
         dt_count = len(df_dt)
@@ -2269,8 +2402,9 @@ class DataFetcher:
         self._last_market_phase = market_phase
         self._last_position_suggestion = position_suggestion
 
-        # 获取涨跌家数（统一数据源）
-        up_n, down_n = self._spot_red_green_counts()
+        # 获取涨跌家数（并行阶段已取则复用全 A spot，避免二次请求）
+        if up_n is None and down_n is None:
+            up_n, down_n = self._spot_red_green_counts()
         # 存储到实例变量，供其他方法使用，确保数据一致性
         self._last_up_count = up_n
         self._last_down_count = down_n

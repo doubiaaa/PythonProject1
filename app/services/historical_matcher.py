@@ -4,9 +4,21 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Optional
 
 import pandas as pd
+
+
+def _parallel_workers() -> int:
+    """与 data_fetcher 共用 fetch_parallel_max_workers，避免循环 import。"""
+    try:
+        from app.utils.config import ConfigManager
+
+        w = int(ConfigManager().get("fetch_parallel_max_workers", 8) or 8)
+        return max(2, min(16, w))
+    except Exception:
+        return 8
 
 
 def _metrics_for_day(fetcher: Any, d: str) -> Optional[tuple[int, float, int]]:
@@ -29,17 +41,40 @@ def _metrics_for_day(fetcher: Any, d: str) -> Optional[tuple[int, float, int]]:
 def _metrics_cache_for_days(
     fetcher: Any, days: list[str]
 ) -> dict[str, tuple[int, float, int]]:
-    """逐日拉取（依赖 DataFetcher 内存/磁盘缓存）；同一日只请求一次。"""
-    out: dict[str, tuple[int, float, int]] = {}
+    """逐日拉取（依赖 DataFetcher 内存/磁盘缓存）；同一日只请求一次；多日时并行。"""
+    uniq: list[str] = []
     seen: set[str] = set()
     for d in days:
         if d in seen:
             continue
         seen.add(d)
-        m = _metrics_for_day(fetcher, d)
-        if m is not None:
-            out[d] = m
-    return out
+        uniq.append(d)
+    if not uniq:
+        return {}
+    if len(uniq) == 1:
+        m = _metrics_for_day(fetcher, uniq[0])
+        return {uniq[0]: m} if m is not None else {}
+    try:
+        w = max(2, min(_parallel_workers(), len(uniq)))
+
+        def _job(d: str) -> tuple[str, Optional[tuple[int, float, int]]]:
+            return d, _metrics_for_day(fetcher, d)
+
+        out: dict[str, tuple[int, float, int]] = {}
+        with ThreadPoolExecutor(max_workers=w) as ex:
+            futs = [ex.submit(_job, d) for d in uniq]
+            for fut in as_completed(futs):
+                d, m = fut.result()
+                if m is not None:
+                    out[d] = m
+        return out
+    except Exception:
+        out = {}
+        for d in uniq:
+            m = _metrics_for_day(fetcher, d)
+            if m is not None:
+                out[d] = m
+        return out
 
 
 def _dist(
