@@ -620,12 +620,20 @@ class DataFetcher:
             raise DataSourceInvalidError(f"{label} 缺少列: {miss}")
 
     # ---------- 辅助函数：金额单位转换 ----------
+    def _parse_pct_cell_series(self, ser: pd.Series) -> pd.Series:
+        """涨跌幅列：去除 %，'-' / 空 视为缺失 → 0（与东财表缺数据一致）。"""
+        s = ser.astype(str).str.replace("%", "", regex=False).str.strip()
+        s = s.replace({"-": "", "—": "", "nan": ""})
+        return pd.to_numeric(s, errors="coerce").fillna(0.0)
+
     def _convert_money_to_float(self, money_str):
         """将带单位的金额字符串转换为以亿元为单位的浮点数"""
         if isinstance(money_str, (int, float)):
             return money_str / 1e8  # 如果已经是数值，假设单位为元，转为亿元
         try:
             s = str(money_str).strip()
+            if s in ("-", "—", "", "nan", "None"):
+                return 0.0
             if '亿' in s:
                 return float(s.replace('亿', ''))
             elif '万' in s:
@@ -800,7 +808,7 @@ class DataFetcher:
                     "今日主力净流入-净额": "money",
                 }
             )
-            df_result["pct"] = df_result["pct"].astype(str).str.replace("%", "").astype(float)
+            df_result["pct"] = self._parse_pct_cell_series(df_result["pct"])
             df_result["money"] = df_result["money"].apply(self._convert_money_to_float)
             return df_result.sort_values("money", ascending=False).head(top_n)
         _log.warning("资金流表标准列名不存在，可用列: %s", df.columns.tolist())
@@ -815,7 +823,7 @@ class DataFetcher:
         df_result = df[[name_col, pct_col, money_col]].rename(
             columns={name_col: "sector", pct_col: "pct", money_col: "money"}
         )
-        df_result["pct"] = df_result["pct"].astype(str).str.replace("%", "").astype(float)
+        df_result["pct"] = self._parse_pct_cell_series(df_result["pct"])
         df_result["money"] = df_result["money"].apply(self._convert_money_to_float)
         return df_result.sort_values("money", ascending=False).head(top_n)
 
@@ -870,7 +878,7 @@ class DataFetcher:
                         )
                         # 转换数据格式
                         try:
-                            df_result['pct'] = df_result['pct'].astype(str).str.replace('%', '').astype(float)
+                            df_result["pct"] = self._parse_pct_cell_series(df_result["pct"])
                             df_result['money'] = df_result['money'].apply(self._convert_money_to_float)
                             df_result = df_result.sort_values('money', ascending=False).head(5)
                             self._set_cache(cache_key, df_result)

@@ -60,6 +60,19 @@ def _is_yizi_row(row: pd.Series) -> bool:
     )
 
 
+def _first_time_series_to_datetime(ser: pd.Series) -> pd.Series:
+    """
+    首次封板时间列：多为 HH:MM / HH:MM:SS，少数为完整时间戳。
+    用固定日期拼接时间字符串排序，避免 pd.to_datetime 逐元素推断格式告警。
+    """
+    t = ser.astype(str).str.replace("：", ":", regex=False).str.strip()
+    full = pd.to_datetime(t, errors="coerce")
+    prefix = "2000-01-01 "
+    t2 = pd.to_datetime(prefix + t, format="%Y-%m-%d %H:%M:%S", errors="coerce")
+    t2 = t2.fillna(pd.to_datetime(prefix + t, format="%Y-%m-%d %H:%M", errors="coerce"))
+    return full.where(full.notna(), t2)
+
+
 def _md_cell(val: object, max_len: int = 40) -> str:
     t = str(val if val is not None else "").strip()
     t = t.replace("|", "｜").replace("\n", " ")
@@ -111,10 +124,7 @@ def _zt_first_seal_hour_buckets_md(df_zt: pd.DataFrame) -> str:
     """首封时间按交易时段桶统计（短线看盘常用粒度）。"""
     if df_zt is None or df_zt.empty or "first_time" not in df_zt.columns:
         return ""
-    tser = pd.to_datetime(
-        df_zt["first_time"].astype(str).str.replace("：", ":", regex=False),
-        errors="coerce",
-    )
+    tser = _first_time_series_to_datetime(df_zt["first_time"])
     valid = tser.notna()
     if not bool(valid.any()):
         return ""
@@ -954,10 +964,7 @@ def build_six_section_catalog(
     )
     if not df_zt.empty and "first_time" in df_zt.columns:
         sub = df_zt.copy()
-        sub["_ft"] = pd.to_datetime(
-            sub["first_time"].astype(str).str.replace("：", ":", regex=False),
-            errors="coerce",
-        )
+        sub["_ft"] = _first_time_series_to_datetime(sub["first_time"])
         sub = sub.sort_values("_ft", na_position="last")
         lines.append(
             "| 时间 | 代码 | 名称 | 连板 | 行业 | 涨停原因 |\n"
