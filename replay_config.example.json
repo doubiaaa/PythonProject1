@@ -1,0 +1,13 @@
+{
+  "active_strategy_profile": "default",
+  "strategy_profiles": {
+    "default": {},
+    "balanced_example": {
+      "w_main": 0.25,
+      "w_dragon": 0.2,
+      "w_kline": 0.18,
+      "w_liq": 0.12,
+      "w_tech": 0.25
+    }
+  }
+}

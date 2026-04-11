@@ -20,17 +20,31 @@ from app.services.weekly_performance import (
     records_for_iso_week,
 )
 from app.services.watchlist_store import load_all_records
+from app.utils.config import ConfigManager
 from config.strategy_preference_config import (
-    MAX_WEIGHT_DELTA_PER_UPDATE,
-    WEIGHT_CLIP_HIGH,
-    WEIGHT_CLIP_LOW,
-    WEIGHT_HISTORY_MAX,
+    get_max_weight_delta_per_update,
+    get_weight_clip_high,
+    get_weight_clip_low,
+    get_weight_history_max,
 )
 
 _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
-DATA_DIR = os.path.join(_PROJECT_ROOT, "data")
-PREF_FILE = os.path.join(DATA_DIR, "strategy_preference.json")
-LOG_FILE = os.path.join(DATA_DIR, "strategy_evolution_log.jsonl")
+
+
+def _data_dir() -> str:
+    cm = ConfigManager()
+    paths = cm.config.get("paths") or {}
+    root = paths.get("project_root") or _PROJECT_ROOT
+    rel = str(paths.get("data_dir") or "data").replace("/", os.sep)
+    return os.path.normpath(os.path.join(root, rel))
+
+
+def _pref_file() -> str:
+    return ConfigManager().path("strategy_preference_file")
+
+
+def _log_file() -> str:
+    return ConfigManager().path("strategy_evolution_log_file")
 
 _lock = threading.Lock()
 
@@ -55,12 +69,12 @@ def tag_to_bucket(tag: str) -> str:
 
 
 def _ensure_dir() -> None:
-    os.makedirs(DATA_DIR, exist_ok=True)
+    os.makedirs(_data_dir(), exist_ok=True)
 
 
 def load_strategy_preference() -> dict[str, Any]:
     _ensure_dir()
-    if not os.path.isfile(PREF_FILE):
+    if not os.path.isfile(_pref_file()):
         return {
             "version": 1,
             "active": True,
@@ -69,7 +83,7 @@ def load_strategy_preference() -> dict[str, Any]:
             "notes": "初始均匀权重",
         }
     try:
-        with open(PREF_FILE, "r", encoding="utf-8") as f:
+        with open(_pref_file(), "r", encoding="utf-8") as f:
             data = json.load(f)
         if not isinstance(data, dict):
             raise ValueError("bad shape")
@@ -98,16 +112,17 @@ def load_strategy_preference() -> dict[str, Any]:
 
 def _save_pref(data: dict[str, Any]) -> None:
     _ensure_dir()
-    tmp = PREF_FILE + ".tmp"
+    pf = _pref_file()
+    tmp = pf + ".tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
-    os.replace(tmp, PREF_FILE)
+    os.replace(tmp, pf)
 
 
 def _append_log(entry: dict[str, Any]) -> None:
     _ensure_dir()
     line = json.dumps(entry, ensure_ascii=False) + "\n"
-    with open(LOG_FILE, "a", encoding="utf-8") as f:
+    with open(_log_file(), "a", encoding="utf-8") as f:
         f.write(line)
 
 
@@ -376,16 +391,8 @@ def update_from_recent_returns(
     """
     更新策略偏好。multi_week：用最近 multi_week_lookback 周衰减合成 suggested，再平滑。
     """
-    from app.utils.config import ConfigManager
-
-    _cm = ConfigManager()
     if max_weight_delta_per_update is None:
-        max_weight_delta_per_update = float(
-            _cm.get(
-                "strategy_max_weight_delta_per_update",
-                MAX_WEIGHT_DELTA_PER_UPDATE,
-            )
-        )
+        max_weight_delta_per_update = get_max_weight_delta_per_update()
 
     with _lock:
         cur = load_strategy_preference()
@@ -419,7 +426,9 @@ def update_from_recent_returns(
         merged, old, max_change=max_change_per_week, pullback=shift_pullback
     )
     merged = _apply_floor_cap(merged, max_single=max_single, min_each=min_each)
-    merged = _clip_bucket_normalize(merged, WEIGHT_CLIP_LOW, WEIGHT_CLIP_HIGH)
+    merged = _clip_bucket_normalize(
+        merged, get_weight_clip_low(), get_weight_clip_high()
+    )
     merged = _limit_weight_delta_vs_old(
         merged, old, max_delta=max_weight_delta_per_update
     )
@@ -432,7 +441,7 @@ def update_from_recent_returns(
     alerts = detect_weight_anomalies(old, merged, counts)
     hist = list(cur.get("weight_history") or [])
     hist.append({"anchor": anchor_date, "weights": dict(merged)})
-    hist = hist[-WEIGHT_HISTORY_MAX:]
+    hist = hist[-get_weight_history_max() :]
 
     out = {
         **cur,
@@ -507,10 +516,10 @@ def plot_evolution_log(output_path: str) -> bool:
         import matplotlib.pyplot as plt
     except ImportError:
         return False
-    if not os.path.isfile(LOG_FILE):
+    if not os.path.isfile(_log_file()):
         return False
     rows: list[dict[str, Any]] = []
-    with open(LOG_FILE, "r", encoding="utf-8") as f:
+    with open(_log_file(), "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
             if not line:

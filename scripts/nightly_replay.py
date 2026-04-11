@@ -40,6 +40,22 @@ def _resolve_api_key():
 
 
 def main() -> int:
+    try:
+        from app.infrastructure.observability.crash import install_crash_hooks
+        from app.utils.logger import setup_logging
+
+        setup_logging()
+        install_crash_hooks()
+        return _main()
+    except Exception as e:
+        import traceback
+
+        print(f"[nightly] 未处理异常：{e}", file=sys.stderr)
+        traceback.print_exc()
+        return 1
+
+
+def _main() -> int:
     parser = argparse.ArgumentParser(description="夜间自动复盘（定时任务 / GitHub Actions）")
     parser.add_argument(
         "--date",
@@ -108,20 +124,29 @@ def main() -> int:
             flush=True,
         )
 
+    from app.infrastructure.observability import alert_failure, emit_event, trace_scope
     from app.services.replay_task import ReplayTask
 
-    task = ReplayTask()
-    print(f"[nightly] 交易日={date_str}（北京时间自然日对应 A 股交易日）", flush=True)
-    task.run(
-        date_str,
-        api_key,
-        fetcher,
-        email_cfg=email_cfg,
-    )
+    with trace_scope():
+        emit_event("nightly.begin", trade_date=date_str)
+        task = ReplayTask()
+        print(f"[nightly] 交易日={date_str}（北京时间自然日对应 A 股交易日）", flush=True)
+        task.run(
+            date_str,
+            api_key,
+            fetcher,
+            email_cfg=email_cfg,
+        )
 
-    if task.status == "error":
-        print(task.result or "unknown error", file=sys.stderr)
-        return 1
+        if task.status == "error":
+            alert_failure(
+                "nightly replay task failed",
+                trade_date=date_str,
+                detail=str(task.result or "")[:800],
+            )
+            print(task.result or "unknown error", file=sys.stderr)
+            return 1
+        emit_event("nightly.complete", trade_date=date_str, status=task.status)
     print("[nightly] completed", flush=True)
     return 0
 

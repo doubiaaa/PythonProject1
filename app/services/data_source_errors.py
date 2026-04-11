@@ -16,3 +16,7 @@ class DataSourceInvalidError(DataSourceError):
 
 class DataSourceExhaustedError(DataSourceError):
     """重试耗尽仍失败。"""
+
+
+class DataSourceCircuitOpenError(DataSourceError):
+    """熔断打开：短时不再请求该数据源。"""

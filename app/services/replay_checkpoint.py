@@ -6,12 +6,19 @@ from __future__ import annotations
 
 import json
 import os
+from datetime import datetime
 from typing import Any, Optional
 
 _PROJECT_ROOT = os.path.abspath(
     os.path.join(os.path.dirname(__file__), os.pardir, os.pardir)
 )
 STATUS_DIR = os.path.join(_PROJECT_ROOT, "data", "replay_status")
+
+# 断点阶段（运维可见；resume 逻辑仍以 market 缓存为准）
+PHASE_STARTED = "started"
+PHASE_DATA_COMPLETE = "data_complete"
+PHASE_LLM_COMPLETE = "llm_complete"
+PHASE_DONE = "done"
 
 
 def _path_for(date: str, suffix: str) -> str:
@@ -53,9 +60,20 @@ def read_status(date: str) -> dict[str, Any]:
         return {}
     try:
         with open(p, "r", encoding="utf-8") as f:
-            return json.load(f)
+            raw = json.load(f)
+            return raw if isinstance(raw, dict) else {}
     except Exception:
         return {}
+
+
+def write_checkpoint_phase(date: str, phase: str, **extra: Any) -> None:
+    """写入当前流水线阶段，便于失败排查与后续扩展「从某阶段续跑」。"""
+    st = read_status(date)
+    st["phase"] = phase
+    st["phase_updated_at"] = datetime.now().isoformat(timespec="seconds")
+    if extra:
+        st["phase_extra"] = extra
+    write_status(date, st)
 
 
 def save_fetcher_bundle(date: str, market_data: str, fetcher: Any) -> None:

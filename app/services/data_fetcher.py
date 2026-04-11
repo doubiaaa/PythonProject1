@@ -19,7 +19,11 @@ from tenacity import (
 )
 
 from config import data_source_config as _dsc
-from app.services.data_source_errors import DataSourceExhaustedError, DataSourceInvalidError
+from app.services.data_source_errors import (
+    DataSourceCircuitOpenError,
+    DataSourceExhaustedError,
+    DataSourceInvalidError,
+)
 from app.utils.disk_cache import df_to_payload, payload_to_df
 from app.utils.ladder_utils import ladder_level_count, max_lb_from_ladder_dict
 from app.utils.logger import get_logger
@@ -333,6 +337,9 @@ def compute_short_term_market_phase(
 class DataFetcher:
     """数据获取类（含冗余、重试、缓存）"""
 
+    _disk_cache_sweep_done = False
+    _disk_cache_sweep_lock = threading.Lock()
+
     def __init__(self, cache_expire=3600, retry_times=1):
         self.cache = {}  # 缓存 {key: (timestamp, data)}
         self.cache_expire = cache_expire
@@ -357,6 +364,22 @@ class DataFetcher:
         self._north_hist_em_ts: float = 0.0
         self._cache_lock = threading.Lock()
         self._spot_fetch_lock = threading.Lock()
+        with DataFetcher._disk_cache_sweep_lock:
+            if not DataFetcher._disk_cache_sweep_done:
+                DataFetcher._disk_cache_sweep_done = True
+                try:
+                    from app.utils.config import ConfigManager
+                    from app.utils.disk_cache import cache_dir, sweep_expired_json_files
+
+                    _ttl = int(
+                        ConfigManager().get("disk_cache_sweep_ttl_sec", 86400) or 0
+                    )
+                    if _ttl > 0:
+                        sweep_expired_json_files(
+                            cache_root=cache_dir(), ttl_sec=_ttl
+                        )
+                except Exception:
+                    pass
 
     def _is_cache_valid(self, key):
         with self._cache_lock:
@@ -580,9 +603,19 @@ class DataFetcher:
             self._parse_progress(buf.getvalue())
             return res
 
+        from app.infrastructure.resilience import get_circuit
+
+        cb = get_circuit("akshare")
+        if not cb.allow_request():
+            raise DataSourceCircuitOpenError(
+                "数据源熔断中（连续失败过多），请稍后重试"
+            ) from None
         try:
-            return _inner()
+            out = _inner()
+            cb.record_success()
+            return out
         except Exception as e:
+            cb.record_failure()
             _log.error("AK 调用失败（已重试）: %s", e)
             raise DataSourceExhaustedError(str(e)) from e
 

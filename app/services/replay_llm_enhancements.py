@@ -7,7 +7,9 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Optional
+import time
+from concurrent.futures import ThreadPoolExecutor
+from typing import Any, Callable, Optional
 
 
 def build_program_anomaly_hints(data_fetcher: Any) -> str:
@@ -330,3 +332,161 @@ def run_weekly_weight_explanation(
     if "API请求失败" in head or "调用大模型 API" in head:
         return "\n\n（权重变动说明生成失败：" + (out or "")[:400] + "）\n"
     return "\n\n" + (out or "").strip() + "\n"
+
+
+def run_replay_enhancement_bundle(
+    *,
+    parallel: bool,
+    max_workers: int,
+    gap_en: float,
+    gap_x: float,
+    actual_date: str,
+    market_data: str,
+    data_fetcher: Any,
+    separation_result: Optional[dict[str, Any]],
+    api_key: str,
+    result: str,
+    main_report_for_qc: str,
+    _en_main: bool,
+    _en_qc: bool,
+    _en_cmp: bool,
+    _en_news: bool,
+    mt: int,
+    mi: int,
+    log: Callable[[str], None],
+) -> str:
+    """
+    四类复盘增强块：按 extra → qc → cmp → news 顺序拼接。
+
+    parallel=False 时与历史逐段串行 + 段间 sleep 行为一致。
+    parallel=True 时在 gap_en 与 collect_program_facts_snapshot 之后并发调用 LLM，
+    再按固定顺序拼接；**不**插入段间 sleep，可能增加 429 风险，需自行权衡。
+    """
+    if _en_main and gap_en > 0:
+        log(
+            f"DeepSeek 增强块前等待 {gap_en:.0f}s（降低连发限速）"
+        )
+        time.sleep(gap_en)
+    pf = collect_program_facts_snapshot(
+        actual_date,
+        market_data,
+        data_fetcher,
+        separation_result,
+    )
+
+    if not parallel:
+        suffix = ""
+        if _en_main:
+            extra = run_replay_deepseek_enhancements(
+                api_key,
+                actual_date,
+                pf,
+                result,
+                max_tokens=mt,
+            )
+            suffix += extra
+            log("DeepSeek 增强块已附加")
+        gap_x_val = float(gap_x or 0)
+        if _en_qc:
+            if gap_x_val > 0:
+                time.sleep(gap_x_val)
+            suffix += run_replay_chapter_quality(
+                api_key,
+                actual_date,
+                pf,
+                main_report_for_qc,
+            )
+            log("章节质控（周期/明日）已附加")
+        if _en_cmp:
+            if gap_x_val > 0:
+                time.sleep(gap_x_val)
+            suffix += run_replay_comparison_narrative(
+                api_key,
+                actual_date,
+                market_data,
+            )
+            log("近5日变化叙事已附加")
+        if _en_news:
+            rel_n = getattr(data_fetcher, "_last_finance_news_related", None) or []
+            gen_n = getattr(data_fetcher, "_last_finance_news_general", None) or []
+            if rel_n or gen_n:
+                if gap_x_val > 0:
+                    time.sleep(gap_x_val)
+                suffix += run_replay_news_event_chain(
+                    api_key,
+                    actual_date,
+                    data_fetcher,
+                    max_items_push=mi,
+                )
+                log("要闻深化（事件链）已附加")
+        return suffix
+
+    workers = max(1, min(int(max_workers), 4))
+
+    def _main() -> str:
+        if not _en_main:
+            return ""
+        return run_replay_deepseek_enhancements(
+            api_key,
+            actual_date,
+            pf,
+            result,
+            max_tokens=mt,
+        )
+
+    def _qc() -> str:
+        if not _en_qc:
+            return ""
+        return run_replay_chapter_quality(
+            api_key,
+            actual_date,
+            pf,
+            main_report_for_qc,
+        )
+
+    def _cmp() -> str:
+        if not _en_cmp:
+            return ""
+        return run_replay_comparison_narrative(
+            api_key,
+            actual_date,
+            market_data,
+        )
+
+    def _news() -> str:
+        if not _en_news:
+            return ""
+        rel_n = getattr(data_fetcher, "_last_finance_news_related", None) or []
+        gen_n = getattr(data_fetcher, "_last_finance_news_general", None) or []
+        if not rel_n and not gen_n:
+            return ""
+        return run_replay_news_event_chain(
+            api_key,
+            actual_date,
+            data_fetcher,
+            max_items_push=mi,
+        )
+
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        f_main = ex.submit(_main) if _en_main else None
+        f_qc = ex.submit(_qc) if _en_qc else None
+        f_cmp = ex.submit(_cmp) if _en_cmp else None
+        f_news = ex.submit(_news) if _en_news else None
+        extra = f_main.result() if f_main else ""
+        qc = f_qc.result() if f_qc else ""
+        cmp_t = f_cmp.result() if f_cmp else ""
+        news = f_news.result() if f_news else ""
+
+    if _en_main:
+        log("DeepSeek 增强块已附加")
+    if _en_qc:
+        log("章节质控（周期/明日）已附加")
+    if _en_cmp:
+        log("近5日变化叙事已附加")
+    if _en_news:
+        rel_n2 = getattr(data_fetcher, "_last_finance_news_related", None) or []
+        gen_n2 = getattr(data_fetcher, "_last_finance_news_general", None) or []
+        if rel_n2 or gen_n2:
+            log("要闻深化（事件链）已附加")
+
+    return extra + qc + cmp_t + news

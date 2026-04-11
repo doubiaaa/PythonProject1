@@ -1,44 +1,27 @@
 # -*- coding: utf-8 -*-
 """
-统一日志：控制台 + 按天滚动文件（默认保留约 30 天）。
+统一日志：控制台 + 按天滚动文件；可选 JSON 结构化（见 observability）。
+
 用法：from app.utils.logger import get_logger; get_logger(__name__).info("...")
+追踪：from app.infrastructure.observability import trace_scope, get_trace_id
 """
 from __future__ import annotations
 
 import logging
-import os
-from logging.handlers import TimedRotatingFileHandler
 
 _CONFIGURED = False
-_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
-_LOG_DIR = os.path.join(_PROJECT_ROOT, "data", "logs")
 
 
 def setup_logging(level: int = logging.INFO) -> None:
+    """初始化根日志器（幂等）；具体格式由 observability + replay_config 决定。"""
     global _CONFIGURED
     if _CONFIGURED:
         return
-    os.makedirs(_LOG_DIR, exist_ok=True)
-    log_path = os.path.join(_LOG_DIR, "app.log")
-    fmt = logging.Formatter(
-        "%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
-    )
-    root = logging.getLogger()
-    root.setLevel(level)
-    if not root.handlers:
-        sh = logging.StreamHandler()
-        sh.setFormatter(fmt)
-        root.addHandler(sh)
-        fh = TimedRotatingFileHandler(
-            log_path,
-            when="midnight",
-            interval=1,
-            backupCount=30,
-            encoding="utf-8",
-        )
-        fh.setFormatter(fmt)
-        root.addHandler(fh)
+    from app.infrastructure.observability.logging_setup import configure_root_logging
+
+    configure_root_logging()
+    if level != logging.INFO:
+        logging.getLogger().setLevel(level)
     _CONFIGURED = True
 
 

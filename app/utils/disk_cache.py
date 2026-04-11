@@ -33,12 +33,48 @@ def get_json(key: str, ttl_sec: int, *, cache_root: Optional[str] = None) -> Opt
     if not os.path.isfile(path):
         return None
     if ttl_sec > 0 and (time.time() - os.path.getmtime(path)) > ttl_sec:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
         return None
     try:
         with open(path, "r", encoding="utf-8") as f:
             return json.load(f)
     except Exception:
         return None
+
+
+def sweep_expired_json_files(
+    cache_root: Optional[str] = None,
+    *,
+    ttl_sec: int,
+    max_files: int = 5000,
+) -> int:
+    """
+    扫描目录，删除超过 ttl_sec（按 mtime）的 .json 缓存文件。
+    返回删除数量；用于进程启动或低频定时清理，避免缓存无限增长。
+    """
+    root = cache_root or _DEFAULT_DIR
+    if not os.path.isdir(root) or ttl_sec <= 0:
+        return 0
+    now = time.time()
+    removed = 0
+    try:
+        names = os.listdir(root)
+    except OSError:
+        return 0
+    for name in names[:max_files]:
+        if not name.endswith(".json"):
+            continue
+        path = os.path.join(root, name)
+        try:
+            if now - os.path.getmtime(path) > ttl_sec:
+                os.remove(path)
+                removed += 1
+        except OSError:
+            continue
+    return removed
 
 
 def set_json(key: str, payload: Any, *, cache_root: Optional[str] = None) -> None:

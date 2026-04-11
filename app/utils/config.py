@@ -1,5 +1,10 @@
-import os
 import json
+import os
+from functools import lru_cache
+from typing import Any, Optional
+
+from app.infrastructure.config_defaults import DEFAULT_CONFIG, frozen_defaults
+from app.infrastructure.unified_config import build_effective_config
 
 # config.py 位于 app/utils/，项目根需上溯三级
 _PROJECT_ROOT = os.path.abspath(
@@ -7,174 +12,62 @@ _PROJECT_ROOT = os.path.abspath(
 )
 CONFIG_FILE = os.path.join(_PROJECT_ROOT, "replay_config.json")
 
-# 默认配置
-DEFAULT_CONFIG = {
-    # 大模型：DeepSeek（OpenAI 兼容）
-    "deepseek_api_key": "",
-    "llm_api_key": "",  # 可选，与 deepseek_api_key 二选一
-    "llm_model_name": "",
-    "deepseek_model_name": "",
-    "llm_api_base": "",  # 非空则覆盖默认 DeepSeek URL
-    "smtp_host": "",
-    "smtp_port": 587,
-    "smtp_user": "",
-    "smtp_password": "",
-    "smtp_from": "",
-    "mail_to": "",  # 收件人，多个英文逗号分隔
-    "smtp_ssl": False,  # True 时用 SMTPS（如 465）
-    # 邮件正文是否套统一 HTML 模板（false 时退回旧版简单 HTML 外壳 + 纯文本备选）
-    "email_html_template_enabled": True,
-    # 长文邮件是否增加「报告标题区 + 摘要高亮 + 报告说明」前缀（false 则仅渲染裸 Markdown）
-    "email_content_prefix": True,
-    # 邮件顶部要闻推送块最多展示条数（超出则提示回系统查看全文）
-    "email_news_max_items": 3,
-    # 要闻摘要中需剔除的固定前缀（正则字面替换）
-    "email_news_filter_prefix": "【本文系数据通用户提前专享】",
-    "email_app_version": "1.0",
-    # 邮件/HTML 页眉主标题；{trade_date} 替换为 YYYYMMDD 交易日
-    "report_title_template": "T+0 竞价复盘 · 对 {trade_date} 的复盘",
-    "email_system_name": "T+0 竞价复盘系统",
-    # 复盘长文末尾是否附加「历史相似形态回溯」（额外拉取多日涨停池，略慢）
-    "enable_historical_similarity": True,
-    # 相似形态回溯窗口（交易日）：过大时逐日拉涨停/炸板池极慢，默认 60 约三月
-    "historical_similarity_lookback": 60,
-    # get_market_summary 首阶段并行拉取涨跌停/板块/北向/溢价/涨跌家数（显著缩短墙钟时间）
-    "market_summary_parallel_fetch": True,
-    # 并行拉取线程上限（涨跌停池、分位历史、相似形态等共用）
-    "fetch_parallel_max_workers": 8,
-    # 情绪分位对比的回溯交易日数（5～30）
-    "zhaban_percentile_lookback": 15,
-    # 周报邮件是否尝试内嵌项目根目录下的权重/净值图（需先生成 png）
-    "weekly_email_attach_charts": True,
-    "cache_expire": 3600,  # 缓存过期时间（秒）
-    "retry_times": 2,  # AKShare 等网络请求重试次数（含首次）
-    # 策略权重（须约等于 1.0）；异常时程序回退默认
-    "w_main": 0.22,
-    "w_dragon": 0.18,
-    "w_kline": 0.18,
-    "w_liq": 0.14,
-    "w_tech": 0.28,
-    "tech_eval_topn": 12,  # 技术面精算队列长度（3～48）
-    "enable_tech_momentum": True,
-    # 财联社等公开要闻：拉取摘要并与龙头池/主线做关键词关联；关闭则不请求、不推送要闻块
-    "enable_finance_news": True,
-    # 东财个股主力净流入排名（今日）；关闭则不请求
-    "enable_individual_fund_flow_rank": True,
-    "individual_fund_flow_top_n": 12,
-    # 概念板块成分股快照（东财）；名称为空列表则跳过（可在 replay_config.json 中配置，如 ["人工智能","固态电池"]）
-    "enable_concept_cons_snapshot": True,
-    "concept_board_symbols": [],
-    # 腾讯分笔（稳定性一般，默认关闭）；仅用于调试「分离确认」类分析
-    "enable_intraday_tick_probe": False,
-    "intraday_tick_probe_symbol": "",  # 6 位代码，如 000001；空则不请求
-    # 龙头池周度邮件：周末脚本汇总涨跌；关闭则只跑脚本不寄信（或手动 --dry-run）
-    "enable_weekly_performance_email": True,
-    # 周报复盘末尾是否调用大模型生成「风格诊断+下周侧重」（需 DEEPSEEK_API_KEY 等）
-    "enable_weekly_ai_insight": True,
-    # 周报中是否拉取本周交易日市场快照（涨停家数、溢价、锚点日涨幅前20市值等）
-    "enable_weekly_market_snapshot": True,
-    # 复盘成功后将打板/趋势/低吸三指数写入 data/market_style_indices.json
-    "enable_daily_style_indices_persist": True,
-    # 周报是否计算「自然周」严格涨幅前 20（全市场抽样，较慢）
-    "enable_strict_weekly_top20": True,
-    "weekly_strict_top20_max_universe": 2800,
-    # 周报后根据龙头池风格收益更新 strategy_preference.json，供次日复盘 prompt 侧重
-    "enable_strategy_feedback_loop": True,
-    "strategy_weight_smoothing": 0.3,
-    "strategy_weight_max_single": 0.55,
-    "strategy_weight_min_each": 0.08,
-    # 某风格桶样本数不足则不单独跟数据走（单周模式）
-    "min_trades_per_style_for_weight": 3,
-    # 多周衰减：最近 multi_week_lookback 周，越近权重越高
-    "use_multi_week_decay_for_strategy": True,
-    "multi_week_lookback": 4,
-    "strategy_week_decay_factor": 0.75,
-    # 多周合计每桶至少几条才参与该桶数据更新
-    "min_total_trades_per_bucket_multiweek": 3,
-    "strategy_max_change_per_week": 0.25,
-    "strategy_shift_pullback": 0.5,
-    # 每日复盘前轻量探测市场风格是否切换（多一次大模型调用，易与主请求连发触发 429）
-    "enable_style_stability_probe": False,
-    # 启用风格探测时，探测完成后再等待秒数再调主长文（降低连续请求被限流）
-    "replay_llm_spacing_sec": 15,
-    # 主文若漏写「五、核心股聚焦」「七、明日预案」，由 report_builder 在免责声明前插入程序补充
-    "enable_report_builder_core_stocks_plan": True,
-    "enable_report_core_stocks_llm": False,
-    # 主文生成后追加 DeepSeek 增强块（一致性核对、多空对照、龙头观察、待验证点；多一次 API）
-    "enable_replay_llm_enhancements": True,
-    "replay_llm_enhancements_max_tokens": 6144,
-    "replay_llm_enhancements_spacing_sec": 8,
-    # 增强块之后的独立 DeepSeek 调用（各多一次 API，注意 429）
-    "enable_replay_llm_chapter_qc": True,
-    "enable_replay_llm_comparison_narrative": True,
-    "enable_replay_llm_news_deep": True,
-    "replay_llm_extra_spacing_sec": 8,
-    # 周报在风格诊断之后再追加「周度节奏与变化叙事」（多一次 API）
-    "enable_weekly_llm_trend_narrative": True,
-    # 周报权重更新后异常时额外发一封提醒邮件
-    "enable_weekly_weight_anomaly_email": True,
-    # 周末更新五桶权重后，追加 DeepSeek 白话解释（多一次 API）
-    "enable_weekly_weight_llm_explanation": True,
-    # 复盘 Markdown 目录中「4. 龙虎榜数据」是否请求东财接口（关则可省多次外网调用）
-    "enable_replay_lhb_catalog": True,
-    # 复盘目录是否拉取「概念资金流」TOP（与行业榜并列，偏题材向；多一次东财请求）
-    "enable_replay_concept_fund_snapshot": True,
-    # 复盘目录：程序龙头池档案（data/watchlist_records.json）
-    "enable_replay_watchlist_snapshot": True,
-    "replay_watchlist_max_rows": 40,
-    # 监控窗口长度：自 signal_date 起连续交易日数（含首日），用于推算「监控结束」
-    "replay_watchlist_monitor_span": 5,
-    # 监控池档案下方是否附「池内代码·5日/今日」快照表
-    "enable_replay_watchlist_spot_followup": True,
-    "replay_watchlist_spot_followup_max_codes": 15,
-    # 复盘目录：全 A 快照五日涨跌幅榜（复用 get_stock_zh_a_spot_em_cached，无列或失败则降级）
-    "enable_replay_spot_5d_leaderboard": True,
-    "replay_spot_5d_top_n": 19,
-    # 复盘断点：成功后写入 data/replay_status/；resume 为 True 时优先用缓存跳过数据拉取
-    "enable_replay_checkpoint": True,
-    "resume_replay_if_available": False,
-    # 策略权重：单次更新每桶相对上一版最大绝对变化（默认 10%，与 max_change_per_week 不同）
-    "strategy_max_weight_delta_per_update": 0.10,
-    # 数据源：本地 JSON 缓存目录、过期、重试；可被 replay_config.json 覆盖
-    "data_source": {
-        "timeout": 8,
-        "retry_times": 3,
-        "cache_expire_days": 1,
-        "cache_dir": "data_cache",
-        "llm_connect_timeout": 10,
-        "llm_read_timeout": 120,
-    },
-}
+
+def _build_merged_config(config_file: Optional[str] = None) -> dict[str, Any]:
+    path = config_file or CONFIG_FILE
+    return build_effective_config(
+        defaults=frozen_defaults(),
+        config_file=path,
+        project_root=_PROJECT_ROOT,
+    )
 
 
 class ConfigManager:
-    """配置管理类（持久化）"""
+    """配置管理类：defaults + 策略 profile + JSON + 环境变量（见 unified_config）。"""
 
-    def __init__(self, config_file=CONFIG_FILE):
+    def __init__(self, config_file: str = CONFIG_FILE):
         self.config_file = config_file
         self.config = self.load_config()
 
-    def load_config(self):
-        if os.path.exists(self.config_file):
-            try:
-                with open(self.config_file, 'r', encoding='utf-8') as f:
-                    user_config = json.load(f)
-                    # 合并默认配置
-                    merged = DEFAULT_CONFIG.copy()
-                    merged.update(user_config)
-                    return merged
-            except Exception:
-                return DEFAULT_CONFIG.copy()
-        else:
-            return DEFAULT_CONFIG.copy()
+    def load_config(self) -> dict[str, Any]:
+        return _build_merged_config(self.config_file)
 
-    def save_config(self):
-        with open(self.config_file, 'w', encoding='utf-8') as f:
+    def save_config(self) -> None:
+        """仅将当前内存中的可序列化片段写回 JSON（不含环境-only 覆盖说明）。"""
+        with open(self.config_file, "w", encoding="utf-8") as f:
             json.dump(self.config, f, indent=2, ensure_ascii=False)
 
-    def get(self, key, default=None):
+    def get(self, key: str, default: Any = None) -> Any:
         return self.config.get(key, default)
 
-    def set(self, key, value):
+    def set(self, key: str, value: Any) -> None:
         self.config[key] = value
         self.save_config()
+
+    def path(self, *keys: str) -> str:
+        """
+        解析 `paths` 下相对路径为绝对路径（基于 paths.project_root）。
+        例：cm.path('strategy_preference_file')
+        """
+        paths = self.config.get("paths") or {}
+        if not isinstance(paths, dict):
+            paths = {}
+        root = paths.get("project_root") or _PROJECT_ROOT
+        if len(keys) == 1:
+            rel = paths.get(keys[0])
+        else:
+            cur: Any = paths
+            for k in keys:
+                if not isinstance(cur, dict):
+                    cur = None
+                    break
+                cur = cur.get(k)
+            rel = cur
+        if not rel or not isinstance(rel, str):
+            raise KeyError(keys)
+        return os.path.normpath(os.path.join(root, rel.replace("/", os.sep)))
+
+
+@lru_cache(maxsize=1)
+def get_project_root() -> str:
+    return _PROJECT_ROOT

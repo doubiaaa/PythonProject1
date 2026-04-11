@@ -1,37 +1,48 @@
 # -*- coding: utf-8 -*-
 """
-应用服务层：复盘报告正文相关的纯规则（无 IO、无框架）。
+应用服务层：复盘报告正文相关的规则；阈值与文案由统一配置驱动。
 
-由编排层调用；单元测试直接导入本模块，避免依赖 ReplayTask 全链路。
+由编排层调用；单元测试直接导入本模块。
 """
 
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Optional
 
-_DRAGON_HEADINGS = (
-    "盘面综述",
-    "情绪与数据解读",
-    "周期定性",
-    "情绪数据量化",
-    "核心股聚焦",
-    "明日预案",
-)
+from app.utils.config import ConfigManager
+
+
+def _cfg() -> ConfigManager:
+    return ConfigManager()
+
+
+def _templates() -> dict[str, Any]:
+    t = _cfg().get("replay_text_templates")
+    return t if isinstance(t, dict) else {}
+
+
+def _failure_markers() -> tuple[str, ...]:
+    raw = _cfg().get("llm_failure_markers")
+    if isinstance(raw, list) and raw:
+        return tuple(str(x) for x in raw if isinstance(x, str) and x.strip())
+    return tuple()
+
+
+def _dragon_headings() -> tuple[str, ...]:
+    raw = _cfg().get("dragon_report_headings")
+    if isinstance(raw, list) and raw:
+        return tuple(str(x) for x in raw if isinstance(x, str) and x.strip())
+    return tuple()
 
 
 def is_llm_failure_payload(text: str) -> bool:
     """返回内容实为 API 错误串（无模型正文），避免误报「缺章节」。"""
-    s = (text or "").strip()[:1200]
-    markers = (
-        "API请求失败（",
-        "调用大模型 API",
-        "错误：大模型 API",
-        "API 返回异常",
-        "您的账户已达到速率限制",
-        '"code":"1302"',
-        "请求频率",
-        "账户余额不足",
-    )
+    cm = _cfg()
+    n = int(cm.get("llm_failure_payload_scan_chars", 1200))
+    s = (text or "").strip()[: max(1, n)]
+    markers = _failure_markers()
+    if not markers:
+        return False
     return any(m in s for m in markers)
 
 
@@ -39,22 +50,20 @@ def ensure_dragon_report_sections(text: str) -> str:
     """若缺少龙头模板关键章节标题，在文末追加系统提示（不重试 API）。"""
     if not text or not str(text).strip():
         return text
+    tpl = _templates()
+    headings = _dragon_headings()
     if is_llm_failure_payload(text):
-        note = (
-            "\n\n---\n\n> **【系统提示】** 本次 **未生成 AI 复盘长文**（上方为大模型接口报错或限速），"
-            "**并非** 章节未写全。请间隔数分钟后重试，或检查 API Key、配额与并发；"
-            "程序数据目录仍在上方市场摘要中可阅。\n"
-        )
+        note = str(tpl.get("dragon_llm_failure_note") or "")
         return text.rstrip() + note
-    missing = [h for h in _DRAGON_HEADINGS if h not in text]
+    if not headings:
+        return text
+    missing = [h for h in headings if h not in text]
     if not missing:
         return text
-    note = (
-        "\n\n---\n\n> **【系统提示】** 本次输出未检测到以下章节标题，"
-        "请人工对照程序数据复核或缩小单节篇幅后重试："
-        + "、".join(missing)
-        + "。\n"
-    )
+    intro = str(tpl.get("dragon_missing_headings_intro") or "")
+    sep = str(tpl.get("dragon_missing_headings_sep") or "、")
+    end = str(tpl.get("dragon_missing_headings_end") or "。\n")
+    note = intro + sep.join(missing) + end
     return text.rstrip() + note
 
 
@@ -62,10 +71,11 @@ def extract_summary_line(text: str) -> Optional[str]:
     """解析报告首行【摘要】…，用于推送标题。"""
     if not text:
         return None
+    max_chars = int(_cfg().get("replay_summary_line_max_chars", 220))
     for line in text.strip().split("\n"):
         s = line.strip()
         if s.startswith("【摘要】"):
-            return s[:220]
+            return s[: max(1, max_chars)]
     return None
 
 
@@ -76,12 +86,13 @@ def ensure_summary_line(text: str, market_phase: str = "高位震荡期") -> str
     first = str(text).strip().split("\n")[0].strip()
     if first.startswith("【摘要】"):
         return text
+    tpl = _templates()
     if is_llm_failure_payload(text):
-        return (
-            f"【摘要】周期阶段：{market_phase}｜适宜度：—｜置信度：低（未生成正文：大模型限速或服务异常，见下方）\n\n"
-            + text
+        prefix = str(tpl.get("summary_fallback_api_error") or "").format(
+            market_phase=market_phase
         )
-    return (
-        f"【摘要】周期阶段：{market_phase}｜适宜度：中｜置信度：低（系统补全：模型未输出规范首行摘要）\n\n"
-        + text
+        return prefix + text
+    prefix = str(tpl.get("summary_fallback_generic") or "").format(
+        market_phase=market_phase
     )
+    return prefix + text

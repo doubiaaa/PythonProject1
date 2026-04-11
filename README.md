@@ -27,7 +27,7 @@
 12. [复盘文末五人理论与每周温习](#复盘文末五人理论与每周温习)  
 13. [持久化：档案、风格指数、断点](#持久化档案风格指数断点)  
 14. [周度闭环与策略偏好](#周度闭环与策略偏好)  
-15. [配置：`DEFAULT_CONFIG` 全量说明](#配置default_config-全量说明)  
+15. [配置：`DEFAULT_CONFIG` 全量说明](#配置default_config-全量说明)（含 [性能与并发](#性能与并发)）  
 16. [嵌套 `data_source` 与数据源环境变量](#嵌套-data_source-与数据源环境变量)  
 17. [环境变量总表（LLM / SMTP / 策略 / 校验）](#环境变量总表llm--smtp--策略--校验)  
 18. [数据文件、缓存与断点目录](#数据文件缓存与断点目录)  
@@ -61,10 +61,10 @@
 | 类别 | 说明 |
 |------|------|
 | 语言 | Python 3（CI 3.11；本地建议 3.10+）。 |
-| 行情/数据 | pandas、**akshare**；部分结果经 `disk_cache` / `price_cache` 缓存。 |
+| 行情/数据 | pandas、**akshare**；`get_market_summary` 基础块可**线程池并行**（见 `market_summary_parallel_fetch`）；部分结果经 **`disk_cache`**（`data/api_cache/` JSON，TTL 到期读时删文件）与 `price_cache` 缓存。 |
 | 大模型 | HTTP `requests`；**tenacity** 传输层重试；业务层对 **HTTP 429** 指数退避。 |
 | 邮件 | SMTP；**markdown** + **Jinja2**（`email_template`）生成 HTML。 |
-| 配置 | `app/utils/config.py` 中 `DEFAULT_CONFIG` 与根目录 **`replay_config.json`** 浅合并。 |
+| 配置 | 默认键在 **`app/infrastructure/config_defaults.py`**（`DEFAULT_CONFIG`），经 **`app/utils/config.py`** 与根目录 **`replay_config.json`** 浅合并。 |
 | 质量 | **`pytest`**、`scripts/validate.py`、CI 中 **ruff**（部分路径）。 |
 
 ---
@@ -138,7 +138,7 @@ flowchart TB
 | 6 | **风格稳定性探测**（`enable_style_stability_probe`，默认关）：`probe_style_stability` → `effective_weights_from_stability`；随后 **`replay_llm_spacing_sec` 睡眠**，再构建 Prompt。 |
 | 7 | **`build_prompt`**：含 `build_prompt_addon`（五桶）、`dragon_meta` JSON 块、分离块、要闻块、主模板 **`MAIN_REPLAY_PROMPT`**。 |
 | 8 | **`call_llm`** → **`_ensure_summary_line`**（用 `_last_market_phase`）→ **`_ensure_dragon_report_sections`**；若返回体被识别为 API 失败载荷，附加说明而不误判为「缺章节」。 |
-| 9 | 若开启任一复盘 LLM 附加项：`collect_program_facts_snapshot`（含程序异常标签、龙头池字段）；可选依次：**`run_replay_deepseek_enhancements`**（主增强块）、**`run_replay_chapter_quality`**（周期/明日量表）、**`run_replay_comparison_narrative`**（近5日变化）、**`run_replay_news_event_chain`**（要闻事件链与噪声相关度）；间隔见 **`replay_llm_enhancements_spacing_sec`** / **`replay_llm_extra_spacing_sec`**。 |
+| 9 | 若开启任一复盘 LLM 附加项：由 **`run_replay_enhancement_bundle`**（`replay_llm_enhancements.py`）统一执行——先 **`collect_program_facts_snapshot`**（含程序异常标签、龙头池字段），再按固定顺序拼接四段：**主增强** → **章节质控** → **近 5 日变化叙事** → **要闻事件链**（与原先逻辑一致）。**默认串行**：段前间隔见 **`replay_llm_enhancements_spacing_sec`**（主文与第一段之间）、**`replay_llm_extra_spacing_sec`**（各独立段之间 `sleep`，降 429）。若 **`replay_llm_enhancements_parallel`** 为 `true`，四段在**同一段间无 sleep** 的前提下**并发**调用 LLM，再按上述顺序拼接（`max_workers` 上限见 **`replay_llm_parallel_max_workers`**，实际不超过 4）；并发更易触发接口限速，请自行权衡。 |
 | 10 | **`append_historical_similarity_block`**（默认开）：在 **免责声明** 前插入「历史相似形态回溯」（依赖多日涨停池拉取，略增耗时；见 **`enable_historical_similarity`**）。 |
 | 11 | **`_last_news_push_prefix`**：经 **`truncate_finance_news_push_prefix`**（`email_news_max_items`、`email_news_filter_prefix`）拼到正文**最前**（含上述 LLM 输出之后）。 |
 | 12 | **`program_completed` 且 `top_pool`**：`append_daily_top_pool` → **`data/watchlist_records.json`**。 |
@@ -154,7 +154,8 @@ flowchart TB
 - **`app/services/auction_halfway_strategy.py`**：主线与 **`top_pool`** 核心逻辑；与 `meta.program_completed`、`abort_reason` 等配合。  
 - **`app/services/sentiment_scorer.py`**：情绪周期量化评分（多因子加权），由 `data_fetcher` 在合适位置调用 **`calculate_sentiment_score`**。  
 - **`app/services/technical_indicators.py`**、**`trend_momentum_strategy.py`**：技术面与动量相关计算（供策略/摘要使用，具体调用链见源码）。  
-- **`app/services/price_cache.py`**、**`app/utils/disk_cache.py`**：价格与通用磁盘缓存。  
+- **`app/services/price_cache.py`**、**`app/utils/disk_cache.py`**：价格与通用磁盘 JSON 缓存（默认目录 **`data/api_cache/`**）；**`get_json`** 在 TTL 过期时**删除**过期文件；**`sweep_expired_json_files`** 可按目录批量清理。进程内**首次**构造 **`DataFetcher`** 时，若 **`disk_cache_sweep_ttl_sec` > 0**，会对上述目录做一次过期清扫（默认 86400 秒；设为 `0` 可关闭）。  
+- **`get_market_summary`**：当 **`market_summary_parallel_fetch`** 为 `true`（默认）时，涨跌停池、板块、北向、溢价、涨跌家数等基础拉取在 **`ThreadPoolExecutor`** 中并发执行，线程数与 **`fetch_parallel_max_workers`**（默认 8，代码侧有上下限钳制）相关；为 `false` 时退回逐步串行拉取，**业务结果与合并顺序不变**。  
 - **`config/data_source_config.py`**：AK 重试、磁盘缓存 TTL、涨跌停等 DataFrame **必需列**名约定；可被 **`AK_*` / `API_CACHE_TTL_SEC`** 等环境变量覆盖。  
 - **`app/services/data_source_errors.py`**：数据源异常类型辅助。
 
@@ -197,7 +198,7 @@ flowchart TB
 ## 复盘增强与周报叙事
 
 - **`app/services/replay_llm_enhancements.py`**：  
-  - 复盘：**`run_replay_deepseek_enhancements`**（一致性、多空、龙头观察、待验证点等）；**`collect_program_facts_snapshot`** 汇总程序事实。  
+  - 复盘：四段增强由 **`run_replay_enhancement_bundle`** 编排，内部调用 **`run_replay_deepseek_enhancements`**（一致性、多空、龙头观察、待验证点等）、**`run_replay_chapter_quality`**、**`run_replay_comparison_narrative`**、**`run_replay_news_event_chain`**；**`collect_program_facts_snapshot`** 汇总程序事实。默认与配置关闭并行时，调用顺序与段间等待与历史行为一致。  
   - 周报：**`run_weekly_trend_narrative`**（周度节奏与变化叙事）；与 **`enable_weekly_llm_trend_narrative`** 联动。  
 - 周报中的「风格诊断」脚本内嵌于 **`scripts/weekly_performance_email.py`**（函数 **`_call_llm_weekly_style`**），不是 `replay_llm_enhancements` 主文件。
 
@@ -256,7 +257,7 @@ flowchart TB
 
 ## 配置：`DEFAULT_CONFIG` 全量说明
 
-以下键均可在 **`replay_config.json`** 中覆盖（**浅合并**，嵌套对象整体替换需注意）。默认值以 **`app/utils/config.py`** 为准。
+以下键均可在 **`replay_config.json`** 中覆盖（**浅合并**，嵌套对象整体替换需注意）。默认值以 **`app/infrastructure/config_defaults.py`**（经 **`app/utils/config.py`** 加载）为准。
 
 ### 大模型
 
@@ -331,9 +332,21 @@ flowchart TB
 | `enable_replay_llm_comparison_narrative` | 独立调用：**相对昨日与近 5 日**变化叙事。 |
 | `enable_replay_llm_news_deep` | 独立调用：要闻 **事件—板块—情绪**链 + 未推送要闻 **相关度一句**（依赖 `enable_finance_news`）。 |
 | `replay_llm_extra_spacing_sec` | 上述独立调用之间的间隔秒数（降 429）。 |
+| `replay_llm_enhancements_parallel` | `false`（默认）：四段 LLM 串行并保持段间 sleep；`true`：四段并发请求后再按固定顺序拼接，**不**插入段间 sleep，可能缩短总耗时但更易 **429**。 |
+| `replay_llm_parallel_max_workers` | 复盘增强并发时的线程池上限提示值（实现侧与任务数取 min，**不超过 4**）。 |
 | `enable_weekly_llm_trend_narrative` | 周报周度叙事（含本周 vs 上周：风格/溢价/连板高度）。 |
 | `enable_weekly_weight_llm_explanation` | 周末五桶权重更新后 **白话解释**（多一次 API）。 |
 | `enable_weekly_weight_anomaly_email` | 权重异常单独发信。 |
+
+### 性能与并发
+
+以下键与 **`get_market_summary`** 拉取方式、**`disk_cache`** 目录清扫相关；**`replay_llm_enhancements_parallel`** / **`replay_llm_parallel_max_workers`** 见上一节「复盘 LLM 行为」。
+
+| 键 | 含义 |
+|----|------|
+| `market_summary_parallel_fetch` | `true`（默认）时 **`get_market_summary`** 内多路基础数据并行拉取；`false` 时改为串行，结果语义不变。 |
+| `fetch_parallel_max_workers` | 并行拉取时的线程数配置（代码内会钳制在合理区间，并与并行任务规模配合）。 |
+| `disk_cache_sweep_ttl_sec` | 进程内首次创建 **`DataFetcher`** 时，对 **`disk_cache`** 默认目录扫描并删除超过该秒数（按 mtime）的 `.json`；默认 `86400`；`0` 表示不执行此次清扫。 |
 
 ### 复盘目录与监控池
 
@@ -399,7 +412,8 @@ flowchart TB
 | `data/strategy_evolution_log.jsonl` | 权重演进审计。 |
 | `data/market_style_indices.json` | 风格指数。 |
 | `data/replay_status/` | `{date}_market.txt`、`{date}_meta.json`。 |
-| `data_cache/`（或配置目录） | 按日键磁盘缓存（TTL 见环境变量与 `data_source`）。 |
+| `data/api_cache/` | **`disk_cache`** 默认目录：复盘等同日多次跑数时复用 JSON；TTL 过期读时删文件，并可配合 **`disk_cache_sweep_ttl_sec`** 启动清扫。 |
+| `data_cache/`（或配置目录） | 数据源侧按日键磁盘缓存（TTL 见环境变量与 `data_source`）。 |
 | `weights_trend.png` | 周报可选附件（项目根，由 `plot_evolution_log` 生成）。 |
 | `data/backtest_results.png` | `scripts/backtest_weights.py --plot` 时生成。 |
 
@@ -430,7 +444,7 @@ flowchart TB
 | 文件 | 大致覆盖 |
 |------|----------|
 | `test_replay_catalog.py` | 目录与工具函数。 |
-| `test_replay_enhancements.py` | 增强块。 |
+| `test_replay_enhancements.py` | 增强块、`collect_program_facts_snapshot`、并行模式下拼接顺序。 |
 | `test_replay_llm_failure.py` | LLM 失败载荷识别等。 |
 | `test_replay_summary.py` | 摘要行。 |
 | `test_finance_news.py` / `test_news_mapper_pool.py` | 要闻与映射。 |
@@ -496,4 +510,4 @@ flowchart TB
 
 ---
 
-*行为以主分支源码与 `pytest` 为准。新增程序侧能力时，请同步更新 **`app/utils/config.py`**、本 README 的 [能力清单](#程序侧量化与报告增强能力清单)、[复盘文末五人理论与每周温习](#复盘文末五人理论与每周温习)、**`ARCHITECTURE.md`** 与分层目标 **`docs/six_layer_architecture.md`**（若涉及模块边界或分层）。*
+*行为以主分支源码与 `pytest` 为准。新增程序侧能力时，请同步更新 **`app/infrastructure/config_defaults.py`**（及 **`app/utils/config.py`** 加载逻辑若需调整）、本 README 的 [能力清单](#程序侧量化与报告增强能力清单)、[配置全量说明](#配置default_config-全量说明)、[复盘文末五人理论与每周温习](#复盘文末五人理论与每周温习)、**`ARCHITECTURE.md`** 与分层目标 **`docs/six_layer_architecture.md`**（若涉及模块边界或分层）。*

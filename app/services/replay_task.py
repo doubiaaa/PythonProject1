@@ -22,10 +22,19 @@ from app.services.strategy_preference import (
 )
 from app.services.watchlist_store import append_daily_top_pool
 from app.utils.config import ConfigManager
+from app.application.llm_intel import run_replay_intel_layer
+from app.infrastructure.observability import alert_failure, emit_event
+from app.infrastructure.resilience.exceptions import format_fault_log
+from app.infrastructure.validation import normalize_trade_date_str
 from app.services.replay_checkpoint import (
+    PHASE_DATA_COMPLETE,
+    PHASE_DONE,
+    PHASE_LLM_COMPLETE,
+    PHASE_STARTED,
     load_fetcher_bundle,
     load_market_data_cache,
     save_fetcher_bundle,
+    write_checkpoint_phase,
 )
 from app.services.llm_client import get_llm_client
 from app.services.separation_confirmation import perform_separation_confirmation
@@ -202,10 +211,22 @@ class ReplayTask:
         )
 
     def run(self, date, api_key, data_fetcher, email_cfg=None):
+        nd = normalize_trade_date_str(date)
+        if nd is None:
+            self.log("参数错误：复盘日须为 8 位数字 YYYYMMDD")
+            self.result = "❌ 复盘失败：非法日期参数"
+            self.status = "error"
+            return
+        date = nd
         actual_date = date
         _t0 = time.monotonic()
         try:
+            emit_event("replay.run_start", trade_date=str(date))
             data_fetcher.set_current_task(self)
+            try:
+                write_checkpoint_phase(str(date)[:8], PHASE_STARTED)
+            except Exception:
+                pass
 
             self.progress = 10
             _cfg = ConfigManager()
@@ -234,6 +255,15 @@ class ReplayTask:
                     actual_date = str(date)[:8]
                     self.log("断点续跑：已加载市场摘要与程序缓存（跳过 get_market_summary）")
                     self.progress = 90
+                    try:
+                        write_checkpoint_phase(str(actual_date)[:8], PHASE_DATA_COMPLETE)
+                    except Exception:
+                        pass
+                    emit_event(
+                        "replay.data_ready",
+                        trade_date=str(actual_date),
+                        resumed=True,
+                    )
 
             if market_data is None:
                 self.log("正在获取市场数据与次日竞价半路选股…")
@@ -245,12 +275,22 @@ class ReplayTask:
                         save_fetcher_bundle(actual_date, market_data, data_fetcher)
                     except Exception as ex:
                         self.log(f"写入复盘断点缓存失败（可忽略）：{ex}")
+                try:
+                    write_checkpoint_phase(str(actual_date)[:8], PHASE_DATA_COMPLETE)
+                except Exception:
+                    pass
+                emit_event(
+                    "replay.data_ready",
+                    trade_date=str(actual_date),
+                    elapsed_sec=round(time.monotonic() - _t0, 2),
+                )
 
             if actual_date != date:
                 self.log(f"日期已自动调整为交易日: {actual_date}")
 
             self.progress = 95
             self.log("数据获取完成，正在调用AI…")
+            emit_event("replay.llm_begin", trade_date=str(actual_date))
             eff_w = None
             stab_hint = ""
             separation_result = None
@@ -341,6 +381,20 @@ class ReplayTask:
                     use_llm=bool(_cm_rb.get("enable_report_core_stocks_llm", False)),
                 )
             result = _ensure_dragon_report_sections(result)
+            try:
+                write_checkpoint_phase(
+                    str(actual_date)[:8],
+                    PHASE_LLM_COMPLETE,
+                    result_chars=len(result or ""),
+                )
+            except Exception:
+                pass
+            emit_event(
+                "replay.llm_complete",
+                trade_date=str(actual_date),
+                result_chars=len(result or ""),
+                llm_sec=round(time.monotonic() - _t_ai, 2),
+            )
             if _is_llm_failure_payload(result):
                 self.log("大模型未返回正文（限速/余额/网络等），已附加说明；请勿将「缺章节」提示理解为模型漏写")
             else:
@@ -354,79 +408,45 @@ class ReplayTask:
                 if _en_main or _en_qc or _en_cmp or _en_news:
                     try:
                         from app.services.replay_llm_enhancements import (
-                            collect_program_facts_snapshot,
-                            run_replay_chapter_quality,
-                            run_replay_comparison_narrative,
-                            run_replay_deepseek_enhancements,
-                            run_replay_news_event_chain,
+                            run_replay_enhancement_bundle,
                         )
 
                         gap_en = float(
                             _cm_en.get("replay_llm_enhancements_spacing_sec", 8) or 0
                         )
-                        if _en_main and gap_en > 0:
-                            self.log(
-                                f"DeepSeek 增强块前等待 {gap_en:.0f}s（降低连发限速）"
-                            )
-                            time.sleep(gap_en)
-                        pf = collect_program_facts_snapshot(
-                            actual_date,
-                            market_data,
-                            data_fetcher,
-                            separation_result,
+                        gap_x = float(
+                            _cm_en.get("replay_llm_extra_spacing_sec", 8) or 0
                         )
-                        if _en_main:
-                            mt = int(
-                                _cm_en.get("replay_llm_enhancements_max_tokens", 6144)
-                                or 6144
-                            )
-                            extra = run_replay_deepseek_enhancements(
-                                api_key,
-                                actual_date,
-                                pf,
-                                result,
-                                max_tokens=mt,
-                            )
-                            result = result + extra
-                            self.log("DeepSeek 增强块已附加")
-                        gap_x = float(_cm_en.get("replay_llm_extra_spacing_sec", 8) or 0)
-                        if _en_qc:
-                            if gap_x > 0:
-                                time.sleep(gap_x)
-                            result = result + run_replay_chapter_quality(
-                                api_key,
-                                actual_date,
-                                pf,
-                                main_report_for_qc,
-                            )
-                            self.log("章节质控（周期/明日）已附加")
-                        if _en_cmp:
-                            if gap_x > 0:
-                                time.sleep(gap_x)
-                            result = result + run_replay_comparison_narrative(
-                                api_key,
-                                actual_date,
-                                market_data,
-                            )
-                            self.log("近5日变化叙事已附加")
-                        if _en_news:
-                            rel_n = getattr(
-                                data_fetcher, "_last_finance_news_related", None
-                            ) or []
-                            gen_n = getattr(
-                                data_fetcher, "_last_finance_news_general", None
-                            ) or []
-                            if rel_n or gen_n:
-                                if gap_x > 0:
-                                    time.sleep(gap_x)
-                                mi = int(_cm_en.get("email_news_max_items", 3) or 3)
-                                result = result + run_replay_news_event_chain(
-                                    api_key,
-                                    actual_date,
-                                    data_fetcher,
-                                    max_items_push=mi,
-                                )
-                                self.log("要闻深化（事件链）已附加")
+                        mt = int(
+                            _cm_en.get("replay_llm_enhancements_max_tokens", 6144)
+                            or 6144
+                        )
+                        mi = int(_cm_en.get("email_news_max_items", 3) or 3)
+                        parallel_en = bool(
+                            _cm_en.get("replay_llm_enhancements_parallel", False)
+                        )
+                        mw = int(_cm_en.get("replay_llm_parallel_max_workers", 4) or 4)
+                        suffix = run_replay_enhancement_bundle(
+                            parallel=parallel_en,
+                            max_workers=mw,
+                            gap_en=gap_en,
+                            gap_x=gap_x,
+                            actual_date=actual_date,
+                            market_data=market_data,
+                            data_fetcher=data_fetcher,
+                            separation_result=separation_result,
+                            api_key=api_key,
+                            result=result,
+                            main_report_for_qc=main_report_for_qc,
+                            _en_main=_en_main,
+                            _en_qc=_en_qc,
+                            _en_cmp=_en_cmp,
+                            _en_news=_en_news,
+                            mt=mt,
+                            mi=mi,
+                            log=self.log,
+                        )
+                        result = result + suffix
                     except Exception as ex:
                         self.log(f"DeepSeek 增强块失败：{ex}")
             try:
@@ -455,11 +475,42 @@ class ReplayTask:
                 result = news_pre + result
                 self.log("已附加财经要闻摘要（推送与正文顶部）")
 
+            try:
+                _li = ConfigManager().config.get("llm_intel") or {}
+                if isinstance(_li, dict) and _li.get("enabled", True):
+                    result, _intel_meta = run_replay_intel_layer(
+                        report_md=result,
+                        actual_date=str(actual_date),
+                        market_data=market_data or "",
+                        data_fetcher=data_fetcher,
+                        separation_result=separation_result,
+                        api_key=api_key,
+                    )
+                    emit_event(
+                        "replay.llm_intel_applied",
+                        trade_date=str(actual_date),
+                        **_intel_meta,
+                    )
+                    self.log(
+                        "程序智能校验与决策摘要已附加（事实对照/结构化决策，非投资建议）"
+                    )
+            except Exception as ex:
+                self.log(f"智能分析层附加失败（可忽略）：{ex}")
+
             result = append_replay_viewpoint_footer(result)
 
             self.progress = 100
             self.result = result
             self.log("分析完成")
+            try:
+                write_checkpoint_phase(str(actual_date)[:8], PHASE_DONE)
+            except Exception:
+                pass
+            emit_event(
+                "replay.run_success",
+                trade_date=str(actual_date),
+                total_sec=round(time.monotonic() - _t0, 2),
+            )
             self.status = "completed"
             ah_meta = getattr(data_fetcher, "_last_auction_meta", None) or {}
             if ah_meta.get("program_completed") and ah_meta.get("top_pool"):
@@ -513,6 +564,19 @@ class ReplayTask:
                 elif not eok:
                     self.log(f"邮件发送失败：{emsg}")
         except Exception as e:
+            try:
+                self.log(format_fault_log(e, context="replay_run"))
+            except Exception:
+                pass
+            try:
+                alert_failure(
+                    str(e),
+                    component="replay_task",
+                    trade_date=str(actual_date),
+                    exc_type=type(e).__name__,
+                )
+            except Exception:
+                pass
             error_msg = f"❌ 复盘失败：{str(e)}"
             self.log(error_msg)
             self.result = error_msg

@@ -21,10 +21,6 @@ from app.utils.email_template import (
     should_skip_rich_email_prefix,
 )
 
-# 单封正文上限（字符），避免部分 SMTP 拒信
-MAX_BODY_CHARS = 200_000
-
-
 def _split_addrs(raw: str) -> list[str]:
     if not raw or not str(raw).strip():
         return []
@@ -214,12 +210,17 @@ def send_report_email(
     use_ssl = bool(cfg.get("smtp_ssl"))
     use_template = bool(cfg.get("email_html_template_enabled", True))
 
-    if len(subject) > 200:
-        subject = subject[:197] + "..."
+    from app.utils.config import ConfigManager
+
+    _cm = ConfigManager()
+    max_subj = int(_cm.get("email_max_subject_chars", 200))
+    max_body = int(_cm.get("email_max_body_chars", 200_000))
+    if len(subject) > max_subj:
+        subject = subject[: max_subj - 3] + "..."
 
     raw_body = body or " "
-    if len(raw_body) > MAX_BODY_CHARS:
-        raw_body = raw_body[: MAX_BODY_CHARS - 80] + "\n\n…（正文过长已截断）"
+    if len(raw_body) > max_body:
+        raw_body = raw_body[: max_body - 80] + "\n\n…（正文过长已截断）"
 
     ev = dict(extra_vars or {})
     ev.setdefault("title", subject)
