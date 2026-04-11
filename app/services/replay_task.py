@@ -332,9 +332,9 @@ class ReplayTask:
             except Exception as ex:
                 self.log(f"要闻映射分析失败：{ex}")
             
-            # 风格稳定性探测
+            # 风格稳定性探测（可选；与主长文各一次智谱调用，连发易 429）
             _cm2 = ConfigManager()
-            if _cm2.get("enable_style_stability_probe", True):
+            if _cm2.get("enable_style_stability_probe", False):
                 try:
                     stab = probe_style_stability(api_key, market_data)
                     stab_hint = stab
@@ -343,7 +343,13 @@ class ReplayTask:
                     self.log(f"风格稳定性探测：{stab}")
                 except Exception as ex:
                     self.log(f"风格稳定性探测失败（沿用文件权重）：{ex}")
-            
+                gap = float(_cm2.get("replay_zhipu_spacing_sec", 15) or 0)
+                if gap > 0:
+                    self.log(
+                        f"智谱调用间隔：等待 {gap:.0f}s 后再请求主长文（降低 429 限速概率）"
+                    )
+                    time.sleep(gap)
+
             # 构建prompt
             prompt = self.build_prompt(
                 actual_date,

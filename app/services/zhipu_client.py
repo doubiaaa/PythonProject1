@@ -27,8 +27,9 @@ DEFAULT_MODEL = os.environ.get("ZHIPU_MODEL", "glm-4-flash")
 DEFAULT_TIMEOUT = float(os.environ.get("ZHIPU_TIMEOUT_SEC", "120"))
 ZHIPU_RETRIES = max(1, int(os.environ.get("ZHIPU_RETRY_ATTEMPTS", "3")))
 # 429 限速：在单次 chat内额外重试（与传输层重试独立）
-ZHIPU_429_RETRIES = max(0, int(os.environ.get("ZHIPU_RETRY_429", "4")))
-ZHIPU_429_WAIT_SEC = max(5, int(os.environ.get("ZHIPU_RETRY_429_WAIT_SEC", "25")))
+ZHIPU_429_RETRIES = max(0, int(os.environ.get("ZHIPU_RETRY_429", "6")))
+ZHIPU_429_WAIT_SEC = max(5, int(os.environ.get("ZHIPU_RETRY_429_WAIT_SEC", "30")))
+ZHIPU_429_WAIT_MAX_SEC = max(30, int(os.environ.get("ZHIPU_RETRY_429_WAIT_MAX_SEC", "180")))
 
 
 class ZhipuClient:
@@ -103,16 +104,18 @@ class ZhipuClient:
 
             if response.status_code == 429 and attempt_429 < ZHIPU_429_RETRIES:
                 attempt_429 += 1
-                wait = ZHIPU_429_WAIT_SEC
+                # 指数退避：30s → 60s → 120s… 上限见 ZHIPU_429_WAIT_MAX_SEC
+                exp = int(ZHIPU_429_WAIT_SEC * (2 ** max(0, attempt_429 - 1)))
+                wait = min(exp, ZHIPU_429_WAIT_MAX_SEC)
                 try:
                     ra = response.headers.get("Retry-After")
                     if ra is not None:
                         wait = max(wait, int(float(ra)))
                 except (TypeError, ValueError):
                     pass
-                wait = min(wait, 120)
+                wait = min(wait, ZHIPU_429_WAIT_MAX_SEC)
                 _log.warning(
-                    "智谱 API 返回 429（限速），%s/%s 次，等待 %ss 后重试",
+                    "智谱 API 返回 429（限速），第 %s/%s 次退避，等待 %ss 后重试",
                     attempt_429,
                     ZHIPU_429_RETRIES,
                     wait,

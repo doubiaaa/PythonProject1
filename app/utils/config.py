@@ -76,8 +76,10 @@ DEFAULT_CONFIG = {
     "min_total_trades_per_bucket_multiweek": 3,
     "strategy_max_change_per_week": 0.25,
     "strategy_shift_pullback": 0.5,
-    # 每日复盘前轻量探测市场风格是否切换（多一次智谱调用）
-    "enable_style_stability_probe": True,
+    # 每日复盘前轻量探测市场风格是否切换（多一次智谱调用，易与主请求连发触发 429）
+    "enable_style_stability_probe": False,
+    # 启用风格探测时，探测完成后再等待秒数再调主长文（降低连续请求被限流）
+    "replay_zhipu_spacing_sec": 15,
     # 周报权重更新后异常时额外发一封提醒邮件
     "enable_weekly_weight_anomaly_email": True,
     # 模拟账户：按程序龙头池与收盘价撮合（data/simulated_account.json）

@@ -13,8 +13,6 @@ import threading
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
-import requests
-
 from app.services.weekly_market_snapshot import trade_days_in_iso_week
 from app.services.weekly_performance import (
     SignalReturnRow,
@@ -40,7 +38,6 @@ BUCKETS = ("打板", "低吸", "趋势", "龙头", "其他")
 
 DEFAULT_WEIGHTS = {k: 0.2 for k in BUCKETS}
 
-ZHIPU_API_URL = "https://open.bigmodel.cn/api/paas/v4/chat/completions"
 MODEL_NAME = "glm-4-flash"
 
 
@@ -305,8 +302,24 @@ def _penalize_large_shift(
     return {k: round(out[k] / s, 4) for k in BUCKETS}
 
 
+def _probe_text_is_api_error(text: str) -> bool:
+    t = (text or "").strip()[:500]
+    return any(
+        t.startswith(p)
+        for p in (
+            "调用智谱",
+            "API请求失败",
+            "API 返回异常",
+            "错误：智谱",
+        )
+    )
+
+
 def probe_style_stability(api_key: str, market_data_excerpt: str, timeout: float = 45.0) -> str:
-    """轻量探测：返回 稳定 / 可能切换 / 混乱。"""
+    """轻量探测：返回 稳定 / 可能切换 / 混乱。走 ZhipuClient 与主复盘一致（含 429 退避）。"""
+    from app.services.zhipu_client import ZhipuClient
+    from app.utils.config import ConfigManager
+
     prompt = (
         "你是市场风格观察员。根据下列复盘用市场数据摘录，只输出下面三个词之一，不要标点与解释：\n"
         "稳定\n可能切换\n混乱\n\n"
@@ -314,25 +327,15 @@ def probe_style_stability(api_key: str, market_data_excerpt: str, timeout: float
         "【数据摘录】\n"
         + (market_data_excerpt or "")[:9000]
     )
+    model = (ConfigManager().get("zhipu_model_name") or "").strip() or MODEL_NAME
     try:
-        r = requests.post(
-            ZHIPU_API_URL,
-            headers={
-                "Authorization": f"Bearer {api_key}",
-                "Content-Type": "application/json",
-            },
-            json={
-                "model": MODEL_NAME,
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.2,
-                "max_tokens": 32,
-            },
-            timeout=timeout,
+        client = ZhipuClient(api_key, model=model, timeout=timeout)
+        text = client.chat_completion(
+            prompt, temperature=0.2, max_tokens=32
         )
-        if r.status_code != 200:
+        if _probe_text_is_api_error(text):
             return "稳定"
-        text = ((r.json().get("choices") or [{}])[0].get("message") or {}).get("content") or ""
-        text = text.strip()
+        text = str(text).strip()
         if "混乱" in text:
             return "混乱"
         if "可能切换" in text or "切换" in text:

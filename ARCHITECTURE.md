@@ -164,7 +164,8 @@ flowchart LR
 | 键 | 含义 |
 |----|------|
 | `enable_finance_news` | 是否拉取并拼接财联社要闻摘要。 |
-| `enable_style_stability_probe` | 主报告前是否增加一次智谱「风格稳定性」轻量调用。 |
+| `enable_style_stability_probe` | 主报告前是否增加一次智谱「风格稳定性」轻量调用（**默认 false**，与主长文各计一次请求，易触发 429；需要时在 `replay_config.json` 设为 `true`）。 |
+| `replay_zhipu_spacing_sec` | 启用风格探测时，探测结束后再等待的秒数，再请求主长文（默认 15）。 |
 | `enable_daily_style_indices_persist` | 复盘成功后是否写入 `market_style_indices.json`。 |
 | `enable_simulated_account` | 是否执行模拟账户逻辑。 |
 | `simulated_buy_price_type` | `close_of_recommendation_day` 或 `next_day_open`。 |
@@ -354,7 +355,7 @@ flowchart LR
 | 变量 | 用途 |
 |------|------|
 | `ZHIPU_API_KEY` | 智谱 API Key。 |
-| `ZHIPU_RETRY_429` / `ZHIPU_RETRY_429_WAIT_SEC` | 主复盘 `chat/completions` 遇 **429 限速** 时的额外重试次数与基准等待秒数（默认 4 次、25s，另尊重 `Retry-After`）。 |
+| `ZHIPU_RETRY_429` / `ZHIPU_RETRY_429_WAIT_SEC` / `ZHIPU_RETRY_429_WAIT_MAX_SEC` | 主复盘 `chat/completions` 遇 **429** 时的重试次数、基准等待秒数与单次等待上限（默认 6 次、30s 起指数退避、上限 180s，另尊重 `Retry-After`）。 |
 | `ZHIPU_RETRY_ATTEMPTS` | 传输层超时/断连重试（`tenacity`，与 429 独立）。 |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` | SMTP。 |
 | `SMTP_FROM` / `MAIL_TO` | 发件人与收件人（可多地址逗号分隔）。 |
