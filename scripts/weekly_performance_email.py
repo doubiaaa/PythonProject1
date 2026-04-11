@@ -175,15 +175,15 @@ def main() -> int:
             except Exception as e:
                 md += f"\n\n## 模拟账户本周表现\n\n（读取失败：{e}）\n"
 
+        api_key_w = (
+            (os.environ.get("DEEPSEEK_API_KEY") or "").strip()
+            or (cm.get("deepseek_api_key") or "").strip()
+            or (cm.get("llm_api_key") or "").strip()
+        )
         if cm.get("enable_weekly_ai_insight", False):
-            api_key = (
-                (os.environ.get("DEEPSEEK_API_KEY") or "").strip()
-                or (cm.get("deepseek_api_key") or "").strip()
-                or (cm.get("llm_api_key") or "").strip()
-            )
-            if api_key:
+            if api_key_w:
                 try:
-                    insight = _call_llm_weekly_style(api_key, md)
+                    insight = _call_llm_weekly_style(api_key_w, md)
                     md += (
                         "\n## 大模型 · 风格诊断与下周侧重（归纳，非投资建议）\n\n"
                         + insight
@@ -193,6 +193,16 @@ def main() -> int:
                     md += f"\n## 大模型 · 风格诊断\n\n（生成失败：{e}）\n"
             else:
                 md += "\n## 大模型 · 风格诊断\n\n（未配置 DEEPSEEK_API_KEY / deepseek_api_key 等）\n"
+
+        if cm.get("enable_weekly_llm_trend_narrative", True) and api_key_w:
+            try:
+                from app.services.replay_llm_enhancements import (
+                    run_weekly_trend_narrative,
+                )
+
+                md += run_weekly_trend_narrative(api_key_w, md)
+            except Exception as e:
+                md += f"\n（周度节奏叙事失败：{e}）\n"
 
         if args.dry_run:
             print(md)

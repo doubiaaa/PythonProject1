@@ -1,21 +1,2 @@
-from flask import Flask
-import os
-
-# 获取项目根目录（app/__init__.py 上溯两级）
-project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-
-# 初始化 Flask 应用，显式指定模板文件夹路径
-app = Flask(__name__, template_folder=os.path.join(project_root, "templates"))
-app.json.ensure_ascii = False
-app.config["MAX_CONTENT_LENGTH"] = 2 * 1024 * 1024
-
-
-@app.after_request
-def _security_headers(response):
-    response.headers.setdefault("X-Content-Type-Options", "nosniff")
-    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
-    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
-    return response
-
-
-from app.routes import main
+# -*- coding: utf-8 -*-
+"""业务包：数据拉取、复盘编排、邮件、策略偏好等。无 Web 入口，请使用 scripts/ 下脚本。"""

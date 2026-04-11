@@ -356,6 +356,43 @@ class ReplayTask:
                 self.log("大模型未返回正文（限速/余额/网络等），已附加说明；请勿将「缺章节」提示理解为模型漏写")
             else:
                 self.log("报告首行与龙头模板章节已校验（必要时已补全/提示）")
+                _cm_en = ConfigManager()
+                if _cm_en.get("enable_replay_llm_enhancements", True):
+                    try:
+                        from app.services.replay_llm_enhancements import (
+                            collect_program_facts_snapshot,
+                            run_replay_deepseek_enhancements,
+                        )
+
+                        gap_en = float(
+                            _cm_en.get("replay_llm_enhancements_spacing_sec", 8) or 0
+                        )
+                        if gap_en > 0:
+                            self.log(
+                                f"DeepSeek 增强块前等待 {gap_en:.0f}s（降低连发限速）"
+                            )
+                            time.sleep(gap_en)
+                        pf = collect_program_facts_snapshot(
+                            actual_date,
+                            market_data,
+                            data_fetcher,
+                            separation_result,
+                        )
+                        mt = int(
+                            _cm_en.get("replay_llm_enhancements_max_tokens", 4096)
+                            or 4096
+                        )
+                        extra = run_replay_deepseek_enhancements(
+                            api_key,
+                            actual_date,
+                            pf,
+                            result,
+                            max_tokens=mt,
+                        )
+                        result = result + extra
+                        self.log("DeepSeek 增强块已附加")
+                    except Exception as ex:
+                        self.log(f"DeepSeek 增强块失败：{ex}")
             sum_line = _extract_summary_line(result)
             news_pre = (getattr(data_fetcher, "_last_news_push_prefix", None) or "").strip()
             if news_pre:

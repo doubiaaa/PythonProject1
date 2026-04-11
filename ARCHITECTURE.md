@@ -63,7 +63,7 @@
 ## 3. 技术栈与运行时
 
 - **语言**：Python 3（CI 使用 3.11，本地建议 3.10+）。  
-- **Web**：Flask，入口 `run.py`。  
+- **入口**：命令行脚本 `scripts/*.py`（`run.py` 仅提示已移除 Web）。  
 - **数据**：pandas、akshare（行情与交易日历）。  
 - **模型**：DeepSeek Chat Completions（HTTP，`requests`）。  
 - **邮件**：SMTP，`markdown` 渲染 HTML 正文。  
@@ -80,7 +80,6 @@
 ```mermaid
 flowchart LR
     subgraph in["入口"]
-        W[Flask Web]
         N[nightly_replay]
         P[weekly_performance_email]
         M[simulated_morning_buy]
@@ -91,6 +90,7 @@ flowchart LR
         DF[DataFetcher + 竞价半路策略]
         RT[ReplayTask]
         DS[DeepSeek API]
+        ENH[replay_llm_enhancements]
         SP[strategy_preference]
         WL[watchlist_store]
     end
@@ -105,11 +105,11 @@ flowchart LR
         EM[SMTP 邮件]
     end
 
-    W --> RT
     N --> RT
     RT --> DF
     DF --> RT
     RT --> DS
+    RT --> ENH
     RT --> WL
     RT --> SP
     RT --> SIM
@@ -126,8 +126,8 @@ flowchart LR
 
 | 位置 | 职责摘要 |
 |------|----------|
-| `app/__init__.py` | Flask 应用、安全响应头、模板目录。 |
-| `app/routes/main.py` | 页面与复盘相关 REST API。 |
+| `app/__init__.py` | 包初始化（无 Web）。 |
+| `app/services/replay_llm_enhancements.py` | 复盘 DeepSeek 增强块（一致性/多空/龙头观察/待验证）；周报周度叙事。 |
 | `app/services/data_fetcher.py` | 行情/日历/板块等；组装 `get_market_summary`，写入 `_last_auction_meta`。 |
 | `app/services/auction_halfway_strategy.py` | 主线与龙头池逻辑；`meta.top_pool` 含 `close` 等字段。 |
 | `app/services/replay_task.py` | 单次复盘编排：prompt、大模型（默认 DeepSeek）、存档、风格探测、模拟盘、邮件通知。 |
@@ -205,6 +205,7 @@ flowchart LR
 | 2b | `perform_separation_confirmation`（分时异动 +同板块/同梯队候选）；`analyze_finance_news` 叠加 **龙头池字面命中**；结果写入 prompt `meta_block`。 |
 | 3 | `build_prompt`：固定章节 + `build_prompt_addon` + 市场数据。 |
 | 4 | `call_llm`；`_ensure_summary_line` 规范首行【摘要】。 |
+| 4b | （可选，默认开）`replay_llm_enhancements`：一致性核对、多空对照、龙头观察、待验证点（多一次 DeepSeek）。 |
 | 5 | （可选）拼接 `_last_news_push_prefix`。 |
 | 6 | 设置 `result`、`status=completed`。 |
 | 7 | `append_daily_top_pool` → `watchlist_records.json`（程序池，非 AI 表格解析）。 |
@@ -251,19 +252,15 @@ flowchart LR
 
 ---
 
-## 10. HTTP API
+## 10. 入口（脚本，无 Web）
 
-| 方法 | 路径 | 说明 |
-|------|------|------|
-| GET | `/` | 复盘首页模板。 |
-| POST | `/api/start_replay` | JSON：`date`、`api_key`；可选 SMTP；异步执行 `ReplayTask.run`。 |
-| GET | `/api/task_status` | `status`、`result`、`logs`、`progress`。 |
-| GET | `/api/get_defaults` | 默认日期、SMTP 片段、`has_llm_api_key` / `llm_api_key_preview`（不回传完整 Key）、`replay_api_auth_enabled`。 |
-| POST | `/api/send_result_email` | JSON：可选 `date`、与复盘相同的 SMTP 字段；将**内存中最近一次成功复盘**的 Markdown 以 HTML 邮件发出（用于预览邮件样式）。 |
+| 脚本 | 说明 |
+|------|------|
+| `scripts/nightly_replay.py` | 夜间复盘：内部构造 `ReplayTask` + `DataFetcher`，读 `replay_config.json` / 环境变量。 |
+| `scripts/weekly_performance_email.py` | 周报邮件与策略权重更新。 |
+| `scripts/health_check.py` / `scripts/validate.py` | 健康与校验。 |
 
-**可选鉴权**：若设置环境变量 `REPLAY_API_TOKEN`，则 `POST /api/start_replay` 与 `POST /api/send_result_email` 须在 Header `X-Replay-Token` 或 JSON `replay_api_token` 中携带相同值。
-
-**并发**：`ReplayTask.try_begin()` 保证同时仅一个复盘任务。
+复盘结果以**邮件 Markdown/HTML**或日志输出为准；**已移除** Flask 与浏览器 UI。
 
 ---
 

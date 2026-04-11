@@ -45,12 +45,13 @@ def main() -> int:
         ok = False
 
     try:
-        from app import app as flask_app
+        from app.services.replay_llm_enhancements import (  # noqa: F401
+            collect_program_facts_snapshot,
+        )
 
-        assert flask_app is not None
-        print("[OK] Flask app import")
+        print("[OK] app.services.replay_llm_enhancements")
     except Exception as e:
-        print(f"[FAIL] Flask app: {e}")
+        print(f"[FAIL] replay_llm_enhancements: {e}")
         ok = False
 
     llm_key = os.environ.get("DEEPSEEK_API_KEY") or ""

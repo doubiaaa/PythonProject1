@@ -9,7 +9,7 @@
 #   DEPLOY_REMOTE_COMMAND  装依赖后多执行一行，例如：sudo systemctl restart replay
 #
 # 服务器首次：在 DEPLOY_PATH 下手动放 replay_config.json（或仅用环境变量跑 nightly）。
-# 常驻运行：ssh 登录后执行 bash scripts/run_gunicorn.sh（建议写 systemd）
+# 定时任务：使用 GitHub Actions scheduled-nightly.yml 或 crontab 调用 scripts/nightly_replay.py
 name: Deploy
 
 on:

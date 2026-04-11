@@ -84,6 +84,12 @@ DEFAULT_CONFIG = {
     "enable_style_stability_probe": False,
     # 启用风格探测时，探测完成后再等待秒数再调主长文（降低连续请求被限流）
     "replay_llm_spacing_sec": 15,
+    # 主文生成后追加 DeepSeek 增强块（一致性核对、多空对照、龙头观察、待验证点；多一次 API）
+    "enable_replay_llm_enhancements": True,
+    "replay_llm_enhancements_max_tokens": 4096,
+    "replay_llm_enhancements_spacing_sec": 8,
+    # 周报在风格诊断之后再追加「周度节奏与变化叙事」（多一次 API）
+    "enable_weekly_llm_trend_narrative": True,
     # 周报权重更新后异常时额外发一封提醒邮件
     "enable_weekly_weight_anomaly_email": True,
     # 模拟账户：按程序龙头池与收盘价撮合（data/simulated_account.json）

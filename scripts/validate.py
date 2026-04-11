@@ -146,14 +146,13 @@ def check_env_keys() -> None:
     else:
         _ok("已设置 DEEPSEEK_API_KEY")
     if (os.environ.get("REPLAY_API_TOKEN") or "").strip():
-        _ok("已设置 REPLAY_API_TOKEN（Web 复盘 API 将校验口令）")
+        _ok("已设置 REPLAY_API_TOKEN（保留字段，当前无 Web API）")
     else:
-        _skip("未设置 REPLAY_API_TOKEN（公网部署 Flask 时建议设置）")
+        _skip("未设置 REPLAY_API_TOKEN")
 
 
 def check_imports() -> None:
     mods = [
-        "flask",
         "akshare",
         "pandas",
         "requests",
