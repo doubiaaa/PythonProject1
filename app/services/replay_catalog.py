@@ -626,11 +626,9 @@ def build_six_section_catalog(
 
     lines: list[str] = [
         f"## 【程序生成】复盘数据目录（{ds_fmt}）\n",
-        "> 以下为固定 **六大块** 结构；篇首增加 **盘面总览**，对齐专业复盘长图中的大盘概览、情绪刻度与分类强弱表（以 **Markdown 表格** 呈现，便于邮件与推送）。\n\n",
+        "> 下表为**可核对数据**；正文 **勿复述全表**，只摘结论与关键数字。\n\n",
         "---\n\n",
         "## 0. 盘面总览（结构化速览）\n\n",
-        "> **说明**：参考专业复盘中的 K 线、分时、环形图等，程序侧以 **可审计数据表** 为主；"
-        "精细图请使用行情终端。\n\n",
         _sentiment_dashboard_block(
             up_n,
             down_n,
@@ -642,11 +640,10 @@ def build_six_section_catalog(
         ),
         _format_fund_flow_block(df_sector, title="行业 · 主力净流入 TOP（东财·今日）", max_rows=8),
         _format_fund_flow_block(
-            df_concept, title="概念 · 主力净流入 TOP（东财·今日）", max_rows=12
+            df_concept, title="概念 · 主力净流入 TOP（东财·今日）", max_rows=10
         ),
-        "#### 多维趋势提示\n\n",
-        "- **涨停家数 / 连板** 近 5 日轨迹见下文 **第 3 节** 与 **第 1.1 节**。\n",
-        "- **分档涨停、题材明细** 见 **第 2 节**；**指数点位** 见 **第 1.3 节**。\n\n",
+        "#### 导航\n\n",
+        "- 连板轨迹：**§3.1**；涨停原因与分档：**§2**；指数：**§1.3**。\n\n",
         "---\n\n",
         "## 1. 复盘总结\n\n",
         "### 1.1 连板梯队\n\n",
@@ -703,9 +700,7 @@ def build_six_section_catalog(
     lines.append(fetcher._index_snapshot_markdown())
 
     lines.append("### 1.4 盘面小结\n\n")
-    lines.append(
-        "> **程序不写定性小结**；请阅读正文 **「### 一、盘面综述」**，并与本节 1.2 数据对齐。\n\n"
-    )
+    lines.append("> 定性见正文 **一、盘面综述**，与 **§1.2** 对齐。\n\n")
 
     lines.append("### 1.5 题材小结（程序·行业 TOP）\n\n")
     if not df_zt.empty and "industry" in df_zt.columns:
@@ -717,8 +712,8 @@ def build_six_section_catalog(
 
     lines.append("---\n\n## 2. 涨停原因\n\n")
 
-    lines.append("### 2.1 连板图（分布示意）\n\n")
-    lines.append(_ascii_lb_bars(df_zt))
+    lines.append("### 2.1 连板分布\n\n")
+    lines.append("> 条形分布见 **§1.1**，此处不重复。\n\n")
 
     lines.append("### 2.2 一字涨停股（启发式）\n\n")
     lines.append(
@@ -730,7 +725,7 @@ def build_six_section_catalog(
             lines.append("- 未筛出符合启发式的一字样本。\n\n")
         else:
             lines.append("| 代码 | 名称 | 连板 | 首封 | 涨停原因 |\n|------|------|------|------|----------|\n")
-            for _, row in yz.head(30).iterrows():
+            for _, row in yz.head(20).iterrows():
                 lines.append(
                     f"| {_md_cell(row.get('code'), 8)} | {_md_cell(row.get('name'), 8)} | "
                     f"{int(row.get('lb') or 0)} | {_md_cell(row.get('first_time'), 10)} | "
@@ -741,9 +736,7 @@ def build_six_section_catalog(
         lines.append("- 无数据。\n\n")
 
     lines.append("### 2.3 N 字板\n\n")
-    lines.append(
-        "- 需多日 K 线与断板识别，**当前程序未计算**；可在正文由模型结合题材简述。\n\n"
-    )
+    lines.append("- 程序未统计；正文可择要分析。\n\n")
 
     lines.append("### 2.4 创业板涨停\n\n")
     if not df_zt.empty:
@@ -809,7 +802,7 @@ def build_six_section_catalog(
             lines.append(
                 "| 代码 | 名称 | 行业 | 连板 | 涨停原因 |\n|------|------|------|------|----------|\n"
             )
-            for _, row in rest.head(40).iterrows():
+            for _, row in rest.head(25).iterrows():
                 lines.append(
                     f"| {_md_cell(row.get('code'), 8)} | {_md_cell(row.get('name'), 8)} | "
                     f"{_md_cell(row.get('industry'), 10)} | {int(row.get('lb') or 0)} | "
@@ -824,7 +817,7 @@ def build_six_section_catalog(
         lines.append(f"- 炸板 **{len(df_zb)}** 只（详见交易所「炸板池」口径）。\n")
         if "code" in df_zb.columns and "name" in df_zb.columns:
             lines.append("| 代码 | 名称 |\n|------|------|\n")
-            for _, row in df_zb.head(40).iterrows():
+            for _, row in df_zb.head(25).iterrows():
                 lines.append(
                     f"| {_md_cell(row.get('code'), 8)} | {_md_cell(row.get('name'), 12)} |\n"
                 )
@@ -845,12 +838,12 @@ def build_six_section_catalog(
     else:
         lines.append("- 样本不足。\n\n")
 
-    lines.append("### 3.2 创业板指数\n\n")
+    lines.append("### 3.2 创业板指\n\n")
     cyb = _index_pct_row(idx_df, ("创业板", "创业板指", "创业板指"))
     if cyb:
-        lines.append(f"- **{cyb[0]}** 涨跌幅：**{cyb[1]}%**（东财指数快照）\n\n")
+        lines.append(f"- **{cyb[0]}**：**{cyb[1]}%**（与 **§1.3** 同源快照）\n\n")
     else:
-        lines.append("- 未匹配到创业板指行，请见 **1.3 市场指数** 全表。\n\n")
+        lines.append("- 见 **§1.3**。\n\n")
 
     lines.append("---\n\n## 4. 龙虎榜数据\n\n")
     try:
@@ -864,7 +857,7 @@ def build_six_section_catalog(
             "> 已按配置 **跳过** 龙虎榜接口（`enable_replay_lhb_catalog: false`）。\n\n"
         )
     else:
-        lines.append("> 东财/新浪口径差异大，**仅供资金关注度参考**。\n\n")
+        lines.append("> 口径差异大，仅供参考。\n\n")
         lines.append("### 4.1 游资追踪（营业部统计·节选）\n\n")
         lines.append(_lhb_trader_md(fetcher))
         lines.append("### 4.2 机构买卖（上榜日统计·节选）\n\n")
@@ -954,29 +947,31 @@ def build_six_section_catalog(
 
     lines.append("#### 数据驱动的优化点（须正文落地）\n\n")
     lines.append(
-        "> 对齐专业复盘「总结与优化」：**请结合本篇各表与涨停池**，在正文收束处列出 "
-        "**2～5 条可执行项**（如规避弱势时段/品种、调整监控窗口、仓位或止损规则等），避免空泛套话。\n\n"
+        "> 正文收束处 **2～4 条**可执行项（与上表挂钩）。\n\n"
     )
 
     lines.append("---\n\n## 6. 个股解析（按涨停时间排序）\n\n")
-    lines.append(
-        "> 程序按「首次封板时间」升序；**细化解析**见正文「核心股聚焦」等章节。\n\n"
-    )
+    lines.append("> 按首封时间升序；解析见正文 **五、核心股聚焦**。\n\n")
     if not df_zt.empty and "first_time" in df_zt.columns:
         sub = df_zt.copy()
         sub["_ft"] = _first_time_series_to_datetime(sub["first_time"])
         sub = sub.sort_values("_ft", na_position="last")
+        max_rows = 50
+        sub_show = sub.head(max_rows)
         lines.append(
             "| 时间 | 代码 | 名称 | 连板 | 行业 | 涨停原因 |\n"
             "|------|------|------|------|------|----------|\n"
         )
-        for _, row in sub.iterrows():
+        for _, row in sub_show.iterrows():
             lines.append(
                 f"| {_md_cell(row.get('first_time'), 10)} | {_md_cell(row.get('code'), 8)} | "
                 f"{_md_cell(row.get('name'), 8)} | {int(row.get('lb') or 0)} | "
                 f"{_md_cell(row.get('industry'), 8)} | {_md_cell(row.get('reason'), 36)} |\n"
             )
-        lines.append("\n")
+        if len(sub) > max_rows:
+            lines.append(f"\n> 共 {len(sub)} 只，表列前 **{max_rows}** 只；其余见终端。\n\n")
+        else:
+            lines.append("\n")
     elif not df_zt.empty:
         lines.append(
             "> 涨停池无「首次封板时间」列，改按 **连板分档** 展示。\n\n"
