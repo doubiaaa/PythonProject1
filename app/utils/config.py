@@ -36,6 +36,8 @@ DEFAULT_CONFIG = {
     "email_system_name": "T+0 竞价复盘系统",
     # 复盘长文末尾是否附加「历史相似形态回溯」（额外拉取多日涨停池，略慢）
     "enable_historical_similarity": True,
+    # 相似形态回溯窗口（交易日）：过大时逐日拉涨停/炸板池极慢，默认 60 约三月
+    "historical_similarity_lookback": 60,
     # 周报邮件是否尝试内嵌项目根目录下的权重/净值图（需先生成 png）
     "weekly_email_attach_charts": True,
     "cache_expire": 3600,  # 缓存过期时间（秒）
