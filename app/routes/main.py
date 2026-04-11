@@ -76,21 +76,28 @@ def start_replay():
     data = request.get_json(silent=True) or {}
     date = data.get('date')
     api_key = (data.get('api_key') or '').strip()
-    serverchan_sendkey = (data.get('serverchan_sendkey') or '').strip()
 
     if not date or len(date) != 8:
         return jsonify({"error": "日期格式应为YYYYMMDD，如20260309"}), 400
 
     if not api_key:
-        api_key = (config_mgr.get("zhipu_api_key") or "").strip()
+        api_key = (
+            (config_mgr.get("deepseek_api_key") or "").strip()
+            or (config_mgr.get("llm_api_key") or "").strip()
+            or (config_mgr.get("zhipu_api_key") or "").strip()
+        )
     if not api_key:
-        return jsonify({"error": "请输入智谱 API Key，或在 replay_config.json 中保存 zhipu_api_key后留空提交"}), 400
+        return jsonify(
+            {
+                "error": "请输入 DeepSeek API Key，或在 replay_config.json 中配置 deepseek_api_key（兼容 llm_api_key / zhipu_api_key）后留空提交",
+            }
+        ), 400
 
     if not task.try_begin():
         return jsonify({"error": "复盘任务进行中，请稍后再试"}), 409
 
+    config_mgr.set("deepseek_api_key", api_key)
     config_mgr.set("zhipu_api_key", api_key)
-    config_mgr.set("serverchan_sendkey", serverchan_sendkey)
 
     _apply_smtp_from_request(data)
 
@@ -101,7 +108,6 @@ def start_replay():
             date,
             api_key,
             data_fetcher,
-            serverchan_sendkey=serverchan_sendkey,
             email_cfg=email_cfg,
         )
 
@@ -119,13 +125,16 @@ def task_status():
 
 @app.route('/api/get_defaults')
 def get_defaults():
-    zk = (config_mgr.get("zhipu_api_key") or "").strip()
+    zk = (
+        (config_mgr.get("deepseek_api_key") or "").strip()
+        or (config_mgr.get("llm_api_key") or "").strip()
+        or (config_mgr.get("zhipu_api_key") or "").strip()
+    )
     return jsonify({
         "default_date": datetime.now().strftime("%Y%m%d"),
-        "has_zhipu_api_key": bool(zk),
-        "zhipu_api_key_preview": (f"****{zk[-4:]}" if len(zk) >= 4 else ("****" if zk else "")),
+        "has_llm_api_key": bool(zk),
+        "llm_api_key_preview": (f"****{zk[-4:]}" if len(zk) >= 4 else ("****" if zk else "")),
         "replay_api_auth_enabled": bool((os.environ.get("REPLAY_API_TOKEN") or "").strip()),
-        "default_serverchan_sendkey": config_mgr.get("serverchan_sendkey", ""),
         "smtp_host": config_mgr.get("smtp_host", ""),
         "smtp_port": config_mgr.get("smtp_port", 587),
         "smtp_user": config_mgr.get("smtp_user", ""),

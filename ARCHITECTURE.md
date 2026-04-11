@@ -132,7 +132,7 @@ flowchart LR
 | `app/routes/main.py` | 页面与复盘相关 REST API。 |
 | `app/services/data_fetcher.py` | 行情/日历/板块等；组装 `get_market_summary`，写入 `_last_auction_meta`。 |
 | `app/services/auction_halfway_strategy.py` | 主线与龙头池逻辑；`meta.top_pool` 含 `close` 等字段。 |
-| `app/services/replay_task.py` | 单次复盘编排：prompt、智谱、存档、风格探测、模拟盘、通知。 |
+| `app/services/replay_task.py` | 单次复盘编排：prompt、大模型（默认 DeepSeek）、存档、风格探测、模拟盘、邮件通知。 |
 | `app/services/strategy_preference.py` | 五桶权重、周度更新、evolution 日志、稳定性探测、绘图、异常检测。 |
 | `app/services/watchlist_store.py` | `watchlist_records.json` 线程安全读写。 |
 | `app/services/weekly_performance.py` | 区间收益、周报 Markdown、自然月段落。 |
@@ -140,7 +140,7 @@ flowchart LR
 | `app/services/market_style_indices.py` | 打板/趋势/低吸等指数计算与 JSON 持久化。 |
 | `app/services/simulated_account.py` | 模拟盘状态机、买卖、pending、成交通知。 |
 | `app/services/email_notify.py` | `resolve_email_config`、`send_report_email`、`send_simple_email`。 |
-| `app/services/serverchan_notify.py` | Server酱推送封装。 |
+| `app/services/llm_client.py` | OpenAI 兼容 Chat Completions（DeepSeek / 智谱等）；`get_llm_client`。 |
 | `app/utils/config.py` | `DEFAULT_CONFIG` 与 `replay_config.json` 合并（`ConfigManager`）。 |
 | `scripts/` | 夜间复盘、周报、次日开盘买入、校验、失败通知、回测占位。 |
 | `tests/` | 单元测试与回归。 |
@@ -155,7 +155,7 @@ flowchart LR
 
 1. 默认：`app/utils/config.py` 中 **`DEFAULT_CONFIG`**。  
 2. 若存在 **`replay_config.json`**（项目根），与用户 JSON **浅合并**（用户键覆盖默认键）。  
-3. **环境变量**：智谱 Key、SMTP、收件人等常以环境变量覆盖配置文件，具体见 `resolve_email_config` 与各脚本。
+3. **环境变量**：`DEEPSEEK_API_KEY`（兼容 `ZHIPU_API_KEY`）、SMTP、收件人等常以环境变量覆盖配置文件，具体见 `resolve_email_config` 与各脚本。
 
 ### 6.2 与业务强相关的键（节选）
 
@@ -164,8 +164,8 @@ flowchart LR
 | 键 | 含义 |
 |----|------|
 | `enable_finance_news` | 是否拉取并拼接财联社要闻摘要。 |
-| `enable_style_stability_probe` | 主报告前是否增加一次智谱「风格稳定性」轻量调用（**默认 false**，与主长文各计一次请求，易触发 429；需要时在 `replay_config.json` 设为 `true`）。 |
-| `replay_zhipu_spacing_sec` | 启用风格探测时，探测结束后再等待的秒数，再请求主长文（默认 15）。 |
+| `enable_style_stability_probe` | 主报告前是否增加一次大模型「风格稳定性」轻量调用（**默认 false**，与主长文各计一次请求，易触发 429；需要时在 `replay_config.json` 设为 `true`）。 |
+| `replay_llm_spacing_sec` | 启用风格探测时，探测结束后再等待的秒数，再请求主长文（默认 15；兼容旧键 `replay_zhipu_spacing_sec`）。 |
 | `enable_daily_style_indices_persist` | 复盘成功后是否写入 `market_style_indices.json`。 |
 | `enable_simulated_account` | 是否执行模拟账户逻辑。 |
 | `simulated_buy_price_type` | `close_of_recommendation_day` 或 `next_day_open`。 |
@@ -173,7 +173,7 @@ flowchart LR
 | `enable_simulated_trade_notification` | 模拟买卖成交是否发邮件（共用 SMTP）。 |
 | `enable_strategy_feedback_loop` | 周末脚本是否调用 `update_from_recent_returns`。 |
 | `enable_weekly_performance_email` | 是否发送周报邮件。 |
-| `enable_weekly_ai_insight` | 周报是否调用智谱写「风格诊断」。 |
+| `enable_weekly_ai_insight` | 周报是否调用大模型写「风格诊断」。 |
 | `enable_weekly_weight_anomaly_email` | 权重异常是否单独发信。 |
 | `use_multi_week_decay_for_strategy` 等 | 多周衰减、平滑、单桶上下限、周间变动惩罚等（策略偏好）。 |
 
@@ -206,13 +206,13 @@ flowchart LR
 | 2 | （可选）`probe_style_stability` → `effective_weights_from_stability`，供 prompt 侧重。 |
 | 2b | `perform_separation_confirmation`（分时异动 +同板块/同梯队候选）；`analyze_finance_news` 叠加 **龙头池字面命中**；结果写入 prompt `meta_block`。 |
 | 3 | `build_prompt`：固定章节 + `build_prompt_addon` + 市场数据。 |
-| 4 | `call_zhipu`；`_ensure_summary_line` 规范首行【摘要】。 |
+| 4 | `call_llm`；`_ensure_summary_line` 规范首行【摘要】。 |
 | 5 | （可选）拼接 `_last_news_push_prefix`。 |
 | 6 | 设置 `result`、`status=completed`。 |
 | 7 | `append_daily_top_pool` → `watchlist_records.json`（程序池，非 AI 表格解析）。 |
 | 8 | （可选）`persist_daily_indices` → `market_style_indices.json`。 |
 | 9 | （可选）`SimulatedAccount`：`execute_daily_trades`（传入交易日历以计算持有期等）；收盘价模式当日撮合，次日开盘模式写 `pending_buys_*`；`generate_daily_plan`；成交通知线程。 |
-| 10 | `send_serverchan`、`send_report_email` 发送完整报告。 |
+| 10 | （可选）`send_report_email` 发送完整报告。 |
 
 ---
 
@@ -258,9 +258,9 @@ flowchart LR
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/` | 复盘首页模板。 |
-| POST | `/api/start_replay` | JSON：`date`、`api_key`；可选 SMTP/Server酱；异步执行 `ReplayTask.run`。 |
+| POST | `/api/start_replay` | JSON：`date`、`api_key`；可选 SMTP；异步执行 `ReplayTask.run`。 |
 | GET | `/api/task_status` | `status`、`result`、`logs`、`progress`。 |
-| GET | `/api/get_defaults` | 默认日期、SMTP 片段、`has_zhipu_api_key` / `zhipu_api_key_preview`（不回传完整 Key）、`replay_api_auth_enabled`。 |
+| GET | `/api/get_defaults` | 默认日期、SMTP 片段、`has_llm_api_key` / `llm_api_key_preview`（不回传完整 Key）、`replay_api_auth_enabled`。 |
 | POST | `/api/send_result_email` | JSON：可选 `date`、与复盘相同的 SMTP 字段；将**内存中最近一次成功复盘**的 Markdown 以 HTML 邮件发出（用于预览邮件样式）。 |
 
 **可选鉴权**：若设置环境变量 `REPLAY_API_TOKEN`，则 `POST /api/start_replay` 与 `POST /api/send_result_email` 须在 Header `X-Replay-Token` 或 JSON `replay_api_token` 中携带相同值。

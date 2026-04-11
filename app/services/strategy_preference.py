@@ -38,8 +38,6 @@ BUCKETS = ("打板", "低吸", "趋势", "龙头", "其他")
 
 DEFAULT_WEIGHTS = {k: 0.2 for k in BUCKETS}
 
-MODEL_NAME = "glm-4-flash"
-
 
 def tag_to_bucket(tag: str) -> str:
     t = (tag or "").strip()
@@ -307,18 +305,19 @@ def _probe_text_is_api_error(text: str) -> bool:
     return any(
         t.startswith(p)
         for p in (
+            "调用大模型 API",
             "调用智谱",
             "API请求失败",
             "API 返回异常",
             "错误：智谱",
+            "错误：大模型 API",
         )
     )
 
 
-def probe_style_stability(api_key: str, market_data_excerpt: str, timeout: float = 45.0) -> str:
-    """轻量探测：返回 稳定 / 可能切换 / 混乱。走 ZhipuClient 与主复盘一致（含 429 退避）。"""
-    from app.services.zhipu_client import ZhipuClient
-    from app.utils.config import ConfigManager
+def probe_style_stability(api_key: str, market_data_excerpt: str) -> str:
+    """轻量探测：返回 稳定 / 可能切换 / 混乱。与主复盘同一大模型客户端（含 429 退避）。"""
+    from app.services.llm_client import get_llm_client
 
     prompt = (
         "你是市场风格观察员。根据下列复盘用市场数据摘录，只输出下面三个词之一，不要标点与解释：\n"
@@ -327,9 +326,8 @@ def probe_style_stability(api_key: str, market_data_excerpt: str, timeout: float
         "【数据摘录】\n"
         + (market_data_excerpt or "")[:9000]
     )
-    model = (ConfigManager().get("zhipu_model_name") or "").strip() or MODEL_NAME
     try:
-        client = ZhipuClient(api_key, model=model, timeout=timeout)
+        client = get_llm_client(api_key)
         text = client.chat_completion(
             prompt, temperature=0.2, max_tokens=32
         )

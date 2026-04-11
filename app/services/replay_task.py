@@ -9,7 +9,6 @@ import pandas as pd
 from config.replay_prompt_templates import build_main_replay_prompt
 from app.services.email_notify import has_email_config, send_report_email
 from app.utils.email_template import truncate_finance_news_push_prefix
-from app.services.serverchan_notify import send_serverchan
 from app.services.strategy_preference import (
     build_prompt_addon,
     effective_weights_from_stability,
@@ -23,18 +22,11 @@ from app.services.replay_checkpoint import (
     load_market_data_cache,
     save_fetcher_bundle,
 )
-from app.services.zhipu_client import ZhipuClient
+from app.services.llm_client import get_llm_client
 from app.services.separation_confirmation import perform_separation_confirmation
 from app.services.news_mapper import analyze_finance_news
 
-DEFAULT_ZHIPU_MODEL = "glm-4-flash"
-MODEL_NAME = DEFAULT_ZHIPU_MODEL  # 兼容旧引用；实际以配置 zhipu_model_name 为准
 MAX_LOG_ENTRIES = 200
-
-
-def _resolve_zhipu_model() -> str:
-    raw = (ConfigManager().get("zhipu_model_name") or "").strip()
-    return raw or DEFAULT_ZHIPU_MODEL
 
 MODE_NAME = "次日竞价半路模式"
 
@@ -49,13 +41,15 @@ _DRAGON_HEADINGS = (
 
 
 def _is_llm_failure_payload(text: str) -> bool:
-    """返回内容实为智谱错误串（无模型正文），避免误报「缺章节」。"""
+    """返回内容实为 API 错误串（无模型正文），避免误报「缺章节」。"""
     s = (text or "").strip()[:1200]
     markers = (
         "API请求失败（",
+        "调用大模型 API",
         "调用智谱API异常",
         "调用智谱API：速率限制",
         "错误：智谱API",
+        "错误：大模型 API",
         "API 返回异常",
         "您的账户已达到速率限制",
         '"code":"1302"',
@@ -71,7 +65,7 @@ def _ensure_dragon_report_sections(text: str) -> str:
         return text
     if _is_llm_failure_payload(text):
         note = (
-            "\n\n---\n\n> **【系统提示】** 本次 **未生成 AI 复盘长文**（上方为智谱接口报错或限速），"
+            "\n\n---\n\n> **【系统提示】** 本次 **未生成 AI 复盘长文**（上方为大模型接口报错或限速），"
             "**并非** 章节未写全。请间隔数分钟后重试，或检查 API Key、配额与并发；"
             "程序数据目录仍在上方市场摘要中可阅。\n"
         )
@@ -108,7 +102,7 @@ def _ensure_summary_line(text: str, market_phase: str = "高位震荡期") -> st
         return text
     if _is_llm_failure_payload(text):
         return (
-            f"【摘要】周期阶段：{market_phase}｜适宜度：—｜置信度：低（未生成正文：智谱限速或服务异常，见下方）\n\n"
+            f"【摘要】周期阶段：{market_phase}｜适宜度：—｜置信度：低（未生成正文：大模型限速或服务异常，见下方）\n\n"
             + text
         )
     return (
@@ -227,19 +221,14 @@ class ReplayTask:
             meta_block=meta_block + separation_block + news_block,
         )
 
-    def call_zhipu(self, api_key, prompt, temperature=0.42, max_tokens=6144):
-        """调用智谱API（封装重试与超时；连接与读取超时见 replay_config data_source）。"""
-        cm = ConfigManager()
-        ds = cm.get("data_source") or {}
-        conn = float(ds.get("zhipu_connect_timeout", 10))
-        read = float(ds.get("zhipu_read_timeout", 120))
-        timeout = (conn, read)
-        client = ZhipuClient(api_key, model=_resolve_zhipu_model(), timeout=timeout)
+    def call_llm(self, api_key, prompt, temperature=0.42, max_tokens=6144):
+        """调用大模型（DeepSeek / 智谱等，见 llm_provider；超时见 replay_config data_source）。"""
+        client = get_llm_client(api_key)
         return client.chat_completion(
             prompt, temperature=temperature, max_tokens=max_tokens
         )
 
-    def run(self, date, api_key, data_fetcher, serverchan_sendkey=None, email_cfg=None):
+    def run(self, date, api_key, data_fetcher, email_cfg=None):
         actual_date = date
         _t0 = time.monotonic()
         try:
@@ -332,7 +321,7 @@ class ReplayTask:
             except Exception as ex:
                 self.log(f"要闻映射分析失败：{ex}")
             
-            # 风格稳定性探测（可选；与主长文各一次智谱调用，连发易 429）
+            # 风格稳定性探测（可选；与主长文各一次大模型调用，连发易 429）
             _cm2 = ConfigManager()
             if _cm2.get("enable_style_stability_probe", False):
                 try:
@@ -343,10 +332,14 @@ class ReplayTask:
                     self.log(f"风格稳定性探测：{stab}")
                 except Exception as ex:
                     self.log(f"风格稳定性探测失败（沿用文件权重）：{ex}")
-                gap = float(_cm2.get("replay_zhipu_spacing_sec", 15) or 0)
+                gap = float(
+                    _cm2.get("replay_llm_spacing_sec")
+                    or _cm2.get("replay_zhipu_spacing_sec", 15)
+                    or 0
+                )
                 if gap > 0:
                     self.log(
-                        f"智谱调用间隔：等待 {gap:.0f}s 后再请求主长文（降低 429 限速概率）"
+                        f"大模型调用间隔：等待 {gap:.0f}s 后再请求主长文（降低 429 限速概率）"
                     )
                     time.sleep(gap)
 
@@ -361,13 +354,13 @@ class ReplayTask:
                 news_mapping=news_mapping,
             )
             _t_ai = time.monotonic()
-            result = self.call_zhipu(api_key, prompt)
-            self.log(f"阶段 zhipu_chat耗时 {time.monotonic() - _t_ai:.1f}s")
+            result = self.call_llm(api_key, prompt)
+            self.log(f"阶段 llm_chat 耗时 {time.monotonic() - _t_ai:.1f}s")
             # 从 data_fetcher 获取市场阶段，确保摘要一致性
             market_phase = getattr(data_fetcher, "_last_market_phase", "高位震荡期")
             result = _ensure_dragon_report_sections(_ensure_summary_line(result, market_phase))
             if _is_llm_failure_payload(result):
-                self.log("智谱未返回模型长文（限速/余额/网络等），已附加说明；请勿将「缺章节」提示理解为模型漏写")
+                self.log("大模型未返回正文（限速/余额/网络等），已附加说明；请勿将「缺章节」提示理解为模型漏写")
             else:
                 self.log("报告首行与龙头模板章节已校验（必要时已补全/提示）")
             sum_line = _extract_summary_line(result)
@@ -453,20 +446,6 @@ class ReplayTask:
                     self.log("模拟账户已更新（见文末操作备忘）")
                 except Exception as ex:
                     self.log(f"模拟账户更新失败：{ex}")
-            sc_title = (
-                f"✅ {sum_line} · {actual_date}"
-                if sum_line
-                else f"✅ 复盘完成 · {MODE_NAME} · {actual_date}"
-            )
-            ok, msg = send_serverchan(
-                serverchan_sendkey,
-                sc_title,
-                result,
-            )
-            if ok and msg != "skipped":
-                self.log("微信通知已发送（Server酱）")
-            elif not ok:
-                self.log(f"微信通知发送失败：{msg}")
             if email_cfg and has_email_config(email_cfg):
                 subj = (
                     f"【复盘】✅ {sum_line} · {actual_date}"
@@ -495,15 +474,6 @@ class ReplayTask:
             self.log(error_msg)
             self.result = error_msg
             self.status = "error"
-            ok, msg = send_serverchan(
-                serverchan_sendkey,
-                f"❌ 复盘失败 · {MODE_NAME} · {actual_date}",
-                error_msg,
-            )
-            if ok and msg != "skipped":
-                self.log("失败通知已发送（Server酱）")
-            elif not ok:
-                self.log(f"微信通知发送失败：{msg}")
             if email_cfg and has_email_config(email_cfg):
                 subj = f"【复盘】❌ 复盘失败 · {MODE_NAME} · {actual_date}"
                 eok, emsg = send_report_email(

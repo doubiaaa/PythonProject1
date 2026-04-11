@@ -1,16 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-定时复盘入口：拉取数据 → 智谱生成报告 → Server酱 / SMTP 邮件通知（可并存）。
+定时复盘入口：拉取数据 → 大模型（默认 DeepSeek）生成报告 → SMTP 邮件通知（可选）。
 
-默认使用「北京时间当日」作为复盘日；若该日不是 A 股交易日，则**不执行**复盘（退出码 0，不发微信），
+默认使用「北京时间当日」作为复盘日；若该日不是 A 股交易日，则**不执行**复盘（退出码 0），
 适用于定时任务在周末/节假日自动跳过。
 
 用法：
   python scripts/nightly_replay.py
   python scripts/nightly_replay.py --date 20260328
 
-密钥优先级：环境变量 > replay_config.json
-通知：至少配置 Server酱 或 SMTP 邮件其一；可同时配置。
+密钥优先级：环境变量 DEEPSEEK_API_KEY（兼容 ZHIPU_API_KEY）> replay_config.json
+通知：可选配置 SMTP；未配置邮件时仍会生成报告并打印警告。
 SMTP：SMTP_HOST、MAIL_TO 等见 app/services/email_notify.py
 """
 
@@ -28,13 +28,17 @@ if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
 
-def _resolve_keys():
+def _resolve_api_key():
     from app.utils.config import ConfigManager
 
     cm = ConfigManager()
-    api_key = (os.environ.get("ZHIPU_API_KEY") or "").strip() or (cm.get("zhipu_api_key") or "").strip()
-    sct = (os.environ.get("SERVERCHAN_SENDKEY") or "").strip() or (cm.get("serverchan_sendkey") or "").strip()
-    return api_key, sct
+    return (
+        (os.environ.get("DEEPSEEK_API_KEY") or "").strip()
+        or (os.environ.get("ZHIPU_API_KEY") or "").strip()
+        or (cm.get("deepseek_api_key") or "").strip()
+        or (cm.get("llm_api_key") or "").strip()
+        or (cm.get("zhipu_api_key") or "").strip()
+    )
 
 
 def main() -> int:
@@ -88,27 +92,23 @@ def main() -> int:
         )
         return 0
 
-    api_key, serverchan_sendkey = _resolve_keys()
+    api_key = _resolve_api_key()
     if not api_key:
         print(
-            "未配置智谱 API Key：请设置环境变量 ZHIPU_API_KEY 或在 replay_config.json 中填写 zhipu_api_key",
+            "未配置大模型 API Key：请设置环境变量 DEEPSEEK_API_KEY（或兼容 ZHIPU_API_KEY）"
+            "或在 replay_config.json 中填写 deepseek_api_key / llm_api_key / zhipu_api_key",
             file=sys.stderr,
         )
         return 1
 
     from app.services.email_notify import has_email_config, resolve_email_config
-    from app.services.serverchan_notify import has_serverchan_keys
 
     email_cfg = resolve_email_config(cm)
-    if not has_serverchan_keys(
-        serverchan_sendkey or None
-    ) and not has_email_config(email_cfg):
+    if not has_email_config(email_cfg):
         print(
-            "未配置任何通知渠道：请配置 Server酱（SERVERCHAN_SENDKEY 等）"
-            "或 SMTP 邮件（SMTP_HOST + MAIL_TO 等），见 replay_config / GitHub Secrets",
-            file=sys.stderr,
+            "[nightly] 提示：未配置 SMTP 邮件，将仅生成复盘结果、不发送邮件",
+            flush=True,
         )
-        return 1
 
     from app.services.replay_task import ReplayTask
 
@@ -118,7 +118,6 @@ def main() -> int:
         date_str,
         api_key,
         fetcher,
-        serverchan_sendkey=serverchan_sendkey,
         email_cfg=email_cfg,
     )
 

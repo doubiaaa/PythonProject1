@@ -202,7 +202,7 @@
                         </div>
                         <div>
                             <h2 class="font-display text-lg font-semibold text-white tracking-tight">基础配置</h2>
-                            <p class="text-xs text-gray-500 mt-1">复盘日期、智谱 API Key、Server酱（可选）</p>
+                            <p class="text-xs text-gray-500 mt-1">复盘日期、DeepSeek API Key</p>
                         </div>
                     </div>
                     <div class="space-y-6">
@@ -215,20 +215,10 @@
                             </div>
                         </div>
                         <div>
-                            <label class="block text-xs font-medium uppercase tracking-wider text-gray-500 mb-2">智谱 API Key</label>
+                            <label class="block text-xs font-medium uppercase tracking-wider text-gray-500 mb-2">DeepSeek API Key</label>
                             <div class="flex gap-2">
                                 <input type="password" id="api-key-input" class="input-premium flex-1" placeholder="sk-..." autocomplete="off">
                                 <button type="button" id="toggle-key-btn" class="btn-secondary px-4" title="显示/隐藏">
-                                    <i class="fa fa-eye-slash"></i>
-                                </button>
-                            </div>
-                        </div>
-                        <div>
-                            <label class="block text-xs font-medium uppercase tracking-wider text-gray-500 mb-2">Server酱 SendKey（可选）</label>
-                            <p class="text-xs text-gray-600 mb-2">在 <a href="https://sct.ftqq.com/" target="_blank" rel="noopener noreferrer" class="text-indigo-400/90 hover:text-cyan-400/90 underline underline-offset-2">sct.ftqq.com</a> 获取；多 Key 用英文逗号分隔</p>
-                            <div class="flex gap-2">
-                                <input type="password" id="serverchan-input" class="input-premium flex-1 font-mono text-sm" placeholder="SCT… 或 SCTxxx,SCTyyy" autocomplete="off">
-                                <button type="button" id="toggle-sct-btn" class="btn-secondary px-4 shrink-0" title="显示/隐藏">
                                     <i class="fa fa-eye-slash"></i>
                                 </button>
                             </div>
@@ -247,7 +237,7 @@
                         </div>
                         <div>
                             <h2 class="font-display text-lg font-semibold text-white tracking-tight">SMTP 邮件</h2>
-                            <p class="text-xs text-gray-500 mt-1">与微信可同时开启；465 常选 SSL，587 多为 STARTTLS</p>
+                            <p class="text-xs text-gray-500 mt-1">465 常选 SSL，587 多为 STARTTLS</p>
                         </div>
                     </div>
                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
@@ -503,7 +493,7 @@
             document.getElementById('progress-percentage').textContent = pct + '%';
         }
 
-        var hasSavedZhipuKey = false;
+        var hasSavedLlmKey = false;
 
         document.addEventListener('DOMContentLoaded', function () {
             const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -512,17 +502,14 @@
             fetch('/api/get_defaults')
                 .then(function (r) { return r.json(); })
                 .then(function (data) {
-                    hasSavedZhipuKey = !!data.has_zhipu_api_key;
+                    hasSavedLlmKey = !!data.has_llm_api_key;
                     var apiInput = document.getElementById('api-key-input');
-                    if (data.zhipu_api_key_preview) {
-                        apiInput.placeholder = '已保存 ' + data.zhipu_api_key_preview + ' · 可留空沿用本地配置';
+                    if (data.llm_api_key_preview) {
+                        apiInput.placeholder = '已保存 ' + data.llm_api_key_preview + ' · 可留空沿用本地配置';
                     }
                     if (data.replay_api_auth_enabled) {
                         var rw = document.getElementById('replay-api-token-wrap');
                         if (rw) { rw.classList.remove('hidden'); }
-                    }
-                    if (data.default_serverchan_sendkey) {
-                        document.getElementById('serverchan-input').value = data.default_serverchan_sendkey;
                     }
                     if (data.smtp_host !== undefined) {
                         document.getElementById('smtp-host-input').value = data.smtp_host || '';
@@ -596,20 +583,6 @@
                 isKeyVisible = !isKeyVisible;
             });
 
-            let isSctVisible = false;
-            document.getElementById('toggle-sct-btn').addEventListener('click', function () {
-                const input = document.getElementById('serverchan-input');
-                const icon = this.querySelector('i');
-                if (isSctVisible) {
-                    input.type = 'password';
-                    icon.className = 'fa fa-eye-slash';
-                } else {
-                    input.type = 'text';
-                    icon.className = 'fa fa-eye';
-                }
-                isSctVisible = !isSctVisible;
-            });
-
             document.getElementById('replay-btn').addEventListener('click', startReplay);
 
             document.getElementById('clear-log-btn').addEventListener('click', function () {
@@ -641,7 +614,6 @@
         function startReplay() {
             const date = document.getElementById('date-input').value.trim();
             const apiKey = document.getElementById('api-key-input').value.trim();
-            const serverchanSendkey = document.getElementById('serverchan-input').value.trim();
             const smtpPortRaw = document.getElementById('smtp-port-input').value.trim();
             const smtpPort = smtpPortRaw ? parseInt(smtpPortRaw, 10) : 587;
             if (smtpPortRaw && (isNaN(smtpPort) || smtpPort < 1 || smtpPort > 65535)) {
@@ -657,8 +629,8 @@
                 showToast('日期须为 8 位数字', 'error');
                 return;
             }
-            if (!apiKey && !hasSavedZhipuKey) {
-                showToast('请输入智谱 API Key，或先在页面保存过一次配置后留空沿用', 'error');
+            if (!apiKey && !hasSavedLlmKey) {
+                showToast('请输入 DeepSeek API Key，或先在页面保存过一次配置后留空沿用', 'error');
                 return;
             }
 
@@ -680,7 +652,6 @@
                     date: date,
                     api_key: apiKey,
                     replay_api_token: document.getElementById('replay-api-token-input').value.trim(),
-                    serverchan_sendkey: serverchanSendkey,
                     smtp_host: document.getElementById('smtp-host-input').value.trim(),
                     smtp_port: smtpPort,
                     smtp_user: document.getElementById('smtp-user-input').value.trim(),

@@ -331,7 +331,7 @@ def build_weekly_report_markdown(
     lines.append(
         "### 使用说明\n\n"
         "- 数据来自本地 `data/watchlist_records.json`（每次复盘成功且程序产出龙头池时追加）。\n"
-        "- 市场快照与标签归因由程序汇总；**风格诊断与下周侧重**见文末智谱分析（若已开启 `enable_weekly_ai_insight`）。\n\n"
+        "- 市场快照与标签归因由程序汇总；**风格诊断与下周侧重**见文末大模型分析（若已开启 `enable_weekly_ai_insight`）。\n\n"
     )
     return "".join(lines)
 

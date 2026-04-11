@@ -9,8 +9,14 @@ CONFIG_FILE = os.path.join(_PROJECT_ROOT, "replay_config.json")
 
 # 默认配置
 DEFAULT_CONFIG = {
+    # 大模型：默认 DeepSeek（OpenAI 兼容）；llm_provider=zhipu 时用 zhipu_api_key / zhipu_model_name
+    "llm_provider": "deepseek",
+    "deepseek_api_key": "",
+    "llm_api_key": "",  # 可选统一密钥，与 deepseek_api_key / zhipu_api_key 二选一
+    "llm_model_name": "",
+    "deepseek_model_name": "",
+    "llm_api_base": "",  # 非空则覆盖默认 DeepSeek / 智谱 URL
     "zhipu_api_key": "",
-    "serverchan_sendkey": "",  # Server酱 SendKey；多个用英文逗号分隔，空则不发微信
     "smtp_host": "",
     "smtp_port": 587,
     "smtp_user": "",
@@ -52,7 +58,7 @@ DEFAULT_CONFIG = {
     "intraday_tick_probe_symbol": "",  # 6 位代码，如 000001；空则不请求
     # 龙头池周度邮件：周末脚本汇总涨跌；关闭则只跑脚本不寄信（或手动 --dry-run）
     "enable_weekly_performance_email": True,
-    # 周报复盘末尾是否调用智谱生成「风格诊断+下周侧重」（需 ZHIPU_API_KEY）
+    # 周报复盘末尾是否调用大模型生成「风格诊断+下周侧重」（需 DEEPSEEK_API_KEY 等）
     "enable_weekly_ai_insight": True,
     # 周报中是否拉取本周交易日市场快照（涨停家数、溢价、锚点日涨幅前20市值等）
     "enable_weekly_market_snapshot": True,
@@ -76,10 +82,10 @@ DEFAULT_CONFIG = {
     "min_total_trades_per_bucket_multiweek": 3,
     "strategy_max_change_per_week": 0.25,
     "strategy_shift_pullback": 0.5,
-    # 每日复盘前轻量探测市场风格是否切换（多一次智谱调用，易与主请求连发触发 429）
+    # 每日复盘前轻量探测市场风格是否切换（多一次大模型调用，易与主请求连发触发 429）
     "enable_style_stability_probe": False,
     # 启用风格探测时，探测完成后再等待秒数再调主长文（降低连续请求被限流）
-    "replay_zhipu_spacing_sec": 15,
+    "replay_llm_spacing_sec": 15,
     # 周报权重更新后异常时额外发一封提醒邮件
     "enable_weekly_weight_anomaly_email": True,
     # 模拟账户：按程序龙头池与收盘价撮合（data/simulated_account.json）
