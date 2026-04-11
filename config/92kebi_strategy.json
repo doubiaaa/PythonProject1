@@ -1,0 +1,132 @@
+{
+  "meta": {
+    "title": "92科比完整版交易世界观（程序映射）",
+    "version": "1.0",
+    "enabled": true
+  },
+  "active_profile": "default",
+  "profiles": {
+    "default": {
+      "worldview": {
+        "market_essence": "市场本质 = 筹码交换、人气聚集与流动性溢价；价格短期由共识与情绪驱动，非单一基本面。",
+        "core_axis": "核心 = 情绪周期四阶段；先定阶段，再定手法与仓位。",
+        "operations": "操作四象：龙头（最强共识）／补涨（同线扩散）／切换（主线迁移）／空仓（确定性不足时休息）。",
+        "liquidity_note": "流动性溢价：有量有人气才有接力；无量反抽多为减分项。"
+      },
+      "legacy_phase_to_kebi_stage": {
+        "混沌·试错期": "stage_1",
+        "主升期": "stage_2",
+        "高位震荡期": "stage_3",
+        "退潮·冰点期": "stage_4"
+      },
+      "fallback_stage": "stage_3",
+      "output": {
+        "show_program_position_line": true,
+        "kebi_position_overrides_display_only": true
+      },
+      "stages": {
+        "stage_1": {
+          "id": "stage_1",
+          "title": "阶段1：低位震荡（试错期）",
+          "short_label": "试错期",
+          "kebi_cycle_name": "低位震荡 · 试错",
+          "market_state": "情绪修复初期，主线未明，涨停分散，容错低；宜小仓验证新题材与结构。",
+          "primary_operation": "切换",
+          "secondary_operation": "补涨",
+          "operation_note": "小仓切新题材；补涨仅限低位首板/弱转强，不与中位股纠缠；切换重于追新不追旧。",
+          "position_cap_pct_hi": 25,
+          "position_cap_pct_lo": 0,
+          "position_words": "总仓建议上限约 0%～25%，单票更小仓试错。",
+          "selection_focus": "低位首板、新题材首曝、弱转强；回避中位加速与无量反抽。",
+          "buy_sell_rules": "买在分歧、卖在一致；试错单止损明确，不摊薄。",
+          "risk_control": "严格止损；不追高位二波；量能不足一律降预期。",
+          "risk_level": "中",
+          "tomorrow_direction": "观察新题材能否走出持续性；若无，继续降仓或空仓等待。",
+          "standard_bullets": [
+            "主升未确认前以试错为主，不做重仓押注。",
+            "补涨与切换分清：补涨跟主线内低位；切换跟新主线起点。"
+          ]
+        },
+        "stage_2": {
+          "id": "stage_2",
+          "title": "阶段2：主升浪（最强吃肉期）",
+          "short_label": "主升浪",
+          "kebi_cycle_name": "主升浪",
+          "market_state": "共识最强、龙头带节奏，连板与溢价最佳窗口；重在参与核心。",
+          "primary_operation": "龙头",
+          "secondary_operation": "补涨",
+          "operation_note": "重仓怼龙头；买在分歧、卖在一致；补涨只做主线内确定性扩散。",
+          "position_cap_pct_hi": 80,
+          "position_cap_pct_lo": 40,
+          "position_words": "总仓建议区间约 40%～80%，龙头聚焦、分散度低。",
+          "selection_focus": "总龙头与核心梯队；换手充分、承接强的分歧点。",
+          "buy_sell_rules": "分歧低吸核心，一致不追边；龙头断板即降杠杆。",
+          "risk_control": "禁止满仓梭哈单票；龙头破位坚决减；防监管与情绪突变。",
+          "risk_level": "中高（收益高、波动高）",
+          "tomorrow_direction": "延续则锁核心；若分化加剧，提前收缩至龙头与流动性最好标的。",
+          "standard_bullets": [
+            "主升期核心是「人气+流动性」，只做最强共识。",
+            "补涨从属于龙头节奏，不做脱离主线的杂毛主升。"
+          ]
+        },
+        "stage_3": {
+          "id": "stage_3",
+          "title": "阶段3：高位震荡（谨慎回避期）",
+          "short_label": "高位震荡",
+          "kebi_cycle_name": "高位震荡",
+          "market_state": "分歧加大，二波与反抽陷阱增多；宜降杠杆、降预期。",
+          "primary_operation": "切换",
+          "secondary_operation": "龙头",
+          "operation_note": "轻仓；不做二波与中位股；龙头仅保留最强辨识度的减仓T。",
+          "position_cap_pct_hi": 35,
+          "position_cap_pct_lo": 10,
+          "position_words": "总仓建议约 10%～35%，以防守为主。",
+          "selection_focus": "高低切换、低位新方向；回避中位与无量反抽。",
+          "buy_sell_rules": "反弹减仓为主；新仓仅限极小仓试错。",
+          "risk_control": "禁止追涨中位；严格仓位上限；大面日直接收缩。",
+          "risk_level": "高",
+          "tomorrow_direction": "等待情绪出清或新主线孕育；宁可错过不做错。",
+          "standard_bullets": [
+            "高位震荡最易亏在「二波幻想」与「中位接力」。",
+            "切换优先于补仓：先找新共识，再谈回流。"
+          ]
+        },
+        "stage_4": {
+          "id": "stage_4",
+          "title": "阶段4：主跌期（空仓等待期）",
+          "short_label": "主跌期",
+          "kebi_cycle_name": "主跌 · 空仓等待",
+          "market_state": "亏钱效应扩散，核按钮与闷杀增多；确定性极差。",
+          "primary_operation": "空仓",
+          "secondary_operation": "切换",
+          "operation_note": "空仓为主；若尾盘极小仓试错新题材，仅当情绪冰点边际改善且纪律极严。",
+          "position_cap_pct_hi": 10,
+          "position_cap_pct_lo": 0,
+          "position_words": "总仓建议约 0%～10%；常态空仓。",
+          "selection_focus": "几乎不选股；仅观察逆势独立与次日确认。",
+          "buy_sell_rules": "不抄底主跌趋势；尾盘试错不超过固定风险预算。",
+          "risk_control": "宁可错过反弹；单票风险暴露极低。",
+          "risk_level": "极高",
+          "tomorrow_direction": "等待跌停家数收敛、核按钮减少，再谈试错。",
+          "standard_bullets": [
+            "主跌期第一原则是活下来；流动性枯竭时不谈技术。",
+            "尾盘轻仓试错仅服务「验证」，不做翻身仗。"
+          ]
+        }
+      },
+      "report": {
+        "section_title": "## 【92科比·策略结论】",
+        "intro_line": "> 以下为程序按 **筹码 / 人气 / 流动性溢价** 与 **情绪周期四阶段** 生成的当日映射，用于与正文对照；非投资建议。",
+        "row_labels": {
+          "cycle": "当前市场情绪周期（科比四阶段）",
+          "strategy": "今日策略取向",
+          "position": "建议仓位（科比）",
+          "risk": "风险等级",
+          "tomorrow": "明日操作方向",
+          "program_position": "程序原建议仓位（策略.json）"
+        },
+        "strategy_line_template": "主：**{primary}** ｜ 辅：**{secondary}**（{note}）"
+      }
+    }
+  }
+}

@@ -1,0 +1,236 @@
+{
+  "active_profile": "default",
+  "profiles": {
+    "default": {
+      "sentiment_temperature": {
+        "zt_count_bands": [
+          { "above": 30, "add": 30 },
+          { "above": 20, "add": 20 },
+          { "above": 10, "add": 10 }
+        ],
+        "dt_count_bands": [
+          { "below": 5, "add": 20 },
+          { "below": 10, "add": 10 }
+        ],
+        "premium_missing_sentinel": -99,
+        "m5_vs_mean5": {
+          "min_past_sample_n": 2,
+          "band_floor": 0.4,
+          "band_abs_m5_factor": 0.12,
+          "diff_gt_band": 25,
+          "diff_gt_zero": 15,
+          "premium_gt_zero": 5
+        },
+        "premium_only_bands": [
+          { "above": 3, "add": 25 },
+          { "above": 1, "add": 15 },
+          { "above": 0, "add": 5 }
+        ],
+        "zhaban_bands": [
+          { "below": 25, "add": 25 },
+          { "below": 40, "add": 15 }
+        ],
+        "cap": 100
+      },
+      "market_phase": {
+        "premium_missing_sentinel": -99,
+        "ice_sentiment_temp_below": 32,
+        "ice_zt_below": 14,
+        "ice_dt_excess_over_zt": 15,
+        "ice_max_lb_at_most": 2,
+        "ice_zt_below_for_premium_rule": 20,
+        "ice_premium_below": -0.8,
+        "main_sentiment_temp_at_least": 80,
+        "main_max_lb_at_least_a": 6,
+        "main_zt_at_least_a": 25,
+        "main_max_lb_at_least_b": 5,
+        "main_zhaban_at_most": 36,
+        "main_zt_at_least_b": 32,
+        "chaos_sentiment_low": 36,
+        "chaos_sentiment_high": 74,
+        "chaos_zhaban_at_least": 44,
+        "chaos2_sentiment_low": 34,
+        "chaos2_sentiment_high": 70,
+        "chaos2_premium_low": -0.3,
+        "chaos2_premium_high": 1.0,
+        "chaos2_max_lb_values": [2, 3],
+        "chaos2_zt_at_least": 18,
+        "phase_main_rise": "主升期",
+        "phase_ice": "退潮·冰点期",
+        "phase_chaos": "混沌·试错期",
+        "phase_range": "高位震荡期",
+        "legacy_position": {
+          "主升期": "80%",
+          "退潮·冰点期": "0-10%",
+          "混沌·试错期": "15-25%",
+          "高位震荡期": "30%"
+        }
+      },
+      "position": {
+        "zt_percentile_fallback": [
+          { "zt_at_least": 40, "pct": 75 },
+          { "zt_at_least": 25, "pct": 50 }
+        ],
+        "zt_percentile_default": 30,
+        "zt_pct_low_threshold": 25,
+        "zt_pct_low_lo_delta": -5,
+        "zt_pct_low_hi_delta": -10,
+        "zt_pct_high_threshold": 80,
+        "zt_pct_high_hi_delta": 5,
+        "zt_pct_high_hi_cap": 95,
+        "clamp_zhaban_high_first": 30,
+        "clamp_zhaban_pctile_min": 60,
+        "clamp_zhaban_hi_drop": 10,
+        "clamp_zhaban_high_second": 40,
+        "clamp_zhaban_hi_drop_second": 5,
+        "min_hi_above_lo": 5,
+        "cycles": [
+          { "keywords": ["主升"], "lo": 60, "hi": 80 },
+          { "keywords": ["震荡"], "lo": 20, "hi": 40 },
+          { "keywords": ["冰点", "退潮"], "lo": 0, "hi": 10 },
+          { "keywords": ["混沌", "试错"], "lo": 15, "hi": 25 }
+        ],
+        "default_cycle": { "lo": 20, "hi": 40 }
+      },
+      "sentiment_score": {
+        "weights": {
+          "yest_zt_premium": 0.3,
+          "max_lb_height": 0.3,
+          "zhaban_rate": 0.2,
+          "up_down_ratio": 0.2
+        },
+        "interpretation": [
+          { "min": 8, "text": "情绪高涨，赚钱效应强，可积极参与" },
+          { "min": 6, "text": "情绪较好，赚钱效应中等，可适度参与" },
+          { "min": 4, "text": "情绪中性，赚钱效应一般，谨慎参与" },
+          { "min": 2, "text": "情绪低迷，亏钱效应显现，控制仓位" },
+          { "min": 0, "text": "情绪冰点，亏钱效应强，建议观望" }
+        ],
+        "premium": {
+          "t_ge_5": 5,
+          "t_ge_3": 3,
+          "t_ge_1": 1,
+          "t_ge_0": 0,
+          "t_ge_-2": -2,
+          "score_ge_5": 10,
+          "lin_ge_3": { "base": 8, "k": 1, "from": 3 },
+          "lin_ge_1": { "base": 5, "k": 1.5, "from": 1 },
+          "lin_ge_0": { "base": 3, "k": 2, "from": 0 },
+          "lin_ge_-2": { "base": 1, "k": 1, "from": -2 },
+          "else_neg": { "base": 1, "k": 0.5, "from": -2, "floor": 0 }
+        },
+        "max_lb": {
+          "t_ge_7": 7,
+          "t_ge_5": 5,
+          "t_ge_3": 3,
+          "t_ge_2": 2,
+          "t_ge_1": 1,
+          "score_ge_7": 10,
+          "lin_ge_5": { "base": 8, "k": 1, "from": 5 },
+          "lin_ge_3": { "base": 5, "k": 1.5, "from": 3 },
+          "lin_ge_2": { "base": 3, "k": 2, "from": 2 },
+          "lin_ge_1": { "base": 1, "k": 2, "from": 1 },
+          "else": 0
+        },
+        "zhaban": {
+          "t_le_20": 20,
+          "t_le_30": 30,
+          "t_le_40": 40,
+          "t_le_50": 50,
+          "t_le_60": 60,
+          "score_le_20": 10,
+          "lin_le_30": { "base": 8, "k": 0.2, "ref": 30 },
+          "lin_le_40": { "base": 5, "k": 0.3, "ref": 40 },
+          "lin_le_50": { "base": 3, "k": 0.2, "ref": 50 },
+          "lin_le_60": { "base": 1, "k": 0.2, "ref": 60 },
+          "else_hi": { "base": 1, "k": 0.05, "ref": 60, "floor": 0 }
+        },
+        "up_down_ratio": {
+          "r_ge_0.7": 0.7,
+          "r_ge_0.6": 0.6,
+          "r_ge_0.5": 0.5,
+          "r_ge_0.4": 0.4,
+          "r_ge_0.3": 0.3,
+          "down_zero_up": 10,
+          "down_zero_flat": 5,
+          "score_ge_0.7": 10,
+          "lin_ge_0.6": { "base": 8, "k": 20, "from": 0.6 },
+          "lin_ge_0.5": { "base": 5, "k": 30, "from": 0.5 },
+          "lin_ge_0.4": { "base": 3, "k": 20, "from": 0.4 },
+          "lin_ge_0.3": { "base": 1, "k": 20, "from": 0.3 },
+          "else_low": { "k": 3.33, "floor": 0 }
+        },
+        "markdown_footer_rule_text": "评分规则：昨日涨停溢价权重30%、连板高度权重30%、炸板率权重20%、涨跌家数比权重20%"
+      },
+      "ai_prompt_context": {
+        "premium_bad_sentinel": -99,
+        "zt_count_caution_below": 10,
+        "dt_count_high_above": 25,
+        "zb_count_high_above": 80,
+        "main_sector_list_max": 3
+      },
+      "auction_halfway": {
+        "mode_name": "次日竞价半路模式",
+        "max_sectors_scan": 48,
+        "max_main_sectors": 2,
+        "max_dragon_pool": 5,
+        "top_n_days": 5,
+        "vol_days": 3,
+        "huo_kou_turnover_min": 150000000,
+        "renqi_turnover_low": 10,
+        "renqi_turnover_high": 30,
+        "mcap_min": 3000000000,
+        "enable_tech_momentum": true,
+        "tech_eval_topn": 12,
+        "neutral_tech_score": 2.5,
+        "five_day_positive_min_pct": 5,
+        "main_sector": {
+          "min_top10_count": 3,
+          "max_vol_rank": 3,
+          "sector_dragon_pct_above": 3
+        },
+        "pool_prefilter_multiplier": 4,
+        "sector_loop_sleep_sec": 0.05,
+        "tech_loop_sleep_sec": 0.04,
+        "tag_rules": {
+          "renqi": { "lb_min": 3 },
+          "huokou": { "si_min": 2, "pct_over_si": 3 },
+          "trend": { "pct_high": 11, "lb_max": 3 }
+        },
+        "scoring": {
+          "s1_vol_rank": { "1": 5, "2": 4, "3": 3, "else": 0 },
+          "s2_dragon_leader": 5,
+          "s2_dragon_follow": 3,
+          "s3_pct": {
+            "ge_threshold": 9.5,
+            "ge_score": 5,
+            "between_5_10": { "min": 5, "max": 10, "score": 4 },
+            "between_3_5": { "min": 3, "max": 5, "score": 3 },
+            "else": 1
+          },
+          "s4_turnover": {
+            "first_min": 5,
+            "first_max": 15,
+            "first_score": 5,
+            "second_min": 3,
+            "second_max": 20,
+            "second_max_exclusive": true,
+            "second_score": 4,
+            "else": 2
+          }
+        },
+        "ai_hints": {
+          "tech_score_conflict_min": 4.0,
+          "s1_main_max_for_conflict": 2
+        },
+        "weights": {
+          "w_main": 0.22,
+          "w_dragon": 0.18,
+          "w_kline": 0.18,
+          "w_liq": 0.14,
+          "w_tech": 0.28
+        }
+      }
+    }
+  }
+}

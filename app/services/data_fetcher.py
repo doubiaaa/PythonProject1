@@ -232,22 +232,34 @@ def _append_ai_context(
     north_status: str,
 ) -> str:
     """根据程序 meta 与当日基础指标，追加给大模型的「须回应」提示块。"""
+    from app.services.strategy_engine import get_strategy_engine
+
+    _eng = get_strategy_engine()
+    _ap = _eng.get_ai_prompt_context()
+    _ah = _eng.get_auction_halfway()
+    _hints = _ah.get("ai_hints") or {}
+
     lines = ["\n## 【AI 提示】数据质量、程序状态与须回应点\n"]
     bullets: list[str] = []
-    prem_bad = premium == -99.0 or ("非交易日" in str(premium_note))
+    prem_bad = premium == float(_ap.get("premium_bad_sentinel", -99)) or (
+        "非交易日" in str(premium_note)
+    )
     if prem_bad:
         bullets.append(
             "昨日涨停溢价**不可用或异常**，涉及溢价的结论须标注**置信度低**。"
         )
-    if zt_count < 10:
+    zt_lo = int(_ap.get("zt_count_caution_below", 10))
+    if zt_count < zt_lo:
         bullets.append(
             f"涨停家数仅 **{zt_count}**，情绪指标参考价值下降，结论须谨慎。"
         )
-    if dt_count > 25:
+    dt_hi = int(_ap.get("dt_count_high_above", 25))
+    if dt_count > dt_hi:
         bullets.append(
             f"跌停家数 **{dt_count}** 偏高，须强调退潮风险与仓位克制。"
         )
-    if zb_count > 80:
+    zb_hi = int(_ap.get("zb_count_high_above", 80))
+    if zb_count > zb_hi:
         bullets.append(f"炸板数 **{zb_count}** 较多，须强调分歧与模式风险。")
     if sector_empty:
         bullets.append("板块资金流向块缺失，**主线叙事须以程序选股第一节为准**。")
@@ -270,15 +282,18 @@ def _append_ai_context(
         )
     mss = meta.get("main_sectors") or []
     if meta.get("program_completed") and mss:
+        mx = int(_ap.get("main_sector_list_max", 3))
         bullets.append(
             "程序认定的主线板块（**分析必须与下列名称对齐或解释为何不采纳**）：**"
-            + "、".join(mss[:3])
+            + "、".join(mss[:mx])
             + "**"
         )
+    t_conflict = float(_hints.get("tech_score_conflict_min", 4.0))
+    s1_max_c = int(_hints.get("s1_main_max_for_conflict", 2))
     for p in meta.get("top_pool") or []:
         ts = float(p.get("tech_score") or 0)
         s1 = int(p.get("s1_main") or 0)
-        if ts >= 4.0 and s1 <= 2:
+        if ts >= t_conflict and s1 <= s1_max_c:
             bullets.append(
                 f"**冲突须单独回应**：{p['name']}（{p['code']}）技术面 **{ts:.1f}/5** 较高，"
                 f"但主线强度分 **s1={s1}**（板块成交额排名偏弱）。须写清是否仍参与次日竞价。"
@@ -302,36 +317,18 @@ def compute_short_term_market_phase(
     """
     短线复盘四象限：主升 / 高位震荡 / 退潮·冰点 / 混沌·试错。
     premium 为 -99 表示昨日涨停溢价不可用，内部不按溢价判冰点。
+    规则见 config/strategy.json（StrategyEngine）。
     """
-    prem_ok = premium != -99
-    prem = float(premium) if prem_ok else 0.0
+    from app.services.strategy_engine import get_strategy_engine
 
-    if sentiment_temp < 32:
-        return "退潮·冰点期", "0-10%"
-    if zt_count < 14 and dt_count > zt_count + 15:
-        return "退潮·冰点期", "0-10%"
-    if max_lb <= 2 and zt_count < 20 and prem_ok and prem < -0.8:
-        return "退潮·冰点期", "0-10%"
-
-    if sentiment_temp >= 80:
-        return "主升期", "80%"
-    if max_lb >= 6 and zt_count >= 25:
-        return "主升期", "80%"
-    if max_lb >= 5 and zhaban_rate <= 36 and zt_count >= 32:
-        return "主升期", "80%"
-
-    if 36 <= sentiment_temp <= 74 and zhaban_rate >= 44:
-        return "混沌·试错期", "15-25%"
-    if (
-        34 <= sentiment_temp <= 70
-        and prem_ok
-        and -0.3 <= prem <= 1.0
-        and max_lb in (2, 3)
-        and zt_count >= 18
-    ):
-        return "混沌·试错期", "15-25%"
-
-    return "高位震荡期", "30%"
+    return get_strategy_engine().compute_market_phase(
+        sentiment_temp,
+        zt_count,
+        dt_count,
+        zhaban_rate,
+        max_lb,
+        float(premium),
+    )
 
 
 class DataFetcher:
@@ -2376,45 +2373,16 @@ class DataFetcher:
         except Exception:
             self._last_big_face_count = 0
 
-        # 计算情绪温度
-        sentiment_temp = 0
-        if zt_count > 30:
-            sentiment_temp += 30
-        elif zt_count > 20:
-            sentiment_temp += 20
-        elif zt_count > 10:
-            sentiment_temp += 10
-
-        if dt_count < 5:
-            sentiment_temp += 20
-        elif dt_count < 10:
-            sentiment_temp += 10
-
         pa = getattr(self, "_last_premium_analysis", None) or {}
-        m5 = pa.get("mean_5")
-        past_n = int(pa.get("past_sample_n") or 0)
-        if premium != -99 and m5 is not None and past_n >= 2:
-            diff = float(premium) - float(m5)
-            band = max(0.4, abs(float(m5)) * 0.12)
-            if diff > band:
-                sentiment_temp += 25
-            elif diff > 0:
-                sentiment_temp += 15
-            elif float(premium) > 0:
-                sentiment_temp += 5
-        elif premium > 3:
-            sentiment_temp += 25
-        elif premium > 1:
-            sentiment_temp += 15
-        elif premium > 0:
-            sentiment_temp += 5
+        from app.services.strategy_engine import get_strategy_engine
 
-        if zhaban_rate < 25:
-            sentiment_temp += 25
-        elif zhaban_rate < 40:
-            sentiment_temp += 15
-
-        sentiment_temp = min(sentiment_temp, 100)
+        sentiment_temp = get_strategy_engine().compute_sentiment_temperature(
+            zt_count,
+            dt_count,
+            float(premium),
+            pa if isinstance(pa, dict) else {},
+            zhaban_rate,
+        )
 
         max_lb_phase = (
             int(df_zt["lb"].max())
@@ -2451,6 +2419,16 @@ class DataFetcher:
         # 存储市场阶段到实例变量，供其他方法使用
         self._last_market_phase = market_phase
         self._last_position_suggestion = position_suggestion
+
+        try:
+            from app.services.strategy_engine import get_strategy_engine
+
+            self._last_kebi_markdown = get_strategy_engine().format_kebi_conclusion_markdown(
+                str(market_phase),
+                str(position_suggestion),
+            )
+        except Exception:
+            self._last_kebi_markdown = ""
 
         # 获取涨跌家数（并行阶段已取则复用全 A spot，避免二次请求）
         if up_n is None and down_n is None:
@@ -2511,6 +2489,10 @@ class DataFetcher:
             "\n> **口径**：正文叙事以目录 **§1.2** 的 **情绪温度、市场阶段、建议仓位** 为主轴；"
             "上表 **情绪周期量化评分（0～10）** 为辅助刻度，勿与主轴打架。\n\n"
         )
+
+        km = getattr(self, "_last_kebi_markdown", None) or ""
+        if km:
+            summary += km + "\n"
 
         try:
             from app.services.ladder_stats import compute_promotion_rates_md

@@ -19,68 +19,38 @@ from app.services.trend_momentum_strategy import (
     fetch_stock_hist_daily,
 )
 
-MODE_NAME = "次日竞价半路模式"
-MAX_SECTORS_SCAN = 48
-MAX_MAIN_SECTORS = 2
-MAX_DRAGON_POOL = 5
-TOP_N_DAYS = 5
-VOL_DAYS = 3
-
-HUO_KOU_TURNOVER_MIN = 1.5e8  # 元
-RENQI_TURNOVER_LOW, RENQI_TURNOVER_HIGH = 10.0, 30.0
-MCAP_MIN = 30e8  # 30 亿
-
-# 趋势动量（EMA+RSI+ATR）接入评分：仅对预筛前列股票拉日 K，其余给中性分 2.5
-ENABLE_TECH_MOMENTUM = True
-TECH_EVAL_TOPN = 12
-
-# 权重默认值（可被 replay_config.json 覆盖，见 _load_strategy_params）
-W_MAIN = 0.22
-W_DRAGON = 0.18
-W_KLINE = 0.18
-W_LIQ = 0.14
-W_TECH = 0.28
-
-
 def _load_strategy_params() -> dict:
-    """从 ConfigManager 读权重与技术面开关；权重和须≈1，否则回退默认。"""
-    from app.utils.config import ConfigManager
+    """权重与技术面开关：strategy.json 默认值 + replay_config.json 可覆盖。"""
+    from app.services.strategy_engine import get_strategy_engine
 
-    cm = ConfigManager()
+    return get_strategy_engine().get_auction_scoring_params()
 
-    def gf(key: str, default: float) -> float:
-        try:
-            return float(cm.get(key, default))
-        except (TypeError, ValueError):
-            return default
 
-    w_main = gf("w_main", W_MAIN)
-    w_dragon = gf("w_dragon", W_DRAGON)
-    w_kline = gf("w_kline", W_KLINE)
-    w_liq = gf("w_liq", W_LIQ)
-    w_tech = gf("w_tech", W_TECH)
-    s = w_main + w_dragon + w_kline + w_liq + w_tech
-    if abs(s - 1.0) > 0.02:
-        w_main, w_dragon, w_kline, w_liq, w_tech = W_MAIN, W_DRAGON, W_KLINE, W_LIQ, W_TECH
-    try:
-        topn = int(cm.get("tech_eval_topn", TECH_EVAL_TOPN))
-    except (TypeError, ValueError):
-        topn = TECH_EVAL_TOPN
-    topn = max(3, min(48, topn))
-    en = cm.get("enable_tech_momentum", ENABLE_TECH_MOMENTUM)
-    if isinstance(en, str):
-        enable_tech = en.strip().lower() in ("1", "true", "yes")
+def _score_s3_pct(pc: float, s3: dict) -> int:
+    if pc >= float(s3.get("ge_threshold", 9.5)):
+        return int(s3.get("ge_score", 5))
+    b = s3.get("between_5_10") or {}
+    if float(b.get("min", 5)) <= pc <= float(b.get("max", 10)):
+        return int(b.get("score", 4))
+    b2 = s3.get("between_3_5") or {}
+    if float(b2.get("min", 3)) <= pc < float(b2.get("max", 5)):
+        return int(b2.get("score", 3))
+    return int(s3.get("else", 1))
+
+
+def _score_s4_turn(tr: float, s4: dict) -> int:
+    if float(s4.get("first_min", 5)) <= tr <= float(s4.get("first_max", 15)):
+        return int(s4.get("first_score", 5))
+    smin = float(s4.get("second_min", 3))
+    smax = float(s4.get("second_max", 20))
+    exc = bool(s4.get("second_max_exclusive", True))
+    if exc:
+        ok = smin <= tr < smax
     else:
-        enable_tech = bool(en)
-    return {
-        "w_main": w_main,
-        "w_dragon": w_dragon,
-        "w_kline": w_kline,
-        "w_liq": w_liq,
-        "w_tech": w_tech,
-        "tech_eval_topn": topn,
-        "enable_tech": enable_tech,
-    }
+        ok = smin <= tr <= smax
+    if ok:
+        return int(s4.get("second_score", 4))
+    return int(s4.get("else", 2))
 
 
 def _log(fetcher, msg: str) -> None:
@@ -100,12 +70,12 @@ def _norm_code(x) -> str:
     return s.zfill(6)[:6] if s else ""
 
 
-def _pick_sector_universe() -> list[str]:
+def _pick_sector_universe(max_sectors_scan: int) -> list[str]:
     """优先取 5 日资金靠前的行业名称，缩小扫描范围。"""
     try:
         df = ak.stock_sector_fund_flow_rank(indicator="5日", sector_type="行业资金流")
         if df is not None and not df.empty and "名称" in df.columns:
-            names = df["名称"].dropna().astype(str).tolist()[:MAX_SECTORS_SCAN]
+            names = df["名称"].dropna().astype(str).tolist()[:max_sectors_scan]
             if names:
                 return names
     except Exception:
@@ -113,7 +83,7 @@ def _pick_sector_universe() -> list[str]:
     try:
         df = ak.stock_board_industry_name_em()
         if df is not None and not df.empty and "板块名称" in df.columns:
-            return df["板块名称"].astype(str).tolist()[:MAX_SECTORS_SCAN]
+            return df["板块名称"].astype(str).tolist()[:max_sectors_scan]
     except Exception:
         pass
     return []
@@ -148,14 +118,14 @@ def _last_n_trade_days(trade_days: list[str], date: str, n: int) -> list[str]:
     return trade_days[start : i + 1]
 
 
-def _sector_has_dragon(symbol: str) -> bool:
-    """板块内是否存在涨幅>3% 的成份股（近似「龙头/军令状」）。"""
+def _sector_has_dragon(symbol: str, pct_min: float) -> bool:
+    """板块内是否存在涨幅>pct_min% 的成份股（近似「龙头/军令状」）。"""
     try:
         cons = ak.stock_board_industry_cons_em(symbol=symbol)
         if cons is None or cons.empty or "涨跌幅" not in cons.columns:
             return False
         pct = pd.to_numeric(cons["涨跌幅"], errors="coerce")
-        return bool((pct > 3).any())
+        return bool((pct > pct_min).any())
     except Exception:
         return False
 
@@ -226,8 +196,10 @@ def _stock_ma_above(code: str, date: str, trade_days: list[str]) -> tuple[bool, 
         return False, False
 
 
-def _five_day_positive_spike(code: str, date: str, trade_days: list[str]) -> bool:
-    """5 日内至少一日涨幅>=5%（资金活跃近似）。"""
+def _five_day_positive_spike(
+    code: str, date: str, trade_days: list[str], min_pct: float
+) -> bool:
+    """5 日内至少一日涨幅>=min_pct%（资金活跃近似）。"""
     try:
         i = trade_days.index(date)
     except ValueError:
@@ -248,7 +220,7 @@ def _five_day_positive_spike(code: str, date: str, trade_days: list[str]) -> boo
         if df is None or df.empty or "涨跌幅" not in df.columns:
             return False
         pct = pd.to_numeric(df["涨跌幅"], errors="coerce")
-        return bool((pct >= 5).any())
+        return bool((pct >= min_pct).any())
     except Exception:
         return False
 
@@ -269,6 +241,39 @@ def build_auction_halfway_report(
         "program_completed": False,
         "abort_reason": None,
     }
+    from app.services.strategy_engine import get_strategy_engine
+
+    ah = get_strategy_engine().get_auction_halfway()
+    MODE_NAME = str(ah.get("mode_name", "次日竞价半路模式"))
+    MAX_SECTORS_SCAN = int(ah.get("max_sectors_scan", 48))
+    MAX_MAIN_SECTORS = int(ah.get("max_main_sectors", 2))
+    MAX_DRAGON_POOL = int(ah.get("max_dragon_pool", 5))
+    TOP_N_DAYS = int(ah.get("top_n_days", 5))
+    VOL_DAYS = int(ah.get("vol_days", 3))
+    HUO_KOU_TURNOVER_MIN = float(ah.get("huo_kou_turnover_min", 1.5e8))
+    RENQI_TURNOVER_LOW = float(ah.get("renqi_turnover_low", 10.0))
+    RENQI_TURNOVER_HIGH = float(ah.get("renqi_turnover_high", 30.0))
+    MCAP_MIN = float(ah.get("mcap_min", 3e9))
+    ms = ah.get("main_sector") or {}
+    MIN_TOP10 = int(ms.get("min_top10_count", 3))
+    MAX_VOL_R = int(ms.get("max_vol_rank", 3))
+    SECTOR_DRAGON_PCT = float(ms.get("sector_dragon_pct_above", 3))
+    tag_r = ah.get("tag_rules") or {}
+    renqi = tag_r.get("renqi") or {}
+    huokou = tag_r.get("huokou") or {}
+    trend = tag_r.get("trend") or {}
+    NEUTRAL_TECH = float(ah.get("neutral_tech_score", 2.5))
+    POOL_PRE = int(ah.get("pool_prefilter_multiplier", 4))
+    SLEEP_SEC = float(ah.get("sector_loop_sleep_sec", 0.05))
+    TECH_SLEEP = float(ah.get("tech_loop_sleep_sec", 0.04))
+    SPIKE_MIN_PCT = float(ah.get("five_day_positive_min_pct", 5))
+    scoring = ah.get("scoring") or {}
+    s3cfg = scoring.get("s3_pct") or {}
+    s4cfg = scoring.get("s4_turnover") or {}
+    s1map = scoring.get("s1_vol_rank") or {}
+    S2L = int(scoring.get("s2_dragon_leader", 5))
+    S2F = int(scoring.get("s2_dragon_follow", 3))
+
     P = _load_strategy_params()
     W_MAIN = P["w_main"]
     W_DRAGON = P["w_dragon"]
@@ -293,7 +298,7 @@ def build_auction_halfway_report(
         meta["abort_reason"] = "历史交易日不足5日"
         return "".join(lines), meta
 
-    universe = _pick_sector_universe()
+    universe = _pick_sector_universe(MAX_SECTORS_SCAN)
     if not universe:
         lines.append("- 无法获取行业列表，跳过选股。\n\n")
         meta["abort_reason"] = "无法获取行业列表"
@@ -330,7 +335,7 @@ def build_auction_halfway_report(
                 sector_vol_sum[name] = sum(vols) / len(vols)
         except Exception:
             continue
-        time.sleep(0.05)
+        time.sleep(SLEEP_SEC)
 
     if not sector_daily:
         lines.append("- 行业板块历史行情获取失败，跳过。\n\n")
@@ -355,12 +360,12 @@ def build_auction_halfway_report(
 
     candidates: list[tuple[str, int, int]] = []
     for name in sector_daily:
-        if top10_count[name] < 3:
+        if top10_count[name] < MIN_TOP10:
             continue
         vr = vol_rank.get(name, 999)
-        if vr > 3:
+        if vr > MAX_VOL_R:
             continue
-        if not _sector_has_dragon(name):
+        if not _sector_has_dragon(name, SECTOR_DRAGON_PCT):
             continue
         candidates.append((name, top10_count[name], vr))
 
@@ -446,13 +451,24 @@ def build_auction_halfway_report(
         mv = spot_map.get(code, {}).get("流通市值") or 0.0
 
         tag = None
-        if lb >= 3 and RENQI_TURNOVER_LOW <= tr <= RENQI_TURNOVER_HIGH:
+        r_lb = int(renqi.get("lb_min", 3))
+        if lb >= r_lb and RENQI_TURNOVER_LOW <= tr <= RENQI_TURNOVER_HIGH:
             tag = "人气龙头"
-        elif si >= 2 and pct > si + 3 and amt >= HUO_KOU_TURNOVER_MIN:
+        elif (
+            si >= float(huokou.get("si_min", 2))
+            and pct > si + float(huokou.get("pct_over_si", 3))
+            and amt >= HUO_KOU_TURNOVER_MIN
+        ):
             tag = "活口核心"
-        elif mv >= MCAP_MIN and 0 < pct < 11 and lb < 3:
+        elif (
+            mv >= MCAP_MIN
+            and 0 < pct < float(trend.get("pct_high", 11))
+            and lb < int(trend.get("lb_max", 3))
+        ):
             ma_ok, ma20_ok = _stock_ma_above(code, date, trade_days)
-            spike = _five_day_positive_spike(code, date, trade_days)
+            spike = _five_day_positive_spike(
+                code, date, trade_days, SPIKE_MIN_PCT
+            )
             if ma_ok and ma20_ok and spike:
                 tag = "趋势中军"
 
@@ -465,7 +481,7 @@ def build_auction_halfway_report(
         if row["code"] not in seen:
             seen.add(row["code"])
             uniq.append(row)
-    pool_rows = uniq[: MAX_DRAGON_POOL * 4]
+    pool_rows = uniq[: MAX_DRAGON_POOL * POOL_PRE]
 
     if not pool_rows:
         lines.append("### 第二步：龙头池\n")
@@ -486,26 +502,19 @@ def build_auction_halfway_report(
             return 0
         tops = [x for x in items if x["lb"] == max_lb]
         leader = max(tops, key=lambda x: x["turn"])
-        return 5 if r["code"] == leader["code"] else 3
+        return S2L if r["code"] == leader["code"] else S2F
 
     rows_scored: list[dict] = []
     for r in pool_rows:
         sec = r["sector"]
         code = r["code"]
         vr = vol_rank.get(sec, 99)
-        s1 = 5 if vr == 1 else (4 if vr == 2 else (3 if vr == 3 else 0))
+        s1 = int(s1map.get(str(vr), s1map.get("else", 0)))
         s2 = dragon_score(r)
         pc = r["pct"]
-        if pc >= 9.5:
-            s3 = 5
-        elif 5 <= pc <= 10:
-            s3 = 4
-        elif 3 <= pc < 5:
-            s3 = 3
-        else:
-            s3 = 1
+        s3 = _score_s3_pct(float(pc), s3cfg)
         tr = spot_full.get(code, {}).get("换手率") or r["turn"]
-        s4 = 5 if 5 <= tr <= 15 else (4 if 3 <= tr < 20 else 2)
+        s4 = _score_s4_turn(float(tr), s4cfg)
         pre = W_MAIN * s1 + W_DRAGON * s2 + W_KLINE * s3 + W_LIQ * s4
         rows_scored.append(
             {**r, "s1": s1, "s2": s2, "s3": s3, "s4": s4, "pre_partial": pre}
@@ -522,7 +531,7 @@ def build_auction_halfway_report(
             df = fetch_stock_hist_daily(code, date)
             if df is not None:
                 tech_map[code] = analyze_ohlcv(df)
-            time.sleep(0.04)
+            time.sleep(TECH_SLEEP)
 
     final_rows: list[tuple[float, dict]] = []
     for row in rows_scored:
@@ -533,15 +542,19 @@ def build_auction_halfway_report(
                 ts = float(tinfo["score"])
                 info = tinfo
             else:
-                ts = 2.5
+                ts = NEUTRAL_TECH
                 info = {
-                    "score": 2.5,
+                    "score": NEUTRAL_TECH,
                     "detail": "中性分（未进入技术面精算队列）",
                     "rsi": None,
                 }
         else:
-            ts = 2.5
-            info = {"score": 2.5, "detail": "趋势动量模块已关闭", "rsi": None}
+            ts = NEUTRAL_TECH
+            info = {
+                "score": NEUTRAL_TECH,
+                "detail": "趋势动量模块已关闭",
+                "rsi": None,
+            }
         total = (
             W_MAIN * row["s1"]
             + W_DRAGON * row["s2"]
@@ -565,7 +578,9 @@ def build_auction_halfway_report(
     final_rows.sort(key=lambda x: x[0], reverse=True)
     top = [x[1] for x in final_rows[:MAX_DRAGON_POOL]]
 
-    lines.append("### 第二步：龙头池（合并分类，最多展示 5 只）\n")
+    lines.append(
+        f"### 第二步：龙头池（合并分类，最多展示 {MAX_DRAGON_POOL} 只）\n"
+    )
     lines.append(
         f"- 评分权重：主线{W_MAIN:.0%} / 龙头地位{W_DRAGON:.0%} / 次日K线预期{W_KLINE:.0%} / "
         f"流动性{W_LIQ:.0%} / **趋势动量{W_TECH:.0%}**（EMA200+EMA20/50+RSI，文档化框架）\n"
