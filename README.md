@@ -224,7 +224,7 @@ flowchart TB
 | **解读与附录** | **`app/utils/replay_footer_commentary.py`**：每张图下配 **Markdown 解读**，文末附 **四大框架 / 五维对照** 表。日复盘小节标题为 **「每日必看 吾日三省吾身」**。 |
 | **拼接入口** | **`app/utils/replay_viewpoint_footer.py`**：`append_replay_viewpoint_footer(md)`；`ReplayTask` 在定稿后调用。 |
 | **绘图脚本** | 通用流程图：**`app/utils/replay_footer_chart_draw.py`**（`save_flowchart_png`、`save_kebi_framework_png` 等）。重绘示例：`scripts/generate_replay_footer_charts_extended.py`、`generate_replay_footer_kebi.py`、`generate_replay_footer_tuixue.py`、`generate_replay_viewpoint_footer_asking.py`（依赖 matplotlib）。 |
-| **每周温习邮件** | **`scripts/weekly_theory_review_email.py`**：调用 **`build_theory_review_markdown()`** 生成独立正文，主题形如 **`【温习】五人理论框架 · YYYY-MM-DD`**，SMTP 配置与日复盘相同。 |
+| **每周温习邮件** | **`scripts/weekly_theory_review_email.py`**：调用 **`build_theory_review_markdown()`** 生成独立正文（**六层架构图** `architecture_six_layers.png` + 五人理论）；主题形如 **`【温习】五人理论 + 六层架构 · YYYY-MM-DD`**，SMTP 与 **`replay_footer_inline_images_weekly()`**（含架构图 CID）。 |
 | **GitHub 定时** | **`.github/workflows/weekly-theory-review.yml`**：`cron: "0 1 * * 6"` → **北京时间每周六 09:00**（与 `scheduled-nightly`、`weekly-report` 一样使用 `SMTP_*`、`MAIL_TO` 等 Secrets）。支持 **`workflow_dispatch`** 手动触发。 |
 | **Windows 本机定时** | **`scripts/register_weekly_theory_review_task.ps1`**：注册计划任务 **每周六 09:00**（本地时区）执行上述 Python 脚本；需已配置 SMTP 且能访问项目目录。 |
 
@@ -489,10 +489,11 @@ flowchart TB
 | 文档 | 内容 |
 |------|------|
 | **`ARCHITECTURE.md`** | 模块边界、数据契约、排错表、术语、路线图、附录环境变量节选。 |
+| **`docs/six_layer_architecture.md`** | **企业级六层架构目标**（Adapter / Domain / Application / Orchestration / Output / Infra）、依赖规则、与现有代码映射及分阶段迁移。 |
 | **`docs/smtp_env.md`** | 仅用环境变量配置 SMTP 的说明与 PowerShell 示例（若与当前脚本名不一致，以 **`email_notify.resolve_email_config`** 与 **`nightly_replay`** 为准）。 |
 
 **常见情况**（详见 `ARCHITECTURE.md`）：复盘无龙头池 / `abort_reason`；周报无邮件；**429** 限流；**`VALIDATE_STRICT`**；报告首行【摘要】异常。
 
 ---
 
-*行为以主分支源码与 `pytest` 为准。新增程序侧能力时，请同步更新 **`app/utils/config.py`**、本 README 的 [能力清单](#程序侧量化与报告增强能力清单)、[复盘文末五人理论与每周温习](#复盘文末五人理论与每周温习) 与 **`ARCHITECTURE.md`**（若涉及模块边界）。*
+*行为以主分支源码与 `pytest` 为准。新增程序侧能力时，请同步更新 **`app/utils/config.py`**、本 README 的 [能力清单](#程序侧量化与报告增强能力清单)、[复盘文末五人理论与每周温习](#复盘文末五人理论与每周温习)、**`ARCHITECTURE.md`** 与分层目标 **`docs/six_layer_architecture.md`**（若涉及模块边界或分层）。*

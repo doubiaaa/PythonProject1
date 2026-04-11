@@ -12,6 +12,7 @@
 2. [系统目标与非目标](#2-系统目标与非目标)  
 3. [技术栈与运行时](#3-技术栈与运行时)  
 4. [逻辑架构总览](#4-逻辑架构总览)  
+&nbsp;&nbsp;&nbsp;4.1 [企业级六层架构（演进目标）](#41-企业级六层架构演进目标)  
 5. [模块与目录映射](#5-模块与目录映射)  
 6. [配置体系](#6-配置体系)  
 7. [单次复盘流水线](#7-单次复盘流水线)  
@@ -115,6 +116,13 @@ flowchart LR
     V -.-> SP
 ```
 
+### 4.1 企业级六层架构（演进目标）
+
+当前实现仍高度耦合在 `app/services/*` 与少数大模块中（数据、策略、LLM、邮件同路径交织）。**目标形态**为六层：**接口层 Adapter → 领域 Domain → 应用服务 Application → 编排 Orchestration → 输出 Output → 基础设施 Infra**，使换数据源、换 LLM、换推送时**编排与领域规则保持稳定**。
+
+- **完整定义、依赖规则、与现有代码映射、分阶段迁移**：见 **`docs/six_layer_architecture.md`**。  
+- **包骨架**（新代码优先落位）：`app/adapters/`、`app/domain/`、`app/application/`、`app/orchestration/`、`app/output/`、`app/infrastructure/`（各含 `__init__.py` 说明）。历史包名 **`app/services`** 渐进搬迁，不一次性重命名全仓库。
+
 ---
 
 ## 5. 模块与目录映射
@@ -122,6 +130,7 @@ flowchart LR
 | 位置 | 职责摘要 |
 |------|----------|
 | `app/__init__.py` | 包初始化（无 Web）。 |
+| `app/adapters/`、`app/domain/`、`app/application/`、`app/orchestration/`、`app/output/`、`app/infrastructure/` | **六层架构占位**（演进目标，见 `docs/six_layer_architecture.md`）；与 `app/services` 并存。 |
 | `app/services/replay_llm_enhancements.py` | 复盘 DeepSeek 增强块（一致性/多空/龙头观察/待验证）；周报周度叙事。 |
 | `app/services/data_fetcher.py` | 行情/日历/板块等；组装 `get_market_summary`，写入 `_last_auction_meta`。 |
 | `app/services/auction_halfway_strategy.py` | 主线与龙头池逻辑；`meta.top_pool` 含 `close` 等字段。 |
@@ -298,7 +307,8 @@ flowchart LR
 2. **稳定性探测节流**：按规则触发以减少大模型调用次数。  
 3. **标签仲裁**：多标签时单一桶归因，提高统计信噪比。  
 4. **未完结信号**：跨周滚动或 `incomplete` 标记。  
-5. **离线回测**：扩展 `backtest_weights.py` 对接 `evolution_log`。
+5. **离线回测**：扩展 `backtest_weights.py` 对接 `evolution_log`。  
+6. **六层架构演进**：按 **`docs/six_layer_architecture.md`** 分阶段拆分 `DataFetcher` / `ReplayTask` / 邮件与领域模型；新功能优先写入 `adapters` / `domain` / `application` / `orchestration` / `output` / `infrastructure` 对应包。
 
 ---
 
@@ -322,7 +332,8 @@ flowchart LR
 1. **行为变更**：同步更新本文与相关模块 docstring。  
 2. **新增数据文件**：在本章「数据文件与契约」增加一行。  
 3. **新增配置键**：在 `DEFAULT_CONFIG` 与本文 **§6** 补充说明。  
-4. **核心源码锚点**：`replay_task.py`、`data_fetcher.py`、`auction_halfway_strategy.py`、`strategy_preference.py`、`weekly_performance.py`。
+4. **核心源码锚点**：`replay_task.py`、`data_fetcher.py`、`auction_halfway_strategy.py`、`strategy_preference.py`、`weekly_performance.py`。  
+5. **架构演进**：分层目标与迁移步骤见 **`docs/six_layer_architecture.md`**。
 
 ---
 

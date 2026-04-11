@@ -31,91 +31,32 @@ from app.services.llm_client import get_llm_client
 from app.services.separation_confirmation import perform_separation_confirmation
 from app.services.news_mapper import analyze_finance_news
 from app.services.report_builder import append_core_stocks_and_plan_if_missing
+from app.application.replay_text_rules import (
+    ensure_dragon_report_sections as _ensure_dragon_report_sections,
+    ensure_summary_line as _ensure_summary_line,
+    extract_summary_line as _extract_summary_line,
+    is_llm_failure_payload as _is_llm_failure_payload,
+)
+from app.domain.ports import EmailDeliveryPort, LLMCompletionPort
+from app.output.replay_email_subject import (
+    build_replay_failure_email_subject,
+    build_replay_success_email_subject,
+)
 
 MAX_LOG_ENTRIES = 200
 
 MODE_NAME = "次日竞价半路模式"
 
-_DRAGON_HEADINGS = (
-    "盘面综述",
-    "情绪与数据解读",
-    "周期定性",
-    "情绪数据量化",
-    "核心股聚焦",
-    "明日预案",
-)
-
-
-def _is_llm_failure_payload(text: str) -> bool:
-    """返回内容实为 API 错误串（无模型正文），避免误报「缺章节」。"""
-    s = (text or "").strip()[:1200]
-    markers = (
-        "API请求失败（",
-        "调用大模型 API",
-        "错误：大模型 API",
-        "API 返回异常",
-        "您的账户已达到速率限制",
-        '"code":"1302"',
-        "请求频率",
-        "账户余额不足",
-    )
-    return any(m in s for m in markers)
-
-
-def _ensure_dragon_report_sections(text: str) -> str:
-    """若缺少龙头模板关键章节标题，在文末追加系统提示（不重试 API）。"""
-    if not text or not str(text).strip():
-        return text
-    if _is_llm_failure_payload(text):
-        note = (
-            "\n\n---\n\n> **【系统提示】** 本次 **未生成 AI 复盘长文**（上方为大模型接口报错或限速），"
-            "**并非** 章节未写全。请间隔数分钟后重试，或检查 API Key、配额与并发；"
-            "程序数据目录仍在上方市场摘要中可阅。\n"
-        )
-        return text.rstrip() + note
-    missing = [h for h in _DRAGON_HEADINGS if h not in text]
-    if not missing:
-        return text
-    note = (
-        "\n\n---\n\n> **【系统提示】** 本次输出未检测到以下章节标题，"
-        "请人工对照程序数据复核或缩小单节篇幅后重试："
-        + "、".join(missing)
-        + "。\n"
-    )
-    return text.rstrip() + note
-
-
-def _extract_summary_line(text: str) -> Optional[str]:
-    """解析报告首行【摘要】…，用于推送标题。"""
-    if not text:
-        return None
-    for line in text.strip().split("\n"):
-        s = line.strip()
-        if s.startswith("【摘要】"):
-            return s[:220]
-    return None
-
-
-def _ensure_summary_line(text: str, market_phase: str = "高位震荡期") -> str:
-    """模型未输出规范【摘要】首行时补一行，便于推送解析与阅读。"""
-    if not text or not str(text).strip():
-        return text
-    first = str(text).strip().split("\n")[0].strip()
-    if first.startswith("【摘要】"):
-        return text
-    if _is_llm_failure_payload(text):
-        return (
-            f"【摘要】周期阶段：{market_phase}｜适宜度：—｜置信度：低（未生成正文：大模型限速或服务异常，见下方）\n\n"
-            + text
-        )
-    return (
-        f"【摘要】周期阶段：{market_phase}｜适宜度：中｜置信度：低（系统补全：模型未输出规范首行摘要）\n\n"
-        + text
-    )
-
 
 class ReplayTask:
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        llm_port: Optional[LLMCompletionPort] = None,
+        email_port: Optional[EmailDeliveryPort] = None,
+    ):
+        self._llm_port = llm_port
+        self._email_port = email_port
         self._lock = threading.RLock()
         self.status = "idle"
         self.result = None
@@ -225,10 +166,39 @@ class ReplayTask:
         )
 
     def call_llm(self, api_key, prompt, temperature=0.42, max_tokens=6144):
-        """调用 DeepSeek Chat API（超时见 replay_config data_source.llm_*）。"""
+        """调用大模型（默认 DeepSeek Chat API；可注入 llm_port 便于测试或换实现）。"""
+        if self._llm_port is not None:
+            return self._llm_port.complete(
+                prompt, temperature=temperature, max_tokens=max_tokens
+            )
         client = get_llm_client(api_key)
         return client.chat_completion(
             prompt, temperature=temperature, max_tokens=max_tokens
+        )
+
+    def _send_report_email(
+        self,
+        email_cfg: dict,
+        subject: str,
+        body: str,
+        *,
+        extra_vars: Optional[dict[str, Any]] = None,
+        inline_images: Optional[list[tuple[str, str]]] = None,
+    ) -> tuple[bool, str]:
+        if self._email_port is not None:
+            return self._email_port.send_markdown_report(
+                email_cfg,
+                subject,
+                body,
+                extra_vars=extra_vars,
+                inline_images=inline_images,
+            )
+        return send_report_email(
+            email_cfg,
+            subject,
+            body,
+            extra_vars=extra_vars,
+            inline_images=inline_images,
         )
 
     def run(self, date, api_key, data_fetcher, email_cfg=None):
@@ -510,10 +480,10 @@ class ReplayTask:
                 except Exception as ex:
                     self.log(f"风格指数入库失败：{ex}")
             if email_cfg and has_email_config(email_cfg):
-                subj = (
-                    f"【复盘】✅ {sum_line} · {actual_date}"
-                    if sum_line
-                    else f"【复盘】✅ 复盘完成 · {MODE_NAME} · {actual_date}"
+                subj = build_replay_success_email_subject(
+                    summary_line=sum_line,
+                    trade_date=str(actual_date),
+                    mode_name=MODE_NAME,
                 )
                 _kpi = getattr(data_fetcher, "_last_email_kpi", None) or {}
                 _dm = getattr(data_fetcher, "_last_dragon_trader_meta", None) or {}
@@ -522,7 +492,7 @@ class ReplayTask:
                     or "T+0 竞价复盘 · 对 {trade_date} 的复盘"
                 )
                 _banner = _title_tpl.replace("{trade_date}", str(actual_date))
-                eok, emsg = send_report_email(
+                eok, emsg = self._send_report_email(
                     email_cfg,
                     subj,
                     result,
@@ -548,8 +518,11 @@ class ReplayTask:
             self.result = error_msg
             self.status = "error"
             if email_cfg and has_email_config(email_cfg):
-                subj = f"【复盘】❌ 复盘失败 · {MODE_NAME} · {actual_date}"
-                eok, emsg = send_report_email(
+                subj = build_replay_failure_email_subject(
+                    mode_name=MODE_NAME,
+                    trade_date=str(actual_date),
+                )
+                eok, emsg = self._send_report_email(
                     email_cfg,
                     subj,
                     error_msg,

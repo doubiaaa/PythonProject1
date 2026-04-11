@@ -5,7 +5,7 @@
 用法：
   python scripts/weekly_theory_review_email.py
 
-依赖：与日复盘相同，需配置 SMTP（环境变量或 replay_config.json），且 assets 下五张附图存在。
+依赖：与日复盘相同，需配置 SMTP；正文含 **六层架构图**（若存在 `assets/architecture_six_layers.png`）+ **五人理论**五张附图。
 
 定时：
   - GitHub Actions：见 .github/workflows/weekly-theory-review.yml（北京时间周六 09:00）
@@ -25,7 +25,7 @@ from app.services.email_notify import has_email_config, resolve_email_config, se
 from app.utils.config import ConfigManager
 from app.utils.replay_viewpoint_footer import (
     build_theory_review_markdown,
-    replay_footer_inline_images,
+    replay_footer_inline_images_weekly,
 )
 
 
@@ -47,9 +47,9 @@ def main() -> int:
         return 0
 
     date_s = _beijing_today_str()
-    subj = f"【温习】五人理论框架 · {date_s}"
+    subj = f"【温习】五人理论 + 六层架构 · {date_s}"
     _cm = ConfigManager()
-    banner = f"每周温习 · 五人理论框架（{date_s}）"
+    banner = f"每周温习 · 五人理论 + 六层架构（{date_s}）"
     extra = {
         "header_date": f"发送日 {date_s}",
         "title": subj,
@@ -61,7 +61,7 @@ def main() -> int:
         subj,
         body,
         extra_vars=extra,
-        inline_images=replay_footer_inline_images(),
+        inline_images=replay_footer_inline_images_weekly(),
     )
     if ok and msg != "skipped":
         print(f"[weekly-theory] 已发送：{subj}")
