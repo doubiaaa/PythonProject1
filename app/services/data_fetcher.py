@@ -5,7 +5,7 @@ import re
 import time
 from contextlib import redirect_stdout
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Optional
+from typing import Optional, Tuple
 
 import akshare as ak
 import pandas as pd
@@ -40,6 +40,8 @@ INDIVIDUAL_FUND_FLOW_CACHE_TTL_SEC = 120
 CONCEPT_CONS_CACHE_TTL_SEC = 600
 # 分笔探测（按代码短缓存）
 INTRADAY_TICK_CACHE_TTL_SEC = 60
+# 东财炸板股池 stock_zt_pool_zbgc_em 仅支持「当前时点」最近约 30 个交易日，更早勿请求（避免反复报错）
+ZB_POOL_EM_LOOKBACK_TRADING_DAYS = 30
 
 _log = get_logger(__name__)
 
@@ -330,6 +332,8 @@ class DataFetcher:
         self._last_finance_news_related: list = []
         self._last_finance_news_general: list = []
         self._tick_js_cache: dict[str, tuple[float, Optional[pd.DataFrame]]] = {}
+        self._north_hist_em_df: Optional[pd.DataFrame] = None
+        self._north_hist_em_ts: float = 0.0
 
     def _is_cache_valid(self, key):
         if key in self.cache:
@@ -621,6 +625,26 @@ class DataFetcher:
         valid_days = [d for d in trade_days if d <= date_str]
         return valid_days[-1] if valid_days else date_str
 
+    def is_zb_pool_em_available(self, date) -> bool:
+        """
+        东财炸板池接口仅覆盖最近约 ZB_POOL_EM_LOOKBACK_TRADING_DAYS 个交易日（相对当前日历末端）。
+        超出范围则不应调用 ak.stock_zt_pool_zbgc_em，否则会触发「只能获取最近 30 个交易日」类错误并刷屏。
+        """
+        td = self.get_trade_cal()
+        if not td:
+            return True
+        ds = str(date)[:8]
+        if ds > td[-1]:
+            return False
+        valid = [x for x in td if x <= ds]
+        if not valid:
+            return False
+        d_eff = valid[-1]
+        if len(td) < ZB_POOL_EM_LOOKBACK_TRADING_DAYS:
+            return True
+        oldest = td[-ZB_POOL_EM_LOOKBACK_TRADING_DAYS]
+        return d_eff >= oldest
+
     def get_zt_pool(self, date):
         """获取涨停股票池（主用AKShare，失败返回空DataFrame）"""
         cache_key = f"zt_pool_{date}"
@@ -698,6 +722,10 @@ class DataFetcher:
             if df_disk is not None and not df_disk.empty and "code" in df_disk.columns:
                 self._set_cache(cache_key, df_disk)
                 return df_disk
+        if not self.is_zb_pool_em_available(date):
+            empty = pd.DataFrame()
+            self._set_cache(cache_key, empty)
+            return empty
         try:
             df = self.fetch_with_retry(ak.stock_zt_pool_zbgc_em, date=date)
             if df is not None and not df.empty and "代码" in df.columns:
@@ -1830,6 +1858,43 @@ class DataFetcher:
         lines.append("\n")
         return "".join(lines), meta
 
+    def _north_money_from_hist_em(self, ds: str) -> Optional[Tuple[float, str]]:
+        """东财沪深港通历史表（ak.stock_hsgt_hist_em），单位已为亿元。失败返回 None。"""
+        fn = getattr(ak, "stock_hsgt_hist_em", None)
+        if not callable(fn):
+            return None
+        now = time.time()
+        if (
+            self._north_hist_em_df is not None
+            and now - self._north_hist_em_ts < 3600
+        ):
+            df = self._north_hist_em_df
+        else:
+            try:
+                df = self.fetch_with_retry(fn, symbol="北向资金")
+            except Exception:
+                return None
+            self._north_hist_em_df = df
+            self._north_hist_em_ts = now
+        if df is None or df.empty:
+            return 0.0, "empty_df"
+        date_col = "日期" if "日期" in df.columns else df.columns[0]
+        sdt = pd.to_datetime(df[date_col], errors="coerce")
+        sub = df[sdt.dt.strftime("%Y%m%d") == ds]
+        if sub.empty:
+            return 0.0, "empty_df"
+        row = sub.iloc[-1]
+        for col in ("当日成交净买额", "当日资金流入"):
+            if col not in row.index:
+                continue
+            v = row[col]
+            if pd.isna(v):
+                continue
+            val = round(float(v), 2)
+            st = "ok_zero" if val == 0.0 else "ok"
+            return val, st
+        return 0.0, "empty_df"
+
     def get_north_money(self, date) -> tuple[float, str]:
         """
         北向净流入（亿元）与状态。
@@ -1840,28 +1905,31 @@ class DataFetcher:
         if isinstance(cached, dict) and "value" in cached and "status" in cached:
             return float(cached["value"]), str(cached["status"])
         try:
-            df = self.fetch_with_retry(
-                ak.stock_hsgt_north_net_flow_sina, date=date
-            )
-            if df is None or df.empty:
-                out = (0.0, "empty_df")
+            df = None
+            sina_fn = getattr(ak, "stock_hsgt_north_net_flow_sina", None)
+            if callable(sina_fn):
+                df = self.fetch_with_retry(sina_fn, date=date)
+            if df is not None and not df.empty:
+                if "北向资金净流入" in df.columns:
+                    net_flow = df["北向资金净流入"].iloc[0]
+                elif "净流入" in df.columns:
+                    net_flow = df["净流入"].iloc[0]
+                else:
+                    out = (0.0, "empty_df")
+                    _write_cache("north_net", ds, {"value": out[0], "status": out[1]})
+                    return out
+                val = round(float(net_flow) / 1e8, 2)
+                if val == 0.0:
+                    st = "ok_zero"
+                else:
+                    st = "ok"
+                _write_cache("north_net", ds, {"value": val, "status": st})
+                return val, st
+            out = self._north_money_from_hist_em(ds)
+            if out is not None:
                 _write_cache("north_net", ds, {"value": out[0], "status": out[1]})
-                return out
-            if "北向资金净流入" in df.columns:
-                net_flow = df["北向资金净流入"].iloc[0]
-            elif "净流入" in df.columns:
-                net_flow = df["净流入"].iloc[0]
-            else:
-                out = (0.0, "empty_df")
-                _write_cache("north_net", ds, {"value": out[0], "status": out[1]})
-                return out
-            val = round(float(net_flow) / 1e8, 2)
-            if val == 0.0:
-                st = "ok_zero"
-            else:
-                st = "ok"
-            _write_cache("north_net", ds, {"value": val, "status": st})
-            return val, st
+                return out[0], out[1]
+            return 0.0, "fetch_failed"
         except Exception as e:
             _log.error("获取北向资金数据失败: %s", e)
             return 0.0, "fetch_failed"
