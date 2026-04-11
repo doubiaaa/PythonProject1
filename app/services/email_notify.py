@@ -18,9 +18,7 @@ from app.utils.email_template import (
     build_plain_text_email_header,
     markdown_to_email_html,
     render_email_template,
-    render_simulated_trade_email,
     should_skip_rich_email_prefix,
-    simulated_trade_plain_text,
 )
 
 # 单封正文上限（字符），避免部分 SMTP 拒信
@@ -372,38 +370,3 @@ def send_beautiful_email(
         timeout=timeout,
     )
 
-
-def send_simulated_trade_notification(
-    cfg: dict[str, Any],
-    trade_info: dict[str, Any],
-    account_snapshot: dict[str, Any],
-    *,
-    extra_vars: Optional[dict[str, Any]] = None,
-    timeout: float = 45.0,
-) -> tuple[bool, str]:
-    """
-    模拟账户成交通知：专用 HTML 模板 + 纯文本备选。
-    trade_info 须含 side, symbol, name, shares, price, amount, reason, trade_date；
-    account_snapshot 须含 total_value, cash, holding_market_value, n_positions, initial_capital，可选 day_return_pct。
-    """
-    ev = dict(extra_vars or {})
-    subj = str(trade_info.get("subject") or "").strip()
-    if not subj:
-        side = trade_info.get("side") or "buy"
-        op = "买入" if side == "buy" else "卖出"
-        sym = trade_info.get("symbol") or ""
-        name = trade_info.get("name") or ""
-        sh = int(trade_info.get("shares") or 0)
-        price = float(trade_info.get("price") or 0)
-        subj = f"【模拟账户{op}】{sym} {name} {sh}股@{price:.2f}"
-    ev.setdefault("title", subj)
-    html_doc = render_simulated_trade_email(trade_info, account_snapshot, ev)
-    plain = simulated_trade_plain_text(trade_info, account_snapshot)
-    return send_report_email(
-        cfg,
-        subj,
-        plain,
-        html_document=html_doc,
-        extra_vars=ev,
-        timeout=timeout,
-    )

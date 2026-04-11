@@ -432,50 +432,6 @@ class ReplayTask:
                         self.log("风格指数已入库（data/market_style_indices.json）")
                 except Exception as ex:
                     self.log(f"风格指数入库失败：{ex}")
-            if _cm.get("enable_simulated_account", False) and ah_meta.get(
-                "program_completed"
-            ) and ah_meta.get("top_pool"):
-                try:
-                    from app.services.simulated_account import (
-                        SimulatedAccount,
-                        price_from_map,
-                        price_map_from_top_pool,
-                        recommendations_from_top_pool,
-                    )
-                    from app.services.strategy_preference import tag_to_bucket
-
-                    tp = ah_meta["top_pool"]
-                    pmap = price_map_from_top_pool(tp)
-                    recs = recommendations_from_top_pool(
-                        tp, tag_to_bucket_func=tag_to_bucket
-                    )
-                    acc = SimulatedAccount(
-                        account_path=_cm.get(
-                            "simulated_account_path", "data/simulated_account.json"
-                        ),
-                        config_path=_cm.get(
-                            "simulated_config_path", "data/simulated_config.json"
-                        ),
-                        config_manager=_cm,
-                    )
-                    acc._cfg["buy_price_type"] = _cm.get(
-                        "simulated_buy_price_type",
-                        acc._cfg.get("buy_price_type", "close_of_recommendation_day"),
-                    )
-                    acc.update_prices(pmap)
-                    _td = data_fetcher.get_trade_cal()
-                    acc.execute_daily_trades(
-                        recs,
-                        actual_date,
-                        lambda s: price_from_map(pmap, s),
-                        trade_days=_td,
-                    )
-                    plan = acc.generate_daily_plan(actual_date)
-                    result = result + "\n\n---\n\n" + plan
-                    self.result = result
-                    self.log("模拟账户已更新（见文末操作备忘）")
-                except Exception as ex:
-                    self.log(f"模拟账户更新失败：{ex}")
             if email_cfg and has_email_config(email_cfg):
                 subj = (
                     f"【复盘】✅ {sum_line} · {actual_date}"

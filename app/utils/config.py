@@ -92,14 +92,6 @@ DEFAULT_CONFIG = {
     "enable_weekly_llm_trend_narrative": True,
     # 周报权重更新后异常时额外发一封提醒邮件
     "enable_weekly_weight_anomaly_email": True,
-    # 模拟账户：按程序龙头池与收盘价撮合（data/simulated_account.json）
-    "enable_simulated_account": True,
-    "simulated_account_path": "data/simulated_account.json",
-    "simulated_config_path": "data/simulated_config.json",
-    # 模拟买入价格：close_of_recommendation_day=当日收盘撮合；next_day_open=仅写 pending，次日开盘脚本买入
-    "simulated_buy_price_type": "next_day_open",
-    # 模拟账户每笔买卖成交通知（与复盘共用 SMTP / MAIL_TO）
-    "enable_simulated_trade_notification": False,
     # 复盘 Markdown 目录中「4. 龙虎榜数据」是否请求东财接口（关则可省多次外网调用）
     "enable_replay_lhb_catalog": True,
     # 复盘目录是否拉取「概念资金流」TOP（与行业榜并列，偏题材向；多一次东财请求）
@@ -115,8 +107,6 @@ DEFAULT_CONFIG = {
     # 复盘目录：全 A 快照五日涨跌幅榜（复用 get_stock_zh_a_spot_em_cached，无列或失败则降级）
     "enable_replay_spot_5d_leaderboard": True,
     "replay_spot_5d_top_n": 19,
-    # 复盘目录：模拟账户绩效摘要（需 enable_simulated_account 且存在状态文件）
-    "enable_replay_sim_account_summary": True,
     # 复盘断点：成功后写入 data/replay_status/；resume 为 True 时优先用缓存跳过数据拉取
     "enable_replay_checkpoint": True,
     "resume_replay_if_available": False,

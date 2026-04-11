@@ -75,22 +75,6 @@ def _maybe_plot_weights() -> None:
         )
 
 
-def _maybe_plot_sim_equity(cm) -> None:
-    """将模拟账户 daily_series 画为 simulated_equity.png。"""
-    from app.services.simulated_account import plot_simulated_equity_curve
-
-    rel = cm.get("simulated_account_path", "data/simulated_account.json")
-    acc_path = rel if os.path.isabs(rel) else os.path.join(_ROOT, rel.replace("/", os.sep))
-    outp = os.path.join(_ROOT, "simulated_equity.png")
-    if plot_simulated_equity_curve(acc_path, outp):
-        print(f"已生成 {outp}", flush=True)
-    else:
-        print(
-            "模拟净值曲线未生成（需 matplotlib，且 simulated_account.json 含 daily_series）",
-            file=sys.stderr,
-        )
-
-
 def main() -> int:
     parser = argparse.ArgumentParser(description="龙头池周度表现邮件")
     parser.add_argument(
@@ -106,7 +90,7 @@ def main() -> int:
     parser.add_argument(
         "--plot",
         action="store_true",
-        help="生成 weights_trend.png（权重）与 simulated_equity.png（模拟净值，若启用模拟账户）（需 matplotlib）",
+        help="生成 weights_trend.png（权重趋势，需 matplotlib）",
     )
     args = parser.parse_args()
     cm = None
@@ -149,31 +133,6 @@ def main() -> int:
         md = build_weekly_report_markdown_auto(
             trade_days, anchor, iso_year, iso_week, fetcher=fetcher
         )
-
-        if cm.get("enable_simulated_account", False):
-            try:
-                from app.services.simulated_account import SimulatedAccount
-                from app.services.weekly_market_snapshot import trade_days_in_iso_week
-
-                wd = trade_days_in_iso_week(trade_days, iso_year, iso_week)
-                if wd:
-                    w0, w1 = wd[0], wd[-1]
-                else:
-                    w0, w1 = anchor, anchor
-                acc = SimulatedAccount(
-                    account_path=cm.get(
-                        "simulated_account_path", "data/simulated_account.json"
-                    ),
-                    config_path=cm.get(
-                        "simulated_config_path", "data/simulated_config.json"
-                    ),
-                )
-                md += (
-                    "\n\n## 模拟账户本周表现\n\n"
-                    + acc.get_weekly_summary(w0, w1)
-                )
-            except Exception as e:
-                md += f"\n\n## 模拟账户本周表现\n\n（读取失败：{e}）\n"
 
         api_key_w = (
             (os.environ.get("DEEPSEEK_API_KEY") or "").strip()
@@ -313,21 +272,15 @@ def main() -> int:
 
         if cm.get("weekly_email_attach_charts", True):
             _maybe_plot_weights()
-            if cm.get("enable_simulated_account", False):
-                _maybe_plot_sim_equity(cm)
 
         from app.utils.email_template import embed_image_cid, markdown_to_email_html
 
         html_frag = markdown_to_email_html(md)
         inline_images: list[tuple[str, str]] = []
-        for cid, fname in (
-            ("wchart", "weights_trend.png"),
-            ("eqchart", "simulated_equity.png"),
-        ):
-            p = os.path.join(_ROOT, fname)
-            if os.path.isfile(p):
-                html_frag = embed_image_cid(html_frag, p, cid)
-                inline_images.append((cid, p))
+        _wpath = os.path.join(_ROOT, "weights_trend.png")
+        if os.path.isfile(_wpath):
+            html_frag = embed_image_cid(html_frag, _wpath, "wchart")
+            inline_images.append(("wchart", _wpath))
 
         subj = (
             f"【复盘】📊 龙头池周度表现 · {iso_year}年第{iso_week}周 · 锚点{anchor}"
@@ -351,8 +304,6 @@ def main() -> int:
     finally:
         if args.plot:
             _maybe_plot_weights()
-            if cm is not None and cm.get("enable_simulated_account", False):
-                _maybe_plot_sim_equity(cm)
 
 
 if __name__ == "__main__":

@@ -67,56 +67,6 @@ def check_strategy_preference() -> None:
         _ok("strategy_preference.json 权重和≈1")
 
 
-def check_simulated_account(cm: dict) -> None:
-    if not cm.get("enable_simulated_account"):
-        _skip("未开启模拟账户，跳过 simulated_account.json 检查")
-        return
-    p = _path(cm.get("simulated_account_path") or "data/simulated_account.json")
-    if not os.path.isfile(p):
-        _fail("已开启模拟账户但 simulated_account.json 不存在")
-        return
-    try:
-        with open(p, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception as e:
-        _fail(f"simulated_account.json：{e}")
-        return
-    for k in ("initial_capital", "cash", "holdings", "transactions", "daily_series", "total_value"):
-        if k not in data:
-            _fail(f"simulated_account.json 缺少字段 {k}")
-            return
-    if not isinstance(data.get("holdings"), list):
-        _fail("simulated_account.json holdings 须为数组")
-        return
-    _ok("simulated_account.json 字段完整")
-
-
-def check_simulated_config(cm: dict) -> None:
-    if not cm.get("enable_simulated_account"):
-        _skip("未开启模拟账户，跳过 simulated_config 检查")
-        return
-    p = _path(cm.get("simulated_config_path") or "data/simulated_config.json")
-    if not os.path.isfile(p):
-        _fail("已开启模拟账户但 simulated_config.json 不存在")
-        return
-    try:
-        with open(p, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception as e:
-        _fail(f"simulated_config.json：{e}")
-        return
-    if float(data.get("stop_loss", 0)) >= 0:
-        _fail("simulated_config stop_loss 应为负数")
-        return
-    if float(data.get("stop_profit", 0)) <= 0:
-        _fail("simulated_config stop_profit 应为正数")
-        return
-    if int(data.get("max_positions", 0)) <= 0:
-        _fail("simulated_config max_positions 应 > 0")
-        return
-    _ok("simulated_config.json 数值合理")
-
-
 def check_evolution_log() -> None:
     p = _path("data/strategy_evolution_log.jsonl")
     if not os.path.isfile(p):
@@ -175,11 +125,6 @@ def main() -> int:
     print("=== validate.py ===\n")
     check_imports()
     check_strategy_preference()
-    from app.utils.config import ConfigManager
-
-    cm = ConfigManager().config
-    check_simulated_config(cm)
-    check_simulated_account(cm)
     check_evolution_log()
     check_env_keys()
     print(f"\n失败项数：{FAILURES}")
