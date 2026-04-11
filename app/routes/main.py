@@ -84,12 +84,11 @@ def start_replay():
         api_key = (
             (config_mgr.get("deepseek_api_key") or "").strip()
             or (config_mgr.get("llm_api_key") or "").strip()
-            or (config_mgr.get("zhipu_api_key") or "").strip()
         )
     if not api_key:
         return jsonify(
             {
-                "error": "请输入 DeepSeek API Key，或在 replay_config.json 中配置 deepseek_api_key（兼容 llm_api_key / zhipu_api_key）后留空提交",
+                "error": "请输入 DeepSeek API Key，或在 replay_config.json 中配置 deepseek_api_key 或 llm_api_key 后留空提交",
             }
         ), 400
 
@@ -97,7 +96,6 @@ def start_replay():
         return jsonify({"error": "复盘任务进行中，请稍后再试"}), 409
 
     config_mgr.set("deepseek_api_key", api_key)
-    config_mgr.set("zhipu_api_key", api_key)
 
     _apply_smtp_from_request(data)
 
@@ -128,7 +126,6 @@ def get_defaults():
     zk = (
         (config_mgr.get("deepseek_api_key") or "").strip()
         or (config_mgr.get("llm_api_key") or "").strip()
-        or (config_mgr.get("zhipu_api_key") or "").strip()
     )
     return jsonify({
         "default_date": datetime.now().strftime("%Y%m%d"),

@@ -9,14 +9,12 @@ CONFIG_FILE = os.path.join(_PROJECT_ROOT, "replay_config.json")
 
 # 默认配置
 DEFAULT_CONFIG = {
-    # 大模型：默认 DeepSeek（OpenAI 兼容）；llm_provider=zhipu 时用 zhipu_api_key / zhipu_model_name
-    "llm_provider": "deepseek",
+    # 大模型：DeepSeek（OpenAI 兼容）
     "deepseek_api_key": "",
-    "llm_api_key": "",  # 可选统一密钥，与 deepseek_api_key / zhipu_api_key 二选一
+    "llm_api_key": "",  # 可选，与 deepseek_api_key 二选一
     "llm_model_name": "",
     "deepseek_model_name": "",
-    "llm_api_base": "",  # 非空则覆盖默认 DeepSeek / 智谱 URL
-    "zhipu_api_key": "",
+    "llm_api_base": "",  # 非空则覆盖默认 DeepSeek URL
     "smtp_host": "",
     "smtp_port": 587,
     "smtp_user": "",
@@ -113,8 +111,6 @@ DEFAULT_CONFIG = {
     "replay_spot_5d_top_n": 19,
     # 复盘目录：模拟账户绩效摘要（需 enable_simulated_account 且存在状态文件）
     "enable_replay_sim_account_summary": True,
-    # 智谱对话模型名（如 glm-4-flash）；空则使用程序内置默认
-    "zhipu_model_name": "",
     # 复盘断点：成功后写入 data/replay_status/；resume 为 True 时优先用缓存跳过数据拉取
     "enable_replay_checkpoint": True,
     "resume_replay_if_available": False,
@@ -126,8 +122,8 @@ DEFAULT_CONFIG = {
         "retry_times": 3,
         "cache_expire_days": 1,
         "cache_dir": "data_cache",
-        "zhipu_connect_timeout": 10,
-        "zhipu_read_timeout": 120,
+        "llm_connect_timeout": 10,
+        "llm_read_timeout": 120,
     },
 }
 

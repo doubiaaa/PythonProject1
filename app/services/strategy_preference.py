@@ -306,10 +306,8 @@ def _probe_text_is_api_error(text: str) -> bool:
         t.startswith(p)
         for p in (
             "调用大模型 API",
-            "调用智谱",
             "API请求失败",
             "API 返回异常",
-            "错误：智谱",
             "错误：大模型 API",
         )
     )

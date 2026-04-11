@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-大模型 Chat Completions（OpenAI 兼容）：默认 DeepSeek，可选智谱。
+大模型 Chat Completions（OpenAI 兼容）：DeepSeek。
 超时、传输重试、429 指数退避。
 """
 from __future__ import annotations
@@ -24,36 +24,23 @@ _log = get_logger(__name__)
 DEEPSEEK_DEFAULT_URL = os.environ.get(
     "DEEPSEEK_API_URL", "https://api.deepseek.com/v1/chat/completions"
 )
-ZHIPU_DEFAULT_URL = os.environ.get(
-    "ZHIPU_API_URL", "https://open.bigmodel.cn/api/paas/v4/chat/completions"
-)
 DEFAULT_TIMEOUT = float(os.environ.get("LLM_TIMEOUT_SEC", "120"))
 LLM_RETRIES = max(1, int(os.environ.get("LLM_RETRY_ATTEMPTS", "3")))
-# 兼容旧环境变量名 ZHIPU_RETRY_*
-LLM_429_RETRIES = max(
-    0,
-    int(
-        os.environ.get("LLM_RETRY_429")
-        or os.environ.get("ZHIPU_RETRY_429")
-        or "6"
-    ),
-)
-LLM_429_WAIT_SEC = max(
-    5,
-    int(os.environ.get("LLM_RETRY_429_WAIT_SEC") or os.environ.get("ZHIPU_RETRY_429_WAIT_SEC") or "30"),
-)
-LLM_429_WAIT_MAX_SEC = max(
-    30,
-    int(
-        os.environ.get("LLM_RETRY_429_WAIT_MAX_SEC")
-        or os.environ.get("ZHIPU_RETRY_429_WAIT_MAX_SEC")
-        or "180"
-    ),
-)
+LLM_429_RETRIES = max(0, int(os.environ.get("LLM_RETRY_429", "6")))
+LLM_429_WAIT_SEC = max(5, int(os.environ.get("LLM_RETRY_429_WAIT_SEC", "30")))
+LLM_429_WAIT_MAX_SEC = max(30, int(os.environ.get("LLM_RETRY_429_WAIT_MAX_SEC", "180")))
+
+
+def _read_timeouts(ds_cfg: dict[str, Any]) -> tuple[float, float]:
+    """连接/读取超时（`replay_config.json` → `data_source.llm_*`）。"""
+    return (
+        float(ds_cfg.get("llm_connect_timeout", 10)),
+        float(ds_cfg.get("llm_read_timeout", 120)),
+    )
 
 
 class ChatCompletionClient:
-    """OpenAI 兼容 POST /v1/chat/completions（DeepSeek、智谱等）。"""
+    """OpenAI 兼容 POST …/chat/completions（DeepSeek）。"""
 
     def __init__(
         self,
@@ -156,47 +143,26 @@ class ChatCompletionClient:
 
 
 def get_llm_client(api_key: str = "") -> ChatCompletionClient:
-    """
-    按配置组装客户端：默认 deepseek（deepseek-chat），llm_provider=zhipu 时用智谱。
-    """
+    """组装 DeepSeek 客户端；模型默认 deepseek-chat。"""
     from app.utils.config import ConfigManager
 
     cm = ConfigManager()
-    provider = (cm.get("llm_provider") or "deepseek").strip().lower()
     ds_cfg = cm.get("data_source") or {}
-    conn = float(ds_cfg.get("zhipu_connect_timeout", 10))
-    read = float(ds_cfg.get("zhipu_read_timeout", 120))
+    conn, read = _read_timeouts(ds_cfg)
     timeout = (conn, read)
 
     key = (api_key or "").strip()
     if not key:
-        if provider == "zhipu":
-            key = (cm.get("zhipu_api_key") or "").strip()
-        else:
-            key = (
-                cm.get("deepseek_api_key") or cm.get("llm_api_key") or cm.get("zhipu_api_key") or ""
-            ).strip()
+        key = (cm.get("deepseek_api_key") or cm.get("llm_api_key") or "").strip()
 
     if not key:
         raise ValueError("未配置大模型 API Key（deepseek_api_key 或请求传入 api_key）")
 
     custom_base = (cm.get("llm_api_base") or "").strip()
-
-    if provider == "zhipu":
-        base = custom_base or ZHIPU_DEFAULT_URL
-        model = (
-            (cm.get("zhipu_model_name") or cm.get("llm_model_name") or "").strip()
-            or "glm-4-flash"
-        )
-    else:
-        base = custom_base or DEEPSEEK_DEFAULT_URL
-        model = (
-            (cm.get("llm_model_name") or cm.get("deepseek_model_name") or "").strip()
-            or "deepseek-chat"
-        )
+    base = custom_base or DEEPSEEK_DEFAULT_URL
+    model = (
+        (cm.get("llm_model_name") or cm.get("deepseek_model_name") or "").strip()
+        or "deepseek-chat"
+    )
 
     return ChatCompletionClient(api_key=key, base_url=base, model=model, timeout=timeout)
-
-
-# 兼容旧代码
-ZhipuClient = ChatCompletionClient

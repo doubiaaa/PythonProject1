@@ -141,13 +141,10 @@ def check_evolution_log() -> None:
 
 
 def check_env_keys() -> None:
-    if not (
-        (os.environ.get("DEEPSEEK_API_KEY") or "").strip()
-        or (os.environ.get("ZHIPU_API_KEY") or "").strip()
-    ):
-        _warn("未设置 DEEPSEEK_API_KEY（或兼容 ZHIPU_API_KEY，调用大模型时需要）")
+    if not (os.environ.get("DEEPSEEK_API_KEY") or "").strip():
+        _warn("未设置 DEEPSEEK_API_KEY（调用大模型时需要）")
     else:
-        _ok("已设置 DEEPSEEK_API_KEY 或 ZHIPU_API_KEY")
+        _ok("已设置 DEEPSEEK_API_KEY")
     if (os.environ.get("REPLAY_API_TOKEN") or "").strip():
         _ok("已设置 REPLAY_API_TOKEN（Web 复盘 API 将校验口令）")
     else:

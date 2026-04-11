@@ -1,7 +1,7 @@
 # 北京时间每天约 18:00 触发（在 19:30 基础上再提早 1.5h，进一步抵消 Actions 常见1h+ 延迟）。
 # 仅当「当日为 A 股交易日」时才跑复盘，周末/节假日直接跳过（成功退出）。
 # 须在仓库 Secrets 中配置（Settings → Secrets and variables → Actions）：
-#   DEEPSEEK_API_KEY    DeepSeek API Key（推荐；未设时可沿用旧名 ZHIPU_API_KEY）
+#   DEEPSEEK_API_KEY    DeepSeek API Key
 # 可选邮件：
 #   SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASSWORD SMTP_FROM MAIL_TO
 #   SMTP_SSL  填 true / 1 表示 SMTPS（465）；留空则默认 STARTTLS（587）
@@ -48,7 +48,6 @@ jobs:
       - name: Run nightly replay
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          ZHIPU_API_KEY: ${{ secrets.ZHIPU_API_KEY }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
           SMTP_USER: ${{ secrets.SMTP_USER }}

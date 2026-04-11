@@ -178,10 +178,8 @@ def main() -> int:
         if cm.get("enable_weekly_ai_insight", False):
             api_key = (
                 (os.environ.get("DEEPSEEK_API_KEY") or "").strip()
-                or (os.environ.get("ZHIPU_API_KEY") or "").strip()
                 or (cm.get("deepseek_api_key") or "").strip()
                 or (cm.get("llm_api_key") or "").strip()
-                or (cm.get("zhipu_api_key") or "").strip()
             )
             if api_key:
                 try:

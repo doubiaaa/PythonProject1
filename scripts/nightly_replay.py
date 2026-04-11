@@ -9,7 +9,7 @@
   python scripts/nightly_replay.py
   python scripts/nightly_replay.py --date 20260328
 
-密钥优先级：环境变量 DEEPSEEK_API_KEY（兼容 ZHIPU_API_KEY）> replay_config.json
+密钥优先级：环境变量 DEEPSEEK_API_KEY > replay_config.json
 通知：可选配置 SMTP；未配置邮件时仍会生成报告并打印警告。
 SMTP：SMTP_HOST、MAIL_TO 等见 app/services/email_notify.py
 """
@@ -34,10 +34,8 @@ def _resolve_api_key():
     cm = ConfigManager()
     return (
         (os.environ.get("DEEPSEEK_API_KEY") or "").strip()
-        or (os.environ.get("ZHIPU_API_KEY") or "").strip()
         or (cm.get("deepseek_api_key") or "").strip()
         or (cm.get("llm_api_key") or "").strip()
-        or (cm.get("zhipu_api_key") or "").strip()
     )
 
 
@@ -95,8 +93,8 @@ def main() -> int:
     api_key = _resolve_api_key()
     if not api_key:
         print(
-            "未配置大模型 API Key：请设置环境变量 DEEPSEEK_API_KEY（或兼容 ZHIPU_API_KEY）"
-            "或在 replay_config.json 中填写 deepseek_api_key / llm_api_key / zhipu_api_key",
+            "未配置大模型 API Key：请设置环境变量 DEEPSEEK_API_KEY"
+            "或在 replay_config.json 中填写 deepseek_api_key 或 llm_api_key",
             file=sys.stderr,
         )
         return 1

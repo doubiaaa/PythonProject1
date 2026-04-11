@@ -46,9 +46,6 @@ def _is_llm_failure_payload(text: str) -> bool:
     markers = (
         "API请求失败（",
         "调用大模型 API",
-        "调用智谱API异常",
-        "调用智谱API：速率限制",
-        "错误：智谱API",
         "错误：大模型 API",
         "API 返回异常",
         "您的账户已达到速率限制",
@@ -222,7 +219,7 @@ class ReplayTask:
         )
 
     def call_llm(self, api_key, prompt, temperature=0.42, max_tokens=6144):
-        """调用大模型（DeepSeek / 智谱等，见 llm_provider；超时见 replay_config data_source）。"""
+        """调用 DeepSeek Chat API（超时见 replay_config data_source.llm_*）。"""
         client = get_llm_client(api_key)
         return client.chat_completion(
             prompt, temperature=temperature, max_tokens=max_tokens
@@ -332,11 +329,7 @@ class ReplayTask:
                     self.log(f"风格稳定性探测：{stab}")
                 except Exception as ex:
                     self.log(f"风格稳定性探测失败（沿用文件权重）：{ex}")
-                gap = float(
-                    _cm2.get("replay_llm_spacing_sec")
-                    or _cm2.get("replay_zhipu_spacing_sec", 15)
-                    or 0
-                )
+                gap = float(_cm2.get("replay_llm_spacing_sec", 15) or 0)
                 if gap > 0:
                     self.log(
                         f"大模型调用间隔：等待 {gap:.0f}s 后再请求主长文（降低 429 限速概率）"

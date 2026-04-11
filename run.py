@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
 次日竞价半路模式（BS 架构）
-功能：收盘后按策略选股 + 智谱 GLM 生成次日竞价预案
+功能：收盘后按策略选股 + DeepSeek 生成次日竞价预案
 依赖：pip install akshare pandas requests flask
 """
 

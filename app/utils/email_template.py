@@ -270,7 +270,7 @@ def build_email_content_prefix(
         'padding:12px 14px;background:#f8fafc;border-radius:0 8px 8px 0;">'
         "<strong style=\"color:#0f172a;\">报告说明</strong>：正文由<strong>程序侧数据</strong>（交易日历、行情与规则、龙头池、"
         "<strong>近5日连板梯队对比</strong>与标签等）"
-        "与<strong>智谱模型</strong>在固定章节结构下共同生成，通常依次包含：<strong>周期与情绪</strong>、"
+        "与<strong>DeepSeek 大模型</strong>在固定章节结构下共同生成，通常依次包含：<strong>周期与情绪</strong>、"
         "<strong>核心股与明日预案</strong>、<strong>风险</strong>等。"
         "文中表格、列表与代码块仅用于展示数据与逻辑，<strong>不构成投资建议</strong>；请结合自身情况独立决策。"
         "</p>"
@@ -381,7 +381,7 @@ def build_plain_text_email_header(extra_vars: Optional[dict[str, Any]] = None) -
             "",
             "【报告说明】",
             "· 数据：程序拉取公开行情、交易日历，并按规则生成龙头池等；",
-            "· 正文：智谱模型按固定章节输出，为 Markdown 结构；",
+            "· 正文：DeepSeek 按固定章节输出，为 Markdown 结构；",
             "· 用途：个人研究与记录，不构成投资建议，股市有风险。",
             "",
             "────────── 正文（纯文本）──────────",

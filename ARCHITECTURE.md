@@ -46,7 +46,7 @@
 
 | 能力 | 说明 |
 |------|------|
-| 收盘复盘 | 拉取数据，生成结构化市场摘要与龙头池，调用智谱 GLM 输出长文。 |
+| 收盘复盘 | 拉取数据，生成结构化市场摘要与龙头池，调用 DeepSeek 输出长文。 |
 | 档案沉淀 | 将**程序产出的**龙头池写入本地，与 AI 正文解耦。 |
 | 周度统计 | 按自然周与约定收益口径计算区间表现与标签归因。 |
 | 策略反馈 | 用历史收益更新「五桶」风格权重，供下一交易日 prompt 侧重。 |
@@ -65,7 +65,7 @@
 - **语言**：Python 3（CI 使用 3.11，本地建议 3.10+）。  
 - **Web**：Flask，入口 `run.py`。  
 - **数据**：pandas、akshare（行情与交易日历）。  
-- **模型**：智谱 OpenAPI（HTTP，`requests`）。  
+- **模型**：DeepSeek Chat Completions（HTTP，`requests`）。  
 - **邮件**：SMTP，`markdown` 渲染 HTML 正文。  
 - **测试**：`pytest`；**校验**：`scripts/validate.py`。
 
@@ -90,7 +90,7 @@ flowchart LR
     subgraph core["核心"]
         DF[DataFetcher + 竞价半路策略]
         RT[ReplayTask]
-        GLM[智谱 GLM]
+        DS[DeepSeek API]
         SP[strategy_preference]
         WL[watchlist_store]
     end
@@ -102,7 +102,6 @@ flowchart LR
     end
 
     subgraph out["输出"]
-        SC[Server酱]
         EM[SMTP 邮件]
     end
 
@@ -110,11 +109,10 @@ flowchart LR
     N --> RT
     RT --> DF
     DF --> RT
-    RT --> GLM
+    RT --> DS
     RT --> WL
     RT --> SP
     RT --> SIM
-    RT --> SC
     RT --> EM
     P --> WP
     P --> SP
@@ -140,7 +138,7 @@ flowchart LR
 | `app/services/market_style_indices.py` | 打板/趋势/低吸等指数计算与 JSON 持久化。 |
 | `app/services/simulated_account.py` | 模拟盘状态机、买卖、pending、成交通知。 |
 | `app/services/email_notify.py` | `resolve_email_config`、`send_report_email`、`send_simple_email`。 |
-| `app/services/llm_client.py` | OpenAI 兼容 Chat Completions（DeepSeek / 智谱等）；`get_llm_client`。 |
+| `app/services/llm_client.py` | OpenAI 兼容 Chat Completions（DeepSeek）；`get_llm_client`。 |
 | `app/utils/config.py` | `DEFAULT_CONFIG` 与 `replay_config.json` 合并（`ConfigManager`）。 |
 | `scripts/` | 夜间复盘、周报、次日开盘买入、校验、失败通知、回测占位。 |
 | `tests/` | 单元测试与回归。 |
@@ -155,7 +153,7 @@ flowchart LR
 
 1. 默认：`app/utils/config.py` 中 **`DEFAULT_CONFIG`**。  
 2. 若存在 **`replay_config.json`**（项目根），与用户 JSON **浅合并**（用户键覆盖默认键）。  
-3. **环境变量**：`DEEPSEEK_API_KEY`（兼容 `ZHIPU_API_KEY`）、SMTP、收件人等常以环境变量覆盖配置文件，具体见 `resolve_email_config` 与各脚本。
+3. **环境变量**：`DEEPSEEK_API_KEY`、SMTP、收件人等常以环境变量覆盖配置文件，具体见 `resolve_email_config` 与各脚本。
 
 ### 6.2 与业务强相关的键（节选）
 
@@ -165,7 +163,7 @@ flowchart LR
 |----|------|
 | `enable_finance_news` | 是否拉取并拼接财联社要闻摘要。 |
 | `enable_style_stability_probe` | 主报告前是否增加一次大模型「风格稳定性」轻量调用（**默认 false**，与主长文各计一次请求，易触发 429；需要时在 `replay_config.json` 设为 `true`）。 |
-| `replay_llm_spacing_sec` | 启用风格探测时，探测结束后再等待的秒数，再请求主长文（默认 15；兼容旧键 `replay_zhipu_spacing_sec`）。 |
+| `replay_llm_spacing_sec` | 启用风格探测时，探测结束后再等待的秒数，再请求主长文（默认 15）。 |
 | `enable_daily_style_indices_persist` | 复盘成功后是否写入 `market_style_indices.json`。 |
 | `enable_simulated_account` | 是否执行模拟账户逻辑。 |
 | `simulated_buy_price_type` | `close_of_recommendation_day` 或 `next_day_open`。 |
@@ -289,7 +287,7 @@ flowchart LR
 | 脚本 | 作用 |
 |------|------|
 | `nightly_replay.py` | 夜间自动复盘；非交易日退出码 0 且不执行。 |
-| `weekly_performance_email.py` | 周报、策略更新、可选智谱周评、`--plot`。 |
+| `weekly_performance_email.py` | 周报、策略更新、可选大模型周评、`--plot`。 |
 | `simulated_morning_buy.py` | 处理 pending、开盘价买入（需配置与交易日）。 |
 | `validate.py` | 依赖与数据校验（CI）。 |
 | `backtest_weights.py` | 占位。 |
@@ -311,7 +309,7 @@ flowchart LR
 ## 14. 安全、密钥与合规提示
 
 - **密钥**：优先环境变量或 CI Secrets；勿将含密码的 `replay_config.json` 提交公开仓库。  
-- **邮件/推送**：收件人与 SendKey 属敏感信息，注意仓库与 fork 权限。  
+- **邮件**：收件人与 SMTP 密码属敏感信息，注意仓库与 fork 权限。  
 - **合规**：本系统输出仅供研究或自用记录；对外展示须遵守当地证券法规与平台规则。
 
 ---
@@ -343,7 +341,7 @@ flowchart LR
 ## 17. 已知局限与路线图
 
 1. **周内再校准**：仅调 prompt、不写回 `strategy_preference`，缓解周更滞后。  
-2. **稳定性探测节流**：按规则触发以减少智谱调用次数。  
+2. **稳定性探测节流**：按规则触发以减少大模型调用次数。  
 3. **标签仲裁**：多标签时单一桶归因，提高统计信噪比。  
 4. **未完结信号**：跨周滚动或 `incomplete` 标记。  
 5. **离线回测**：扩展 `backtest_weights.py` 对接 `evolution_log`。
@@ -354,12 +352,11 @@ flowchart LR
 
 | 变量 | 用途 |
 |------|------|
-| `ZHIPU_API_KEY` | 智谱 API Key。 |
-| `ZHIPU_RETRY_429` / `ZHIPU_RETRY_429_WAIT_SEC` / `ZHIPU_RETRY_429_WAIT_MAX_SEC` | 主复盘 `chat/completions` 遇 **429** 时的重试次数、基准等待秒数与单次等待上限（默认 6 次、30s 起指数退避、上限 180s，另尊重 `Retry-After`）。 |
-| `ZHIPU_RETRY_ATTEMPTS` | 传输层超时/断连重试（`tenacity`，与 429 独立）。 |
+| `DEEPSEEK_API_KEY` | DeepSeek API Key。 |
+| `LLM_RETRY_429` / `LLM_RETRY_429_WAIT_SEC` / `LLM_RETRY_429_WAIT_MAX_SEC` | 主复盘 `chat/completions` 遇 **429** 时的重试次数、基准等待秒数与单次等待上限（默认 6 次、30s 起指数退避、上限 180s，另尊重 `Retry-After`）。 |
+| `LLM_RETRY_ATTEMPTS` | 传输层超时/断连重试（`tenacity`，与 429 独立）。 |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASSWORD` | SMTP。 |
 | `SMTP_FROM` / `MAIL_TO` | 发件人与收件人（可多地址逗号分隔）。 |
-| `SERVERCHAN_SENDKEY` | Server酱。 |
 | `ENABLE_SIMULATED_ACCOUNT` / `SIMULATED_BUY_PRICE_TYPE` | 可覆盖 `simulated_morning_buy.py` 行为（见脚本内说明）。 |
 | `VALIDATE_STRICT` | `validate.py` 是否对缺失文件更严格。 |
 

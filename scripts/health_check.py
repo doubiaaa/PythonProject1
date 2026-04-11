@@ -53,9 +53,9 @@ def main() -> int:
         print(f"[FAIL] Flask app: {e}")
         ok = False
 
-    llm_key = (os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("ZHIPU_API_KEY") or "")
+    llm_key = os.environ.get("DEEPSEEK_API_KEY") or ""
     if llm_key.strip():
-        print("[OK] DEEPSEEK_API_KEY 或 ZHIPU_API_KEY 已设置（未实际调用 API）")
+        print("[OK] DEEPSEEK_API_KEY 已设置（未实际调用 API）")
     else:
         print("[WARN] 未设置 DEEPSEEK_API_KEY，复盘 AI 不可用")
 
