@@ -1,0 +1,41 @@
+# 五人理论每周温习邮件：北京时间每周六 09:00（UTC 周六 01:00）。
+# 正文为炒股养家 / 退学炒股 / Asking / 92科比 / 涅槃重升 附图 + 解读 + 附录（与复盘文末「每日必看」一致）。
+name: Weekly theory review email
+
+on:
+  schedule:
+    - cron: "0 1 * * 6"
+  workflow_dispatch: {}
+
+concurrency:
+  group: weekly-theory-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  send:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Send weekly theory review email
+        env:
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+          SMTP_FROM: ${{ secrets.SMTP_FROM }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+          SMTP_SSL: ${{ secrets.SMTP_SSL }}
+        run: python scripts/weekly_theory_review_email.py

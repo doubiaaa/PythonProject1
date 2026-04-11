@@ -4,6 +4,7 @@
 
   夜间复盘：  python scripts/nightly_replay.py
   周报：      python scripts/weekly_performance_email.py
+  周六温习：  python scripts/weekly_theory_review_email.py（五人理论单独邮件）
   健康检查：  python scripts/health_check.py
 """
 from __future__ import annotations
