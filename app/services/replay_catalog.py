@@ -81,31 +81,6 @@ def _md_cell(val: object, max_len: int = 40) -> str:
     return t
 
 
-def _index_spot_df(fetcher: "DataFetcher") -> Optional[pd.DataFrame]:
-    try:
-        return fetcher.fetch_with_retry(ak.stock_zh_index_spot_em)
-    except Exception as e:
-        _log.warning("index spot for catalog: %s", e)
-        return None
-
-
-def _index_pct_row(df: Optional[pd.DataFrame], name_subs: tuple[str, ...]) -> Optional[tuple[str, float]]:
-    if df is None or df.empty:
-        return None
-    name_col = next((c for c in df.columns if str(c) in ("名称", "name")), None)
-    pct_col = next((c for c in df.columns if "涨跌幅" in str(c)), None)
-    if not name_col or not pct_col:
-        return None
-    for sub in name_subs:
-        m = df[df[name_col].astype(str).str.contains(sub, na=False)]
-        if not m.empty:
-            try:
-                return str(m.iloc[0][name_col]).strip()[:14], float(m.iloc[0][pct_col])
-            except Exception:
-                continue
-    return None
-
-
 def _ascii_lb_bars(df_zt: pd.DataFrame, max_width: int = 30) -> str:
     if df_zt is None or df_zt.empty or "lb" not in df_zt.columns:
         return "- （无涨停池）\n"
@@ -118,65 +93,6 @@ def _ascii_lb_bars(df_zt: pd.DataFrame, max_width: int = 30) -> str:
         line = draw_text_bar(f"{int(lb)}连板", int(cnt), total, max_len=max_width)
         lines.append(f"- {line}\n")
     return "".join(lines) + "\n"
-
-
-def _zt_first_seal_hour_buckets_md(df_zt: pd.DataFrame) -> str:
-    """首封时间按交易时段桶统计（短线看盘常用粒度）。"""
-    if df_zt is None or df_zt.empty or "first_time" not in df_zt.columns:
-        return ""
-    tser = _first_time_series_to_datetime(df_zt["first_time"])
-    valid = tser.notna()
-    if not bool(valid.any()):
-        return ""
-    h = tser.dt.hour.fillna(0).astype(int)
-    m = tser.dt.minute.fillna(0).astype(int)
-
-    def _bucket(hi: int, mi: int) -> str:
-        mins = hi * 60 + mi
-        if mins < 9 * 60 + 25:
-            return "09:25–10:00"
-        if 9 * 60 + 25 <= mins < 10 * 60:
-            return "09:25–10:00"
-        if 10 * 60 <= mins < 11 * 60 + 30:
-            return "10:00–11:30"
-        if 11 * 60 + 30 <= mins < 13 * 60:
-            return "11:30–13:00"
-        if 13 * 60 <= mins < 14 * 60 + 30:
-            return "13:00–14:30"
-        if 14 * 60 + 30 <= mins <= 15 * 60:
-            return "14:30–15:00"
-        return "其他"
-
-    buckets: list[str] = []
-    for i in range(len(df_zt)):
-        if bool(valid.iloc[i]):
-            buckets.append(_bucket(int(h.iloc[i]), int(m.iloc[i])))
-    if not buckets:
-        return ""
-    vc = pd.Series(buckets).value_counts()
-    order = [
-        "09:25–10:00",
-        "10:00–11:30",
-        "11:30–13:00",
-        "13:00–14:30",
-        "14:30–15:00",
-        "其他",
-    ]
-    lines = [
-        "#### 首封时间分布（涨停家数·按时段）\n\n",
-        "| 时段 | 家数 | 占比 |\n|------|------|------|\n",
-    ]
-    total = len(buckets)
-    for b in order:
-        cnt = int(vc.get(b, 0))
-        if cnt == 0:
-            continue
-        pct = round(100.0 * cnt / total, 1)
-        lines.append(f"| {b} | {cnt} | {pct}% |\n")
-    lines.append(
-        "\n> 口径：按「首次封板时间」落在的时钟区间统计；与行情软件分时略有误差属正常。\n\n"
-    )
-    return "".join(lines)
 
 
 def _watchlist_spot_followup_md(
@@ -406,24 +322,6 @@ def _sentiment_dashboard_block(
     return "".join(lines)
 
 
-def _nine_grid_markdown(sentiment_temp: int, market_phase: str) -> str:
-    """简版情绪九宫格：温度分档 × 周期阶段。"""
-    t = sentiment_temp
-    if t < 35:
-        row = "偏冷"
-    elif t < 65:
-        row = "中性"
-    else:
-        row = "偏热"
-    col = market_phase[:4] if market_phase else "—"
-    return (
-        "|  | 低位承接 | 中位震荡 | 高位分歧 |\n"
-        "|--|---------|---------|---------|\n"
-        f"| **情绪温度** | {t}°C（{row}） | 程序阶段：{col} | 详见周期定性 |\n\n"
-        "> 精细九宫格需自定义规则；此处为**扫读占位**，与正文「周期定性」一致即可。\n\n"
-    )
-
-
 def _dash_date_yyyymmdd(yyyymmdd: str) -> str:
     s = str(yyyymmdd)[:8]
     if len(s) != 8 or not s.isdigit():
@@ -618,7 +516,6 @@ def build_six_section_catalog(
         else None
     )
 
-    idx_df = _index_spot_df(fetcher)
     if df_sector is None:
         df_sector = pd.DataFrame()
     if df_concept is None:
@@ -642,8 +539,6 @@ def build_six_section_catalog(
         _format_fund_flow_block(
             df_concept, title="概念 · 主力净流入 TOP（东财·今日）", max_rows=10
         ),
-        "#### 导航\n\n",
-        "- 连板轨迹：**§3.1**；涨停原因与分档：**§2**；指数：**§1.3**。\n\n",
         "---\n\n",
         "## 1. 复盘总结\n\n",
         "### 1.1 连板梯队\n\n",
@@ -653,7 +548,6 @@ def build_six_section_catalog(
         lines.append("- 结构：" + "，".join(f"{k}连×{int(v)}只" for k, v in vc.items()) + "\n")
         lines.append(f"- 最高连板：**{max_lb}** 板\n\n")
         lines.append(_ascii_lb_bars(df_zt))
-        lines.append(_zt_first_seal_hour_buckets_md(df_zt))
     else:
         lines.append("- 涨停池为空。\n\n")
 
@@ -699,12 +593,9 @@ def build_six_section_catalog(
     lines.append("### 1.3 市场指数\n\n")
     lines.append(fetcher._index_snapshot_markdown())
 
-    lines.append("### 1.4 盘面小结\n\n")
-    lines.append("> 定性见正文 **一、盘面综述**，与 **§1.2** 对齐。\n\n")
-
-    lines.append("### 1.5 题材小结（程序·行业 TOP）\n\n")
+    lines.append("### 1.4 题材小结（程序·行业 TOP）\n\n")
     if not df_zt.empty and "industry" in df_zt.columns:
-        for ind, cnt in df_zt["industry"].value_counts().head(8).items():
+        for ind, cnt in df_zt["industry"].value_counts().head(5).items():
             lines.append(f"- **{_md_cell(ind, 16)}**：{int(cnt)} 家涨停\n")
         lines.append("\n")
     else:
@@ -712,10 +603,7 @@ def build_six_section_catalog(
 
     lines.append("---\n\n## 2. 涨停原因\n\n")
 
-    lines.append("### 2.1 连板分布\n\n")
-    lines.append("> 条形分布见 **§1.1**，此处不重复。\n\n")
-
-    lines.append("### 2.2 一字涨停股（启发式）\n\n")
+    lines.append("### 2.1 一字涨停股（启发式）\n\n")
     lines.append(
         "> 规则：`炸板次数=0` 且首封时间在 **09:25～09:31** 附近；与真实一字仍有偏差，以行情软件为准。\n\n"
     )
@@ -735,10 +623,7 @@ def build_six_section_catalog(
     else:
         lines.append("- 无数据。\n\n")
 
-    lines.append("### 2.3 N 字板\n\n")
-    lines.append("- 程序未统计；正文可择要分析。\n\n")
-
-    lines.append("### 2.4 创业板涨停\n\n")
+    lines.append("### 2.2 创业板涨停\n\n")
     if not df_zt.empty:
         cy = df_zt[df_zt["code"].map(lambda x: _norm6(x).startswith("300"))]
         if cy.empty:
@@ -760,7 +645,7 @@ def build_six_section_catalog(
     else:
         lines.append("- 无。\n\n")
 
-    lines.append("### 2.5 科创板与北交所涨停\n\n")
+    lines.append("### 2.3 科创板与北交所涨停\n\n")
     if not df_zt.empty:
         kcb_bj = df_zt[
             df_zt["code"].map(
@@ -788,11 +673,15 @@ def build_six_section_catalog(
     else:
         lines.append("- 无。\n\n")
 
-    lines.append("### 2.6 热点题材分类（行业聚合）\n\n")
-    lines.append(fetcher._format_zt_industry_top_table_markdown(df_zt))
-    lines.append(fetcher._format_zt_industry_detail_blocks_markdown(df_zt))
+    lines.append("### 2.4 热点题材分类（行业聚合）\n\n")
+    lines.append(fetcher._format_zt_industry_top_table_markdown(df_zt, top_n=8))
+    lines.append(
+        fetcher._format_zt_industry_detail_blocks_markdown(
+            df_zt, top_industries=4, per_sector=8
+        )
+    )
 
-    lines.append("### 2.7 其他涨停（非热点 TOP6 行业）\n\n")
+    lines.append("### 2.5 其他涨停（非热点 TOP6 行业）\n\n")
     if not df_zt.empty and "industry" in df_zt.columns:
         hot = set(df_zt["industry"].value_counts().head(6).index.astype(str))
         rest = df_zt[~df_zt["industry"].astype(str).isin(hot)]
@@ -812,7 +701,7 @@ def build_six_section_catalog(
     else:
         lines.append("- 无法分类。\n\n")
 
-    lines.append("### 2.8 涨停打开（炸板池）\n\n")
+    lines.append("### 2.6 涨停打开（炸板池）\n\n")
     if df_zb is not None and not df_zb.empty:
         lines.append(f"- 炸板 **{len(df_zb)}** 只（详见交易所「炸板池」口径）。\n")
         if "code" in df_zb.columns and "name" in df_zb.columns:
@@ -837,13 +726,6 @@ def build_six_section_catalog(
         lines.append(f"\n- **倾向**：{trend}\n\n")
     else:
         lines.append("- 样本不足。\n\n")
-
-    lines.append("### 3.2 创业板指\n\n")
-    cyb = _index_pct_row(idx_df, ("创业板", "创业板指", "创业板指"))
-    if cyb:
-        lines.append(f"- **{cyb[0]}**：**{cyb[1]}%**（与 **§1.3** 同源快照）\n\n")
-    else:
-        lines.append("- 见 **§1.3**。\n\n")
 
     lines.append("---\n\n## 4. 龙虎榜数据\n\n")
     try:
@@ -870,9 +752,7 @@ def build_six_section_catalog(
     lines.append(
         f"- 情绪温度 **{sentiment_temp}°C**，阶段 **{market_phase}**，标签：{tags}\n\n"
     )
-    lines.append("### 5.2 情绪九宫格（简版）\n\n")
-    lines.append(_nine_grid_markdown(sentiment_temp, market_phase))
-    lines.append("### 5.3 程序龙头池档案（监控池）\n\n")
+    lines.append("### 5.2 程序龙头池档案（监控池）\n\n")
     cm5: Optional[Any] = None
     try:
         from app.utils.config import ConfigManager
@@ -920,7 +800,7 @@ def build_six_section_catalog(
                 "- 未配置 `concept_board_symbols` 时，仅上表 **程序龙头池** 与正文竞价块为准。\n\n"
             )
 
-    lines.append("### 5.4 两市 A 股五日涨幅榜（快照 TOP）\n\n")
+    lines.append("### 5.3 两市 A 股五日涨幅榜（快照 TOP）\n\n")
     if cm5 is not None and bool(cm5.get("enable_replay_spot_5d_leaderboard", True)):
         lines.append(
             _spot_five_day_leaderboard_md(
@@ -934,17 +814,6 @@ def build_six_section_catalog(
     else:
         lines.append("- （配置不可用，跳过全 A 五日榜。）\n\n")
 
-    lines.append("### 5.5 三大抱团区间涨幅（宽基/风格快照）\n\n")
-    hs300 = _index_pct_row(idx_df, ("沪深300", "沪深 300"))
-    zz500 = _index_pct_row(idx_df, ("中证500", "中证 500"))
-    cyb2 = _index_pct_row(idx_df, ("创业板", "创业板指"))
-    for label, tup in (("沪深300", hs300), ("中证500", zz500), ("创业板指", cyb2)):
-        if tup:
-            lines.append(f"- **{label}**（{tup[0]}）：**{tup[1]}%**\n")
-    if not any([hs300, zz500, cyb2]):
-        lines.append("- 指数快照未匹配到上述宽基，请见 **1.3** 原始表。\n")
-    lines.append("\n")
-
     lines.append("#### 数据驱动的优化点（须正文落地）\n\n")
     lines.append(
         "> 正文收束处 **2～4 条**可执行项（与上表挂钩）。\n\n"
@@ -956,7 +825,7 @@ def build_six_section_catalog(
         sub = df_zt.copy()
         sub["_ft"] = _first_time_series_to_datetime(sub["first_time"])
         sub = sub.sort_values("_ft", na_position="last")
-        max_rows = 50
+        max_rows = 35
         sub_show = sub.head(max_rows)
         lines.append(
             "| 时间 | 代码 | 名称 | 连板 | 行业 | 涨停原因 |\n"
