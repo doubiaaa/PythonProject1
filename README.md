@@ -1,6 +1,6 @@
 # T+0 竞价复盘 · A 股收盘智能简报（完整说明）
 
-本仓库是一套**命令行驱动的 A 股收盘复盘流水线**：在**当日收盘后**拉取交易日历、涨跌停池、板块与资金流等，按「**次日竞价半路**」策略（见 `auction_halfway_strategy`）生成**主线、龙头池（`top_pool`）**、市场阶段与篇首程序目录；再调用 **DeepSeek**（OpenAI 兼容 `chat/completions`）按固定章节输出 Markdown 长文，并可叠加多段 **LLM 增强**与**程序补全块**；结果支持 **SMTP 邮件**投递。页眉标题默认强调 **「对某一交易日的复盘」**（`report_title_template`），避免与「次日竞价」字面混淆。系统**无 Web 前端**（`run.py` 仅提示已移除 Flask）。
+本仓库是一套**命令行驱动的 A 股收盘复盘流水线**：在**当日收盘后**拉取交易日历、涨跌停池、板块与资金流等，按「**次日竞价半路**」策略（见 `auction_halfway_strategy`）生成**主线、龙头池（`top_pool`）**、市场阶段与篇首程序目录；再调用 **DeepSeek**（OpenAI 兼容 `chat/completions`）按固定章节输出 Markdown 长文，必要时由**程序补全**「五 / 七」等章节；结果支持 **SMTP 邮件**投递。（日度主流程**不再**拼接「DeepSeek 增强四段」与「程序智能校验与决策摘要」；周报仍可按配置追加可选大模型段落。）页眉标题默认强调 **「对某一交易日的复盘」**（`report_title_template`），避免与「次日竞价」字面混淆。系统**无 Web 前端**（`run.py` 仅提示已移除 Flask）。
 
 **你能得到什么**：一份「程序算清量、模型写得像」的复盘材料——上半部分是可核对的数据表与 KPI，下半部分是可读的周期叙事与预案；二者用同一套交易日与池子对齐，减少口径漂移。
 
@@ -81,16 +81,16 @@ flowchart TB
         C[分离确认与要闻映射]
         D[可选风格探测]
         E[build_prompt 与 call_llm]
-        F[摘要章节校验与增强块]
-        G[要闻前缀与龙头池存档]
-        H[风格指数与邮件]
+        F[摘要与龙头章节校验]
+        G[历史相似 / 要闻前缀 / 文末附图]
+        H[龙头池存档 · 风格指数 · 邮件]
         B -.-> A
         A --> C --> D --> E --> F --> G --> H
     end
 
     subgraph weekly["周度闭环"]
-        W1[周报 Markdown]
-        W2[风格诊断与周度叙事]
+        W1[程序统计周报 Markdown]
+        W2[可选大模型附录]
         W3[update_from_recent_returns]
         W4[权重异常邮件与周报 SMTP]
         W1 --> W2 --> W3 --> W4
@@ -99,6 +99,10 @@ flowchart TB
     G -.->|watchlist| W1
     W3 -.->|五桶权重| E
 ```
+
+![业务全景流程图（静态 PNG，与上图同构）](assets/readme_business_overview.png)
+
+生成：`python scripts/generate_readme_business_overview_chart.py`（依赖 matplotlib，输出 `assets/readme_business_overview.png`）。
 
 ---
 
@@ -137,14 +141,13 @@ flowchart TB
 | 5 | **要闻映射**：若存在 `_last_finance_news`，调用 **`analyze_finance_news`**（传入 `top_pool`），拼接至 meta。 |
 | 6 | **风格稳定性探测**（`enable_style_stability_probe`，默认关）：`probe_style_stability` → `effective_weights_from_stability`；随后 **`replay_llm_spacing_sec` 睡眠**，再构建 Prompt。 |
 | 7 | **`build_prompt`**：含 `build_prompt_addon`（五桶）、`dragon_meta` JSON 块、分离块、要闻块、主模板 **`MAIN_REPLAY_PROMPT`**。 |
-| 8 | **`call_llm`** → **`_ensure_summary_line`**（用 `_last_market_phase`）→ **`_ensure_dragon_report_sections`**；若返回体被识别为 API 失败载荷，附加说明而不误判为「缺章节」。 |
-| 9 | 若开启任一复盘 LLM 附加项：由 **`run_replay_enhancement_bundle`**（`replay_llm_enhancements.py`）统一执行——先 **`collect_program_facts_snapshot`**（含程序异常标签、龙头池字段），再按固定顺序拼接四段：**主增强** → **章节质控** → **近 5 日变化叙事** → **要闻事件链**（与原先逻辑一致）。**默认串行**：段前间隔见 **`replay_llm_enhancements_spacing_sec`**（主文与第一段之间）、**`replay_llm_extra_spacing_sec`**（各独立段之间 `sleep`，降 429）。若 **`replay_llm_enhancements_parallel`** 为 `true`，四段在**同一段间无 sleep** 的前提下**并发**调用 LLM，再按上述顺序拼接（`max_workers` 上限见 **`replay_llm_parallel_max_workers`**，实际不超过 4）；并发更易触发接口限速，请自行权衡。 |
-| 10 | **`append_historical_similarity_block`**（默认开）：在 **免责声明** 前插入「历史相似形态回溯」（依赖多日涨停池拉取，略增耗时；见 **`enable_historical_similarity`**）。 |
-| 11 | **`_last_news_push_prefix`**：经 **`truncate_finance_news_push_prefix`**（`email_news_max_items`、`email_news_filter_prefix`）拼到正文**最前**（含上述 LLM 输出之后）。 |
-| 12 | **`program_completed` 且 `top_pool`**：`append_daily_top_pool` → **`data/watchlist_records.json`**。 |
-| 13 | **`enable_daily_style_indices_persist`**：`persist_daily_indices` → **`data/market_style_indices.json`**。 |
-| 14 | **`append_replay_viewpoint_footer`**：在要闻前缀拼入之后，为定稿追加 **「每日必看 吾日三省吾身」** 区块（五人 PNG + **`replay_footer_commentary`** 解读 + 附录；邮件 **`inline_images`** 见 `replay_footer_inline_images`）。 |
-| 15 | **邮件**：`has_email_config` 时 **`send_report_email`**；`extra_vars` 含 **`report_banner_title`**（来自 `report_title_template`）、**`email_kpi`**（含大面、溢价文案、动态仓位等）、**`email_dragon_meta`**。失败路径同样可发信。 |
+| 8 | **`call_llm`** → **`_ensure_summary_line`**（用 `_last_market_phase`）→ **`append_core_stocks_and_plan_if_missing`**（可选）→ **`_ensure_dragon_report_sections`**；若返回体被识别为 API 失败载荷，附加说明而不误判为「缺章节」。 |
+| 9 | **`append_historical_similarity_block`**（默认开）：在 **免责声明** 前插入「历史相似形态回溯」（依赖多日涨停池拉取，略增耗时；见 **`enable_historical_similarity`**）。 |
+| 10 | **`_last_news_push_prefix`**：经 **`truncate_finance_news_push_prefix`**（`email_news_max_items`、`email_news_filter_prefix`）拼到正文**最前**（插在主长文与后续块之前）。 |
+| 11 | **`program_completed` 且 `top_pool`**：`append_daily_top_pool` → **`data/watchlist_records.json`**。 |
+| 12 | **`enable_daily_style_indices_persist`**：`persist_daily_indices` → **`data/market_style_indices.json`**。 |
+| 13 | **`append_replay_viewpoint_footer`**：在要闻前缀拼入之后，为定稿追加 **「每日必看 吾日三省吾身」** 区块（五人 PNG + **`replay_footer_commentary`** 解读 + 附录；邮件 **`inline_images`** 见 `replay_footer_inline_images`）。 |
+| 14 | **邮件**：`has_email_config` 时 **`send_report_email`**；`extra_vars` 含 **`report_banner_title`**（来自 `report_title_template`）、**`email_kpi`**（含大面、溢价文案、动态仓位等）、**`email_dragon_meta`**。失败路径同样可发信。 |
 
 ---
 
@@ -197,10 +200,8 @@ flowchart TB
 
 ## 复盘增强与周报叙事
 
-- **`app/services/replay_llm_enhancements.py`**：  
-  - 复盘：四段增强由 **`run_replay_enhancement_bundle`** 编排，内部调用 **`run_replay_deepseek_enhancements`**（一致性、多空、龙头观察、待验证点等）、**`run_replay_chapter_quality`**、**`run_replay_comparison_narrative`**、**`run_replay_news_event_chain`**；**`collect_program_facts_snapshot`** 汇总程序事实。默认与配置关闭并行时，调用顺序与段间等待与历史行为一致。  
-  - 周报：**`run_weekly_trend_narrative`**（周度节奏与变化叙事）；与 **`enable_weekly_llm_trend_narrative`** 联动。  
-- 周报中的「风格诊断」脚本内嵌于 **`scripts/weekly_performance_email.py`**（函数 **`_call_llm_weekly_style`**），不是 `replay_llm_enhancements` 主文件。
+- **`app/services/replay_llm_enhancements.py`**：仍提供 **`run_replay_enhancement_bundle`** 等函数，但 **`ReplayTask` 日度主流程已不再调用**（不再向复盘邮件拼接「DeepSeek 增强四段」）。周报侧仍使用 **`run_weekly_trend_narrative`**、**`run_weekly_weight_explanation`** 等，与对应 `enable_weekly_*` 开关联动。  
+- 周报「风格诊断」在 **`scripts/weekly_performance_email.py`**（**`_call_llm_weekly_style`**），与 `enable_weekly_ai_insight` 联动。
 
 ---
 
@@ -224,7 +225,7 @@ flowchart TB
 | **邮件内嵌** | Markdown 使用 `![说明文字](cid:xxx)`，**`send_report_email(..., inline_images=...)`** 按 CID 附加 MIME 图片（见 `replay_footer_inline_images()`）。 |
 | **解读与附录** | **`app/utils/replay_footer_commentary.py`**：每张图下配 **Markdown 解读**，文末附 **四大框架 / 五维对照** 表。日复盘小节标题为 **「每日必看 吾日三省吾身」**。 |
 | **拼接入口** | **`app/utils/replay_viewpoint_footer.py`**：`append_replay_viewpoint_footer(md)`；`ReplayTask` 在定稿后调用。 |
-| **绘图脚本** | 通用流程图：**`app/utils/replay_footer_chart_draw.py`**（`save_flowchart_png`、`save_kebi_framework_png` 等）。重绘示例：`scripts/generate_replay_footer_charts_extended.py`、`generate_replay_footer_kebi.py`、`generate_replay_footer_tuixue.py`、`generate_replay_viewpoint_footer_asking.py`（依赖 matplotlib）。 |
+| **绘图脚本** | 通用流程图：**`app/utils/replay_footer_chart_draw.py`**（`save_flowchart_png`、`save_readme_business_overview_png`、`save_kebi_framework_png` 等）。README 业务全景：**`scripts/generate_readme_business_overview_chart.py`**。重绘示例：`scripts/generate_replay_footer_charts_extended.py`、`generate_replay_footer_kebi.py`、`generate_replay_footer_tuixue.py`、`generate_replay_viewpoint_footer_asking.py`（依赖 matplotlib）。 |
 | **每周温习邮件** | **`scripts/weekly_theory_review_email.py`**：调用 **`build_theory_review_markdown()`** 生成独立正文（**六层架构图** `architecture_six_layers.png` + 五人理论）；主题形如 **`【温习】五人理论 + 六层架构 · YYYY-MM-DD`**，SMTP 与 **`replay_footer_inline_images_weekly()`**（含架构图 CID）。 |
 | **GitHub 定时** | **`.github/workflows/weekly-theory-review.yml`**：`cron: "0 1 * * 6"` → **北京时间每周六 09:00**（与 `scheduled-nightly`、`weekly-report` 一样使用 `SMTP_*`、`MAIL_TO` 等 Secrets）。支持 **`workflow_dispatch`** 手动触发。 |
 | **Windows 本机定时** | **`scripts/register_weekly_theory_review_task.ps1`**：注册计划任务 **每周六 09:00**（本地时区）执行上述 Python 脚本；需已配置 SMTP 且能访问项目目录。 |
@@ -321,11 +322,13 @@ flowchart TB
 
 ### 复盘 LLM 行为
 
+以下含 **`enable_replay_llm_*`** 的键仍写入配置；**当前 `ReplayTask` 不会读取它们**（日度邮件不再拼接增强 bundle）。保留以便将来恢复或供本地实验脚本调用。
+
 | 键 | 含义 |
 |----|------|
 | `enable_style_stability_probe` | 主文前风格探测（多一次 API）。 |
 | `replay_llm_spacing_sec` | 探测后与主文之间的等待秒数。 |
-| `enable_replay_llm_enhancements` | 主文后增强块（一致性、多空、异常假设验证、主线结构、龙头逐票观察等）。 |
+| `enable_replay_llm_enhancements` | （当前未接入主流程）主文后增强块（一致性、多空、龙头观察等）。 |
 | `replay_llm_enhancements_max_tokens` | 增强块 max_tokens（默认 6144）。 |
 | `replay_llm_enhancements_spacing_sec` | 主文与增强块间隔秒数。 |
 | `enable_replay_llm_chapter_qc` | 独立调用：周期定性 / 明日预案 **1～5 分量表与缺口分析**。 |

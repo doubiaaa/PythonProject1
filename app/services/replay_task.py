@@ -22,7 +22,6 @@ from app.services.strategy_preference import (
 )
 from app.services.watchlist_store import append_daily_top_pool
 from app.utils.config import ConfigManager
-from app.application.llm_intel import run_replay_intel_layer
 from app.infrastructure.observability import alert_failure, emit_event
 from app.infrastructure.resilience.exceptions import format_fault_log
 from app.infrastructure.validation import normalize_trade_date_str
@@ -399,56 +398,6 @@ class ReplayTask:
                 self.log("大模型未返回正文（限速/余额/网络等），已附加说明；请勿将「缺章节」提示理解为模型漏写")
             else:
                 self.log("报告首行与龙头模板章节已校验（必要时已补全/提示）")
-                _cm_en = ConfigManager()
-                main_report_for_qc = result
-                _en_main = bool(_cm_en.get("enable_replay_llm_enhancements", True))
-                _en_qc = bool(_cm_en.get("enable_replay_llm_chapter_qc", True))
-                _en_cmp = bool(_cm_en.get("enable_replay_llm_comparison_narrative", True))
-                _en_news = bool(_cm_en.get("enable_replay_llm_news_deep", True))
-                if _en_main or _en_qc or _en_cmp or _en_news:
-                    try:
-                        from app.services.replay_llm_enhancements import (
-                            run_replay_enhancement_bundle,
-                        )
-
-                        gap_en = float(
-                            _cm_en.get("replay_llm_enhancements_spacing_sec", 8) or 0
-                        )
-                        gap_x = float(
-                            _cm_en.get("replay_llm_extra_spacing_sec", 8) or 0
-                        )
-                        mt = int(
-                            _cm_en.get("replay_llm_enhancements_max_tokens", 6144)
-                            or 6144
-                        )
-                        mi = int(_cm_en.get("email_news_max_items", 3) or 3)
-                        parallel_en = bool(
-                            _cm_en.get("replay_llm_enhancements_parallel", False)
-                        )
-                        mw = int(_cm_en.get("replay_llm_parallel_max_workers", 4) or 4)
-                        suffix = run_replay_enhancement_bundle(
-                            parallel=parallel_en,
-                            max_workers=mw,
-                            gap_en=gap_en,
-                            gap_x=gap_x,
-                            actual_date=actual_date,
-                            market_data=market_data,
-                            data_fetcher=data_fetcher,
-                            separation_result=separation_result,
-                            api_key=api_key,
-                            result=result,
-                            main_report_for_qc=main_report_for_qc,
-                            _en_main=_en_main,
-                            _en_qc=_en_qc,
-                            _en_cmp=_en_cmp,
-                            _en_news=_en_news,
-                            mt=mt,
-                            mi=mi,
-                            log=self.log,
-                        )
-                        result = result + suffix
-                    except Exception as ex:
-                        self.log(f"DeepSeek 增强块失败：{ex}")
             try:
                 from app.services.historical_matcher import append_historical_similarity_block
 
@@ -474,28 +423,6 @@ class ReplayTask:
                 )
                 result = news_pre + result
                 self.log("已附加财经要闻摘要（推送与正文顶部）")
-
-            try:
-                _li = ConfigManager().config.get("llm_intel") or {}
-                if isinstance(_li, dict) and _li.get("enabled", True):
-                    result, _intel_meta = run_replay_intel_layer(
-                        report_md=result,
-                        actual_date=str(actual_date),
-                        market_data=market_data or "",
-                        data_fetcher=data_fetcher,
-                        separation_result=separation_result,
-                        api_key=api_key,
-                    )
-                    emit_event(
-                        "replay.llm_intel_applied",
-                        trade_date=str(actual_date),
-                        **_intel_meta,
-                    )
-                    self.log(
-                        "程序智能校验与决策摘要已附加（事实对照/结构化决策，非投资建议）"
-                    )
-            except Exception as ex:
-                self.log(f"智能分析层附加失败（可忽略）：{ex}")
 
             result = append_replay_viewpoint_footer(result)
 

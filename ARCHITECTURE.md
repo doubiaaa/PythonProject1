@@ -89,7 +89,6 @@ flowchart LR
         DF[DataFetcher + 竞价半路策略]
         RT[ReplayTask]
         DS[DeepSeek API]
-        ENH[replay_llm_enhancements]
         SP[strategy_preference]
         WL[watchlist_store]
     end
@@ -97,6 +96,7 @@ flowchart LR
     subgraph opt["可选"]
         MSI[market_style_indices]
         WP[weekly_performance]
+        ENH[replay_llm_enhancements<br/>周报叙事等]
     end
 
     subgraph out["输出"]
@@ -107,12 +107,13 @@ flowchart LR
     RT --> DF
     DF --> RT
     RT --> DS
-    RT --> ENH
     RT --> WL
     RT --> SP
     RT --> EM
     P --> WP
     P --> SP
+    P --> ENH
+    ENH --> EM
     V -.-> SP
 ```
 
@@ -131,7 +132,7 @@ flowchart LR
 |------|----------|
 | `app/__init__.py` | 包初始化（无 Web）。 |
 | `app/adapters/`、`app/domain/`、`app/application/`、`app/orchestration/`、`app/output/`、`app/infrastructure/` | **六层架构占位**（演进目标，见 `docs/six_layer_architecture.md`）；与 `app/services` 并存。 |
-| `app/services/replay_llm_enhancements.py` | 复盘 DeepSeek 增强块（一致性/多空/龙头观察/待验证）；周报周度叙事。 |
+| `app/services/replay_llm_enhancements.py` | 周报周度叙事、权重白话解释等；**日度 `ReplayTask` 已不再拼接**复盘增强 bundle（函数仍保留）。 |
 | `app/services/data_fetcher.py` | 行情/日历/板块等；组装 `get_market_summary`，写入 `_last_auction_meta`。 |
 | `app/services/auction_halfway_strategy.py` | 主线与龙头池逻辑；`meta.top_pool` 含 `close` 等字段。 |
 | `app/services/replay_task.py` | 单次复盘编排：prompt、大模型（默认 DeepSeek）、存档、风格探测、邮件通知。 |
@@ -202,13 +203,12 @@ flowchart LR
 | 2 | （可选）`probe_style_stability` → `effective_weights_from_stability`，供 prompt 侧重。 |
 | 2b | `perform_separation_confirmation`（分时异动 +同板块/同梯队候选）；`analyze_finance_news` 叠加 **龙头池字面命中**；结果写入 prompt `meta_block`。 |
 | 3 | `build_prompt`：固定章节 + `build_prompt_addon` + 市场数据。 |
-| 4 | `call_llm`；`_ensure_summary_line` 规范首行【摘要】。 |
-| 4b | （可选，默认开）`replay_llm_enhancements`：一致性核对、多空对照、龙头观察、待验证点（多一次 DeepSeek）。 |
-| 5 | （可选）拼接 `_last_news_push_prefix`。 |
-| 6 | 设置 `result`、`status=completed`。 |
-| 7 | `append_daily_top_pool` → `watchlist_records.json`（程序池，非 AI 表格解析）。 |
-| 8 | （可选）`persist_daily_indices` → `market_style_indices.json`。 |
-| 9 | （可选）`send_report_email` 发送完整报告。 |
+| 4 | `call_llm`；`_ensure_summary_line`、可选 **`append_core_stocks_and_plan_if_missing`**、**`_ensure_dragon_report_sections`**。 |
+| 5 | （可选）**`append_historical_similarity_block`**。 |
+| 6 | **`_last_news_push_prefix`** 经截断后置于正文最前；**`append_replay_viewpoint_footer`**；写入 `result` 与 `status=completed`。 |
+| 7 | **`append_daily_top_pool`** → `watchlist_records.json`（程序池，非 AI 表格解析）。 |
+| 8 | （可选）**`persist_daily_indices`** → `market_style_indices.json`。 |
+| 9 | （可选）**`send_report_email`** 发送完整报告。 |
 
 ---
 

@@ -16,6 +16,7 @@ import markdown
 from app.utils.email_template import (
     build_email_content_prefix,
     build_plain_text_email_header,
+    enhance_cid_images_in_html,
     markdown_to_email_html,
     render_email_template,
     should_skip_rich_email_prefix,
@@ -264,6 +265,8 @@ def send_report_email(
             ev_mail = dict(ev)
             ev_mail["content_prefix_html"] = content_prefix_html
             inner = markdown_to_email_html(md_src)
+            if inline_images:
+                inner = enhance_cid_images_in_html(inner, inline_images)
             final_html = render_email_template(inner, subject, ev_mail)
         else:
             inner = _markdown_to_html_fragment_legacy(raw_body)

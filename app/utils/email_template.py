@@ -108,6 +108,79 @@ def markdown_to_email_html(md_text: str) -> str:
     return enhance_html_tables_for_email(markdown_to_html(md_text))
 
 
+def _png_pixel_size(path: str) -> tuple[int, int] | None:
+    """读取 PNG IHDR 宽高（无 Pillow 依赖）。"""
+    try:
+        with open(path, "rb") as f:
+            if f.read(8) != b"\x89PNG\r\n\x1a\n":
+                return None
+            while True:
+                chunk_len = int.from_bytes(f.read(4), "big")
+                ctype = f.read(4)
+                data = f.read(chunk_len)
+                f.read(4)
+                if ctype == b"IHDR":
+                    w = int.from_bytes(data[0:4], "big")
+                    h = int.from_bytes(data[4:8], "big")
+                    return w, h
+                if ctype == b"IEND" or chunk_len == 0:
+                    break
+    except OSError:
+        return None
+    return None
+
+
+def enhance_cid_images_in_html(
+    html: str,
+    cid_paths: list[tuple[str, str]],
+    *,
+    max_display_width: int = 560,
+) -> str:
+    """
+    为 ``<img src="cid:...">`` 写入与 PNG 成比例的 width/height，减轻 Outlook 等客户端把图拉变形的问题。
+    """
+    if not html or not cid_paths:
+        return html or ""
+    safe_map: dict[str, str] = {}
+    for cid, pth in cid_paths:
+        if not cid or not pth:
+            continue
+        safe = re.sub(r"[^a-zA-Z0-9._-]", "", cid) or "img"
+        safe_map[safe] = pth
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        return html
+    soup = BeautifulSoup(html, "html.parser")
+    for img in soup.find_all("img"):
+        src = (img.get("src") or "").strip()
+        if not src.lower().startswith("cid:"):
+            continue
+        raw_cid = src[4:].strip()
+        safe_cid = re.sub(r"[^a-zA-Z0-9._-]", "", raw_cid) or ""
+        pth = safe_map.get(safe_cid)
+        if not pth or not os.path.isfile(pth):
+            continue
+        dim = _png_pixel_size(pth)
+        if not dim:
+            continue
+        nw, nh = dim
+        if nw <= 0 or nh <= 0:
+            continue
+        dw = min(nw, max_display_width)
+        dh = max(1, int(round(nh * (dw / float(nw)))))
+        img["width"] = str(dw)
+        img["height"] = str(dh)
+        img["border"] = "0"
+        prev = img.get("style") or ""
+        extra = (
+            "max-width:100%;width:auto;height:auto;display:block;margin:12px auto;"
+            "border-radius:8px;object-fit:contain;-ms-interpolation-mode:bicubic;"
+        )
+        img["style"] = (prev.rstrip("; ") + "; " + extra).strip()
+    return str(soup)
+
+
 def truncate_finance_news_push_prefix(
     text: str,
     *,
