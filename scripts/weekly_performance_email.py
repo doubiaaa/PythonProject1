@@ -168,9 +168,12 @@ def main() -> int:
             print(md)
             return 0
 
-        from app.services.watchlist_store import RECORDS_FILE, load_all_records
+        from app.services.watchlist_store import load_all_records
+        from app.utils.config_paths import watchlist_records_file
 
-        has_recs = os.path.isfile(RECORDS_FILE) and bool(load_all_records())
+        has_recs = os.path.isfile(watchlist_records_file()) and bool(
+            load_all_records()
+        )
 
         if has_recs and cm.get("enable_strategy_feedback_loop", True):
             try:
