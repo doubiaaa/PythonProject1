@@ -110,6 +110,30 @@ def _dashed_arrow(
     )
 
 
+def _dashed_line_segments(
+    ax,
+    points: list[tuple[float, float]],
+    *,
+    color: str = "#616161",
+    lw: float = 1.05,
+) -> None:
+    """虚折线（无箭头），用于绕行避免压住节点。"""
+    if len(points) < 2:
+        return
+    xs = [p[0] for p in points]
+    ys = [p[1] for p in points]
+    ax.plot(
+        xs,
+        ys,
+        linestyle=(0, (4, 3)),
+        color=color,
+        lw=lw,
+        solid_capstyle="round",
+        clip_on=False,
+        zorder=1,
+    )
+
+
 def _edge_label(ax, x: float, y: float, text: str, *, fs: float = 6.2) -> None:
     ax.text(
         x,
@@ -431,6 +455,8 @@ def save_readme_business_overview_png(out_path: str, *, dpi: int = 240) -> None:
     """
     README「业务全景」Mermaid 的静态 PNG：日度主链 + 周度闭环 + 两条虚线关联。
     不含已移除的「DeepSeek 增强四段」与「程序智能校验与决策摘要」节点。
+
+    布局：日度列靠左、周度列靠右，留出中间走廊；「五桶权重→prompt」用折线虚线，避免横穿节点。
     """
     import matplotlib.pyplot as plt
     from matplotlib import patches
@@ -441,68 +467,72 @@ def save_readme_business_overview_png(out_path: str, *, dpi: int = 240) -> None:
         title_fc="#e3f2fd",
         title_ec="#1565c0",
     )
-    GAP = 1.05
-    fig_w, fig_h = 10.5, 15.2
+    GAP = 1.15
+    bh = 3.65
+    bw = 26.0
+    bw_w = 21.5
+    # 更高画布，避免周度列与日度列在垂直方向挤在一起
+    fig_w, fig_h = 11.0, 17.0
+    y_max = 118.0
     fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=dpi)
     ax.set_xlim(0, 100)
-    ax.set_ylim(0, 100)
+    ax.set_ylim(0, y_max)
     ax.axis("off")
     fig.patch.set_facecolor(pal.bg)
     ax.set_facecolor(pal.bg)
 
     cx = 50.0
-    y = 97.5
-    h_t = 3.6
+    y_title = 114.0
+    h_t = 3.5
     _rounded_box(
         ax,
-        (cx, y),
-        92,
+        (cx, y_title),
+        94,
         h_t,
         "业务全景 · 日度复盘 / 周度闭环（与 README Mermaid 一致）",
-        fs=9.6,
+        fs=9.4,
         fc=pal.title_fc,
         ec=pal.title_ec,
     )
 
     daily_rect = patches.FancyBboxPatch(
-        (6.0, 14.0),
-        56.0,
-        78.0,
-        boxstyle="round,pad=0.02,rounding_size=0.8",
+        (3.5, 8.0),
+        50.5,
+        102.0,
+        boxstyle="round,pad=0.02,rounding_size=0.85",
         linewidth=1.0,
         edgecolor="#90caf9",
         facecolor="#e3f2fd",
-        alpha=0.35,
+        alpha=0.32,
         zorder=0,
     )
     weekly_rect = patches.FancyBboxPatch(
-        (64.0, 14.0),
-        30.0,
-        78.0,
-        boxstyle="round,pad=0.02,rounding_size=0.8",
+        (56.5, 8.0),
+        40.0,
+        102.0,
+        boxstyle="round,pad=0.02,rounding_size=0.85",
         linewidth=1.0,
         edgecolor="#81c784",
         facecolor="#e8f5e9",
-        alpha=0.4,
+        alpha=0.38,
         zorder=0,
     )
     ax.add_patch(daily_rect)
     ax.add_patch(weekly_rect)
-    ax.text(34.0, 90.8, "日度复盘", ha="center", fontsize=8.4, color="#0d47a1", weight="bold")
-    ax.text(79.0, 90.8, "周度闭环", ha="center", fontsize=8.4, color="#1b5e20", weight="bold")
+    ax.text(28.5, 107.5, "日度复盘", ha="center", fontsize=8.5, color="#0d47a1", weight="bold", zorder=2)
+    ax.text(78.0, 107.5, "周度闭环", ha="center", fontsize=8.5, color="#1b5e20", weight="bold", zorder=2)
 
-    bw = 30.0
-    bh = 4.2
-    fs = 6.55
-    y_a = 86.0
-    x_b, x_a = 22.0, 46.0
+    fs = 6.45
+    x_chain = 33.0
+    x_b, x_a = 13.5, 33.0
+    y_a = 102.0
     _rounded_box(
         ax,
         (x_b, y_a),
-        18.0,
+        17.0,
         bh,
         "断点恢复\n可选",
-        fs=5.9,
+        fs=5.85,
         fc="#fff3e0",
         ec="#ef6c00",
     )
@@ -516,7 +546,7 @@ def save_readme_business_overview_png(out_path: str, *, dpi: int = 240) -> None:
         fc="#e3f2fd",
         ec="#1565c0",
     )
-    _dashed_arrow(ax, x_b + 9.0, y_a, x_a - bw / 2 + 0.5, y_a)
+    _dashed_arrow(ax, x_b + 8.5, y_a, x_a - bw / 2 + 0.5, y_a)
 
     chain_labels = [
         "分离确认与\n要闻映射",
@@ -525,7 +555,6 @@ def save_readme_business_overview_png(out_path: str, *, dpi: int = 240) -> None:
         "摘要与龙头\n章节校验",
         "历史相似 / 要闻前缀\n/ 文末附图",
     ]
-    x_chain = 46.0
     y_cur = y_a - bh / 2 - GAP - bh / 2
     centers: list[tuple[float, float]] = []
     for i, lab in enumerate(chain_labels):
@@ -538,33 +567,44 @@ def save_readme_business_overview_png(out_path: str, *, dpi: int = 240) -> None:
             _arrow(ax, x_chain, py - bh / 2, x_chain, y_cur + bh / 2)
         y_cur = y_cur - bh - GAP
 
-    x_h, x_w = 34.0, 64.0
+    x_h = 19.5
+    x_w = 77.0
     y_g = centers[-1][1]
     g_bot = y_g - bh / 2
     y_hw = y_g - bh / 2 - GAP - bh / 2
     _rounded_box(
         ax,
         (x_h, y_hw),
-        26.0,
+        24.0,
         bh,
         "龙头池存档 ·\n风格指数 · 邮件",
-        fs=6.2,
+        fs=6.0,
         fc="#e8eaf6",
         ec="#4527a0",
     )
     _rounded_box(
         ax,
         (x_w, y_hw),
-        26.0,
+        bw_w,
         bh,
         "程序统计周报\nMarkdown",
-        fs=6.2,
+        fs=6.0,
         fc="#c8e6c9",
         ec="#2e7d32",
     )
     _arrow(ax, x_chain, g_bot, x_h, y_hw + bh / 2)
-    _dashed_arrow(ax, x_chain, g_bot, x_w, y_hw + bh / 2)
-    _edge_label(ax, 56.0, (g_bot + y_hw) / 2 + 0.8, "watchlist", fs=5.8)
+    # G → W1：折线经中间走廊（先横移再落到 W1 左侧），避免斜穿两列
+    half_ww = bw_w / 2
+    _dashed_line_segments(
+        ax,
+        [
+            (x_chain + bw / 2 + 0.3, g_bot),
+            (54.0, g_bot),
+            (54.0, y_hw),
+        ],
+    )
+    _dashed_arrow(ax, 54.0, y_hw, x_w - half_ww - 0.2, y_hw)
+    _edge_label(ax, 58.5, (g_bot + y_hw) / 2, "watchlist", fs=5.7)
 
     weekly_rest = [
         "可选大模型附录",
@@ -578,10 +618,10 @@ def save_readme_business_overview_png(out_path: str, *, dpi: int = 240) -> None:
         _rounded_box(
             ax,
             (x_w, y_w),
-            26.0,
+            bw_w,
             bh,
             wlab,
-            fs=6.0 if j < 2 else 5.85,
+            fs=5.95 if j < 2 else 5.75,
             fc="#e8f5e9",
             ec="#388e3c",
         )
@@ -591,20 +631,30 @@ def save_readme_business_overview_png(out_path: str, *, dpi: int = 240) -> None:
         y_w = y_w - bh - GAP
 
     x_e, y_e = centers[2]
-    w3_x, w3_y = w_centers[1]
-    _dashed_arrow(ax, w3_x, w3_y - bh / 2, x_e, y_e + bh / 2)
-    _edge_label(ax, 52.0, (w3_y + y_e) / 2 - 0.5, "五桶权重 → prompt", fs=5.8)
+    _w3_x, w3_y = w_centers[1]
+    half_w = bw_w / 2
+    y_e_top = y_e + bh / 2
+    # 折线：W3 右侧 → 右缘竖直抬升到 E 顶高 → 水平指向 E（不穿过中间蓝框）
+    x_r = 96.0
+    w3_right = _w3_x + half_w
+    y_lane = y_e_top + 0.45
+    _dashed_line_segments(
+        ax,
+        [(w3_right, w3_y), (x_r, w3_y), (x_r, y_lane)],
+    )
+    _dashed_arrow(ax, x_r, y_lane, x_chain + bw / 2 - 0.25, y_lane)
+    _edge_label(ax, 90.0, (w3_y + y_lane) / 2, "五桶权重 → prompt", fs=5.4)
 
     ax.text(
         50.0,
-        5.5,
+        3.8,
         "实线：主执行顺序；灰虚线：数据/权重回流。"
         " 不含 DeepSeek 增强四段与 llm_intel（与当前 ReplayTask 一致）。",
         ha="center",
         va="center",
-        fontsize=6.0,
+        fontsize=5.85,
         color="#616161",
-        linespacing=1.15,
+        linespacing=1.12,
     )
 
     parent = os.path.dirname(out_path)
