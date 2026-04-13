@@ -557,6 +557,9 @@ def build_six_section_catalog(
     lines.append("### 1.2 市场数据概括\n\n")
     lines.append("| 项目 | 内容 |\n|------|------|\n")
     lines.append(f"| 涨跌停 | 涨停 **{zt_count}** / 跌停 **{dt_count}** |\n")
+    lines.append(
+        f"| 炸板 | **{zb_count}** 只 · 炸板率 **{zhaban_rate:.2f}%**（炸 / (涨停+炸)） |\n"
+    )
     if up_n is not None and down_n is not None:
         lines.append(f"| 涨跌家数（全 A） | 涨 **{up_n}** / 跌 **{down_n}** |\n")
     if max_lb > 0:

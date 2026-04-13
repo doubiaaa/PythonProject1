@@ -17,8 +17,19 @@ def build_program_anomaly_hints(data_fetcher: Any) -> str:
     lines: list[str] = []
     kpi = getattr(data_fetcher, "_last_email_kpi", None) or {}
     zh = kpi.get("zhaban_rate")
-    if zh is not None and float(zh) >= 0.35:
-        lines.append(f"- **高炸板率**：程序口径炸板率 **{float(zh):.1%}**（偏高，情绪分歧或封板质量差）。")
+    if zh is not None:
+        try:
+            zf = float(zh)
+        except (TypeError, ValueError):
+            zf = None
+        if zf is not None and zf == zf:
+            if 0 < zf < 1:
+                zf *= 100.0
+            if zf >= 35.0:
+                lines.append(
+                    f"- **高炸板率**：程序口径炸板率 **{zf:.1f}%**"
+                    "（偏高，情绪分歧或封板质量差）。"
+                )
     pr = kpi.get("premium")
     if pr is not None:
         if float(pr) < 0:

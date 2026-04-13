@@ -724,8 +724,7 @@ class DataFetcher:
         if not td:
             return True
         ds = str(date)[:8]
-        if ds > td[-1]:
-            return False
+        # 不复用「ds > td[-1] 直接 False」：日历偶发滞后半天时仍会误跳过炸板池，导致炸板率恒为 0
         valid = [x for x in td if x <= ds]
         if not valid:
             return False

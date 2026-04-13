@@ -240,7 +240,7 @@ def build_kpi_card_html(kpi: dict[str, Any]) -> str:
         return ""
     zt = kpi.get("zt_count")
     dt = kpi.get("dt_count")
-    zb = kpi.get("zhaban_rate")
+    zb_raw = kpi.get("zhaban_rate")
     prem = kpi.get("premium")
     prem_note = kpi.get("premium_note") or ""
     prem_disp = (kpi.get("premium_display") or "").strip()
@@ -256,7 +256,23 @@ def build_kpi_card_html(kpi: dict[str, Any]) -> str:
 
     zt_html = f'<span style="color:#15803d;">{html.escape(str(zt))}</span>'
     dt_html = f'<span style="color:#b91c1c;">{html.escape(str(dt))}</span>'
-    zb_html = html.escape(f"{zb}%" if zb is not None else "—")
+
+    def _kpi_zhaban_pct(z: object) -> str | None:
+        if z is None:
+            return None
+        try:
+            v = float(z)
+        except (TypeError, ValueError):
+            return None
+        if v != v:  # NaN
+            return None
+        # KPI 约定为 0～100；兼容历史 0～1 小数
+        if 0 < v < 1:
+            v *= 100.0
+        return f"{v:.2f}"
+
+    _zb_pct = _kpi_zhaban_pct(zb_raw)
+    zb_html = html.escape(f"{_zb_pct}%" if _zb_pct is not None else "—")
     if prem_disp:
         prem_plain = prem_disp.replace("**", "")
         pcol = "#15803d" if prem is not None and float(prem) > 0 else "#64748b"
