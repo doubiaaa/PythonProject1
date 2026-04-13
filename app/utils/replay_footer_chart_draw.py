@@ -553,7 +553,7 @@ def save_readme_business_overview_png(out_path: str, *, dpi: int = 240) -> None:
         "可选风格探测",
         "build_prompt\n与 call_llm",
         "摘要与龙头\n章节校验",
-        "历史相似 / 要闻前缀\n/ 文末附图",
+        "要闻前缀\n/ 文末附图",
     ]
     y_cur = y_a - bh / 2 - GAP - bh / 2
     centers: list[tuple[float, float]] = []

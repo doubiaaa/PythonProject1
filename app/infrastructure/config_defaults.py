@@ -41,8 +41,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "email_max_subject_chars": 200,
     "report_title_template": "T+0 竞价复盘 · 对 {trade_date} 的复盘",
     "email_system_name": "T+0 竞价复盘系统",
-    "enable_historical_similarity": True,
-    "historical_similarity_lookback": 60,
     "market_summary_parallel_fetch": True,
     "fetch_parallel_max_workers": 8,
     "zhaban_percentile_lookback": 15,

@@ -19,7 +19,6 @@ REPLAY_PIPELINE_PHASES: tuple[str, ...] = (
     "llm_main_completion",
     "summary_and_section_rules",
     "report_builder_core_plan",
-    "historical_similarity_block",
     "news_prefix_truncate_and_prepend",
     "replay_viewpoint_footer",
     "persist_top_pool_and_style_indices",

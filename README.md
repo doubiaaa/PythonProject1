@@ -82,7 +82,7 @@ flowchart TB
         D[可选风格探测]
         E[build_prompt 与 call_llm]
         F[摘要与龙头章节校验]
-        G[历史相似 / 要闻前缀 / 文末附图]
+        G[要闻前缀 / 文末附图]
         H[龙头池存档 · 风格指数 · 邮件]
         B -.-> A
         A --> C --> D --> E --> F --> G --> H
@@ -119,7 +119,6 @@ flowchart TB
 | 建议仓位（动态） | `app/services/position_sizer.py` → `calc_position` | 与 **市场阶段**、近窗 **涨停家数 / 炸板率分位**、绝对炸板率挂钩的区间字符串（非固定 30%）。 |
 | 明日情绪推演 | `app/services/cycle_analyzer.py` → `sentiment_forecast` | 结合炸板率变化、溢价、跌停数的**定性**预判句，摘要中单列 **「程序·明日情绪推演」**。 |
 | 连板晋级率 | `app/services/ladder_stats.py` → `compute_promotion_rates_md` | **1→2 / 2→3 / 3→4** 文本表（昨日涨停池与今日涨停池对齐）。 |
-| 历史相似形态 | `app/services/historical_matcher.py` | 约半年窗口内 **3 个**最相似交易日及 **T+1～T+3** 结构快照；默认在免责声明前插入（`enable_historical_similarity`）。 |
 | 五 / 七节补全 | `app/services/report_builder.py` | 模型漏写 **「五、核心股聚焦」「七、明日预案」** 时按程序事实补块（可选 LLM 润色）。 |
 | 主 Prompt 与别名 | `config/replay_prompt_templates.py`、`app/services/llm_section_generator.py` | 固定章节与 **总龙头须来自 `top_dragon`/涨停池** 等硬性约束；后者为模板 re-export，便于检索。 |
 | 邮件标题与系统名 | `app/utils/config.py` | **`report_title_template`**（支持 `{trade_date}`）、**`email_system_name`**（如「T+0 竞价复盘系统」），与正文「当日复盘」语义一致。 |
@@ -142,12 +141,11 @@ flowchart TB
 | 6 | **风格稳定性探测**（`enable_style_stability_probe`，默认关）：`probe_style_stability` → `effective_weights_from_stability`；随后 **`replay_llm_spacing_sec` 睡眠**，再构建 Prompt。 |
 | 7 | **`build_prompt`**：含 `build_prompt_addon`（五桶）、`dragon_meta` JSON 块、分离块、要闻块、主模板 **`MAIN_REPLAY_PROMPT`**。 |
 | 8 | **`call_llm`** → **`_ensure_summary_line`**（用 `_last_market_phase`）→ **`append_core_stocks_and_plan_if_missing`**（可选）→ **`_ensure_dragon_report_sections`**；若返回体被识别为 API 失败载荷，附加说明而不误判为「缺章节」。 |
-| 9 | **`append_historical_similarity_block`**（默认开）：在 **免责声明** 前插入「历史相似形态回溯」（依赖多日涨停池拉取，略增耗时；见 **`enable_historical_similarity`**）。 |
-| 10 | **`_last_news_push_prefix`**：经 **`truncate_finance_news_push_prefix`**（`email_news_max_items`、`email_news_filter_prefix`）拼到正文**最前**（插在主长文与后续块之前）。 |
-| 11 | **`program_completed` 且 `top_pool`**：`append_daily_top_pool` → **`data/watchlist_records.json`**。 |
-| 12 | **`enable_daily_style_indices_persist`**：`persist_daily_indices` → **`data/market_style_indices.json`**。 |
-| 13 | **`append_replay_viewpoint_footer`**：在要闻前缀拼入之后，为定稿追加 **「每日必看 吾日三省吾身」** 区块（五人 PNG + **`replay_footer_commentary`** 解读 + 附录；邮件 **`inline_images`** 见 `replay_footer_inline_images`）。 |
-| 14 | **邮件**：`has_email_config` 时 **`send_report_email`**；`extra_vars` 含 **`report_banner_title`**（来自 `report_title_template`）、**`email_kpi`**（含大面、溢价文案、动态仓位等）、**`email_dragon_meta`**。失败路径同样可发信。 |
+| 9 | **`_last_news_push_prefix`**：经 **`truncate_finance_news_push_prefix`**（`email_news_max_items`、`email_news_filter_prefix`）拼到正文**最前**（插在主长文与后续块之前）。 |
+| 10 | **`program_completed` 且 `top_pool`**：`append_daily_top_pool` → **`data/watchlist_records.json`**。 |
+| 11 | **`enable_daily_style_indices_persist`**：`persist_daily_indices` → **`data/market_style_indices.json`**。 |
+| 12 | **`append_replay_viewpoint_footer`**：在要闻前缀拼入之后，为定稿追加 **「每日必看 吾日三省吾身」** 区块（五人 PNG + **`replay_footer_commentary`** 解读 + 附录；邮件 **`inline_images`** 见 `replay_footer_inline_images`）。 |
+| 13 | **邮件**：`has_email_config` 时 **`send_report_email`**；`extra_vars` 含 **`report_banner_title`**（来自 `report_title_template`）、**`email_kpi`**（含大面、溢价文案、动态仓位等）、**`email_dragon_meta`**。失败路径同样可发信。 |
 
 ---
 
@@ -281,7 +279,6 @@ flowchart TB
 | `email_app_version` | 邮件展示版本号。 |
 | `report_title_template` | 邮件/HTML 页眉主标题；支持占位符 **`{trade_date}`**（YYYYMMDD）。默认强调「对某日复盘」，与「次日竞价」策略名区分。 |
 | `email_system_name` | 页脚与模板中的系统展示名（如 **T+0 竞价复盘系统**）。 |
-| `enable_historical_similarity` | 是否在长文 **免责声明** 前插入「历史相似形态回溯」（会多拉历史日涨停池，略增耗时）。 |
 | `weekly_email_attach_charts` | 周报是否尝试附 `weights_trend.png`。 |
 | `cache_expire` | 通用缓存过期（秒）。 |
 | `retry_times` | DataFetcher 等网络重试（语义见代码）。 |
@@ -493,7 +490,7 @@ flowchart TB
 
 | 路径 | 说明 |
 |------|------|
-| `app/` | 业务包：`services/`（复盘、`data_fetcher`、策略、邮件；以及 **`market_kpi`**、**`news_fetcher`**、**`position_sizer`**、**`cycle_analyzer`**、**`ladder_stats`**、**`historical_matcher`** 等量化辅助）、`utils/`（`config`、`email_template`、`output_formatter`、`replay_viewpoint_footer`、`replay_footer_commentary`、`replay_footer_chart_draw`、`logger`、`disk_cache`）。 |
+| `app/` | 业务包：`services/`（复盘、`data_fetcher`、策略、邮件；以及 **`market_kpi`**、**`news_fetcher`**、**`position_sizer`**、**`cycle_analyzer`**、**`ladder_stats`** 等量化辅助）、`utils/`（`config`、`email_template`、`output_formatter`、`replay_viewpoint_footer`、`replay_footer_commentary`、`replay_footer_chart_draw`、`logger`、`disk_cache`）。 |
 | `config/` | `replay_prompt_templates.py`、`data_source_config.py`、`strategy_preference_config.py` 及包初始化。 |
 | `tests/` | `pytest` 用例。 |
 | `.github/workflows/` | `ci.yml`、`scheduled-nightly.yml`、`weekly-report.yml`、**`weekly-theory-review.yml`**、`deploy.yml`。 |

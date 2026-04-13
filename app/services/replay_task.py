@@ -398,14 +398,6 @@ class ReplayTask:
                 self.log("大模型未返回正文（限速/余额/网络等），已附加说明；请勿将「缺章节」提示理解为模型漏写")
             else:
                 self.log("报告首行与龙头模板章节已校验（必要时已补全/提示）")
-            try:
-                from app.services.historical_matcher import append_historical_similarity_block
-
-                result = append_historical_similarity_block(
-                    result, data_fetcher, actual_date
-                )
-            except Exception as ex:
-                self.log(f"历史相似形态回溯附加失败：{ex}")
 
             sum_line = _extract_summary_line(result)
             news_pre = (getattr(data_fetcher, "_last_news_push_prefix", None) or "").strip()

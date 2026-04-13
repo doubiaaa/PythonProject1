@@ -204,11 +204,10 @@ flowchart LR
 | 2b | `perform_separation_confirmation`（分时异动 +同板块/同梯队候选）；`analyze_finance_news` 叠加 **龙头池字面命中**；结果写入 prompt `meta_block`。 |
 | 3 | `build_prompt`：固定章节 + `build_prompt_addon` + 市场数据。 |
 | 4 | `call_llm`；`_ensure_summary_line`、可选 **`append_core_stocks_and_plan_if_missing`**、**`_ensure_dragon_report_sections`**。 |
-| 5 | （可选）**`append_historical_similarity_block`**。 |
-| 6 | **`_last_news_push_prefix`** 经截断后置于正文最前；**`append_replay_viewpoint_footer`**；写入 `result` 与 `status=completed`。 |
-| 7 | **`append_daily_top_pool`** → `watchlist_records.json`（程序池，非 AI 表格解析）。 |
-| 8 | （可选）**`persist_daily_indices`** → `market_style_indices.json`。 |
-| 9 | （可选）**`send_report_email`** 发送完整报告。 |
+| 5 | **`_last_news_push_prefix`** 经截断后置于正文最前；**`append_replay_viewpoint_footer`**；写入 `result` 与 `status=completed`。 |
+| 6 | **`append_daily_top_pool`** → `watchlist_records.json`（程序池，非 AI 表格解析）。 |
+| 7 | （可选）**`persist_daily_indices`** → `market_style_indices.json`。 |
+| 8 | （可选）**`send_report_email`** 发送完整报告。 |
 
 ---
 
