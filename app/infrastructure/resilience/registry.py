@@ -43,8 +43,12 @@ def get_circuit(name: str) -> "CircuitBreaker":
             block = (res.get("circuit_breaker") or {}).get(name) or {}
             if not isinstance(block, dict):
                 block = {}
-            ft = int(block.get("failure_threshold", 5))
-            rec = float(block.get("recovery_timeout_sec", 60))
+            # akshare：东财等接口在公网/CI 上易出现短时断连；默认阈值过低会误熔断
+            def_ft, def_rec = (5, 60.0)
+            if name == "akshare":
+                def_ft, def_rec = (24, 90.0)
+            ft = int(block.get("failure_threshold", def_ft))
+            rec = float(block.get("recovery_timeout_sec", def_rec))
             cb = CircuitBreaker(name, failure_threshold=ft, recovery_timeout_sec=rec)
         _registry[name] = cb
         return cb

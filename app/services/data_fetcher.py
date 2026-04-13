@@ -11,6 +11,7 @@ from typing import Optional, Tuple
 import akshare as ak
 import pandas as pd
 from requests.exceptions import ChunkedEncodingError, ConnectionError, Timeout
+from urllib3.exceptions import ProtocolError
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -57,7 +58,11 @@ def _parallel_fetch_workers() -> int:
         from app.utils.config import ConfigManager
 
         w = int(ConfigManager().get("fetch_parallel_max_workers", 8) or 8)
-        return max(2, min(16, w))
+        w = max(2, min(16, w))
+        # GitHub Actions 等同源 IP 高并发易被远端掐断；略降并行减轻 RemoteDisconnected
+        if os.environ.get("CI", "").strip().lower() in ("1", "true", "yes"):
+            w = min(w, 5)
+        return w
     except Exception:
         return 8
 
@@ -578,18 +583,21 @@ class DataFetcher:
 
     def fetch_with_retry(self, fetch_func, *args, **kwargs):
         """带重试：仅对连接/读超时类异常重试；其余一次失败即抛出。"""
+        ds = _data_source_cfg()
         attempts = max(
-            int(_data_source_cfg().get("retry_times", _dsc.AK_RETRY_ATTEMPTS)),
+            int(ds.get("retry_times", _dsc.AK_RETRY_ATTEMPTS)),
             self.retry_times + 1,
         )
-        max_w = float(_data_source_cfg().get("timeout", 8))
-        max_w = max(2.0, min(max_w, 32.0))
+        wait_min = float(ds.get("retry_wait_min_sec", _dsc.AK_RETRY_WAIT_MIN_SEC))
+        wait_max = float(ds.get("retry_wait_max_sec", _dsc.AK_RETRY_WAIT_MAX_SEC))
+        wait_min = max(1.0, wait_min)
+        wait_max = max(wait_min, min(wait_max, 120.0))
 
         @retry(
             stop=stop_after_attempt(attempts),
-            wait=wait_exponential(multiplier=1, min=2, max=max_w),
+            wait=wait_exponential(multiplier=1, min=wait_min, max=wait_max),
             retry=retry_if_exception_type(
-                (Timeout, ConnectionError, ChunkedEncodingError)
+                (Timeout, ConnectionError, ChunkedEncodingError, ProtocolError)
             ),
             reraise=True,
         )

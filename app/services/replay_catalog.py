@@ -63,14 +63,17 @@ def _is_yizi_row(row: pd.Series) -> bool:
 def _first_time_series_to_datetime(ser: pd.Series) -> pd.Series:
     """
     首次封板时间列：多为 HH:MM / HH:MM:SS，少数为完整时间戳。
-    用固定日期拼接时间字符串排序，避免 pd.to_datetime 逐元素推断格式告警。
+    用固定日期拼接时间字符串排序，避免 pd.to_datetime 无 format 时的推断告警。
     """
     t = ser.astype(str).str.replace("：", ":", regex=False).str.strip()
-    full = pd.to_datetime(t, errors="coerce")
     prefix = "2000-01-01 "
     t2 = pd.to_datetime(prefix + t, format="%Y-%m-%d %H:%M:%S", errors="coerce")
     t2 = t2.fillna(pd.to_datetime(prefix + t, format="%Y-%m-%d %H:%M", errors="coerce"))
-    return full.where(full.notna(), t2)
+    full_mask = t2.isna() & t.str.contains(r"\d{4}-\d{2}-\d{2}", regex=True, na=False)
+    full = pd.Series(pd.NaT, index=ser.index, dtype="datetime64[ns]")
+    if bool(full_mask.any()):
+        full = pd.to_datetime(t.where(full_mask), errors="coerce")
+    return t2.where(t2.notna(), full)
 
 
 def _md_cell(val: object, max_len: int = 40) -> str:
