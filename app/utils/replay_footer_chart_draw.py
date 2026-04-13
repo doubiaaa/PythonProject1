@@ -134,6 +134,127 @@ def _dashed_line_segments(
     )
 
 
+def _elbow_chain_arrow(
+    ax,
+    pts: list[tuple[float, float]],
+    *,
+    color: str = "#37474f",
+    lw: float = 1.05,
+    z: int = 2,
+) -> None:
+    """折线箭头：最后一段带箭头，前面为直线段（正交管线路由）。"""
+    if len(pts) < 2:
+        return
+    if len(pts) == 2:
+        ax.annotate(
+            "",
+            xy=pts[1],
+            xytext=pts[0],
+            arrowprops=dict(
+                arrowstyle="-|>",
+                color=color,
+                lw=lw,
+                shrinkA=0,
+                shrinkB=5,
+            ),
+            clip_on=False,
+            zorder=z,
+        )
+        return
+    for i in range(len(pts) - 2):
+        ax.plot(
+            [pts[i][0], pts[i + 1][0]],
+            [pts[i][1], pts[i + 1][1]],
+            color=color,
+            lw=lw,
+            solid_capstyle="round",
+            zorder=z,
+        )
+    ax.annotate(
+        "",
+        xy=pts[-1],
+        xytext=pts[-2],
+        arrowprops=dict(
+            arrowstyle="-|>",
+            color=color,
+            lw=lw,
+            shrinkA=0,
+            shrinkB=5,
+        ),
+        clip_on=False,
+        zorder=z,
+    )
+
+
+def _hub_fan_down(
+    ax,
+    cx: float,
+    y_from: float,
+    dests: list[tuple[float, float]],
+    *,
+    color: str = "#37474f",
+    lw: float = 1.05,
+    bus_frac: float = 0.42,
+) -> None:
+    """自 (cx,y_from) 经水平汇流层直角扇出到各箱顶 (bx, y_to)；减少斜线交叉。"""
+    if not dests:
+        return
+    y_hi = max(y for _, y in dests)
+    y_bus = y_from - (y_from - y_hi) * bus_frac
+    ax.plot(
+        [cx, cx],
+        [y_from, y_bus],
+        color=color,
+        lw=lw,
+        solid_capstyle="round",
+        zorder=2,
+    )
+    for bx, y_to in dests:
+        _elbow_chain_arrow(
+            ax, [(cx, y_bus), (bx, y_bus), (bx, y_to)], color=color, lw=lw
+        )
+
+
+def _fan_merge_up(
+    ax,
+    cx: float,
+    y_to: float,
+    sources: list[tuple[float, float]],
+    *,
+    color: str = "#37474f",
+    lw: float = 1.05,
+    bus_frac: float = 0.48,
+) -> None:
+    """多路箱底 (bx,y_from) 汇至中心顶 (cx,y_to)。"""
+    if not sources:
+        return
+    y_lo = min(y for _, y in sources)
+    y_bus = y_lo + (y_to - y_lo) * bus_frac
+    for bx, y_from in sources:
+        ax.plot(
+            [bx, bx, cx],
+            [y_from, y_bus, y_bus],
+            color=color,
+            lw=lw,
+            solid_capstyle="round",
+            zorder=2,
+        )
+    ax.annotate(
+        "",
+        xy=(cx, y_to),
+        xytext=(cx, y_bus),
+        arrowprops=dict(
+            arrowstyle="-|>",
+            color=color,
+            lw=lw,
+            shrinkA=0,
+            shrinkB=5,
+        ),
+        clip_on=False,
+        zorder=2,
+    )
+
+
 def _edge_label(ax, x: float, y: float, text: str, *, fs: float = 6.2) -> None:
     ax.text(
         x,
@@ -215,8 +336,8 @@ class FlowchartSpec:
     h_items: list[str] = field(default_factory=list)
     i_good: tuple[str, str] = ("交易正果", "")
     palette: FlowchartPalette = field(default_factory=FlowchartPalette)
-    fig_w_inch: float = 11.0
-    fig_h_inch: float = 26.0
+    fig_w_inch: float = 13.2
+    fig_h_inch: float = 22.0
     dpi: int = 280
     c_fs: float = 6.85
     e_fs: float = 7.0
@@ -297,8 +418,9 @@ def save_flowchart_png(spec: FlowchartSpec, out_path: str) -> None:
             )
             c_centers.append((xs[j], cy, bh_c / 2))
 
-    for bx, by, hh in c_centers:
-        _arrow(ax, cx, b_bot, bx, by + hh)
+    _hub_fan_down(
+        ax, cx, b_bot, [(bx, by + hh) for bx, by, hh in c_centers], color="#455a64"
+    )
 
     c_bottom = min(by - hh for _, by, hh in c_centers)
 
@@ -317,8 +439,9 @@ def save_flowchart_png(spec: FlowchartSpec, out_path: str) -> None:
     )
     d_top = d_y + h_d / 2
     d_bot = d_y - h_d / 2
-    for bx, by, hh in c_centers:
-        _arrow(ax, bx, by - hh, cx, d_top)
+    _fan_merge_up(
+        ax, cx, d_top, [(bx, by - hh) for bx, by, hh in c_centers], color="#455a64"
+    )
 
     ne = len(spec.e_items)
     groups_e = _split_indices(ne)
@@ -347,8 +470,9 @@ def save_flowchart_png(spec: FlowchartSpec, out_path: str) -> None:
             )
             e_centers.append((xs[j], cy, bh_e / 2))
 
-    for bx, by, hh in e_centers:
-        _arrow(ax, cx, d_bot, bx, by + hh)
+    _hub_fan_down(
+        ax, cx, d_bot, [(bx, by + hh) for bx, by, hh in e_centers], color="#455a64"
+    )
 
     e_bottom = min(by - hh for _, by, hh in e_centers)
 
@@ -368,8 +492,9 @@ def save_flowchart_png(spec: FlowchartSpec, out_path: str) -> None:
         ec=pal.f_ec,
     )
     f_top = f_y + h_f / 2
-    for bx, by, hh in e_centers:
-        _arrow(ax, bx, by - hh, cx, f_top)
+    _fan_merge_up(
+        ax, cx, f_top, [(bx, by - hh) for bx, by, hh in e_centers], color="#455a64"
+    )
 
     # G
     h_g = 5.0
@@ -414,8 +539,9 @@ def save_flowchart_png(spec: FlowchartSpec, out_path: str) -> None:
             )
             h_centers.append((xs[j], cy, bh_h / 2))
 
-    for bx, by, hh in h_centers:
-        _arrow(ax, cx, g_bot, bx, by + hh)
+    _hub_fan_down(
+        ax, cx, g_bot, [(bx, by + hh) for bx, by, hh in h_centers], color="#455a64"
+    )
 
     h_bottom = min(by - hh for _, by, hh in h_centers)
 
@@ -437,8 +563,9 @@ def save_flowchart_png(spec: FlowchartSpec, out_path: str) -> None:
         ec=pal.i_ec,
     )
     i_top = i_y + h_i / 2
-    for bx, by, hh in h_centers:
-        _arrow(ax, bx, by - hh, cx, i_top)
+    _fan_merge_up(
+        ax, cx, i_top, [(bx, by - hh) for bx, by, hh in h_centers], color="#455a64"
+    )
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     fig.savefig(
@@ -463,17 +590,17 @@ def save_readme_business_overview_png(out_path: str, *, dpi: int = 240) -> None:
 
     _configure_font()
     pal = FlowchartPalette(
-        bg="#fafafa",
+        bg="#f5f7fb",
         title_fc="#e3f2fd",
         title_ec="#1565c0",
     )
-    GAP = 1.15
-    bh = 3.65
+    GAP = 1.02
+    bh = 3.45
     bw = 26.0
     bw_w = 21.5
-    # 更高画布，避免周度列与日度列在垂直方向挤在一起
-    fig_w, fig_h = 11.0, 17.0
-    y_max = 118.0
+    # 横向略加宽、纵向压扁，整体更接近「展板」比例
+    fig_w, fig_h = 14.0, 11.2
+    y_max = 102.0
     fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=dpi)
     ax.set_xlim(0, 100)
     ax.set_ylim(0, y_max)
@@ -482,23 +609,23 @@ def save_readme_business_overview_png(out_path: str, *, dpi: int = 240) -> None:
     ax.set_facecolor(pal.bg)
 
     cx = 50.0
-    y_title = 114.0
-    h_t = 3.5
+    y_title = 98.0
+    h_t = 3.35
     _rounded_box(
         ax,
         (cx, y_title),
         94,
         h_t,
         "业务全景 · 日度复盘 / 周度闭环（与 README Mermaid 一致）",
-        fs=9.4,
+        fs=9.5,
         fc=pal.title_fc,
         ec=pal.title_ec,
     )
 
     daily_rect = patches.FancyBboxPatch(
-        (3.5, 8.0),
+        (3.5, 7.5),
         50.5,
-        102.0,
+        88.0,
         boxstyle="round,pad=0.02,rounding_size=0.85",
         linewidth=1.0,
         edgecolor="#90caf9",
@@ -507,9 +634,9 @@ def save_readme_business_overview_png(out_path: str, *, dpi: int = 240) -> None:
         zorder=0,
     )
     weekly_rect = patches.FancyBboxPatch(
-        (56.5, 8.0),
+        (56.5, 7.5),
         40.0,
-        102.0,
+        88.0,
         boxstyle="round,pad=0.02,rounding_size=0.85",
         linewidth=1.0,
         edgecolor="#81c784",
@@ -519,13 +646,13 @@ def save_readme_business_overview_png(out_path: str, *, dpi: int = 240) -> None:
     )
     ax.add_patch(daily_rect)
     ax.add_patch(weekly_rect)
-    ax.text(28.5, 107.5, "日度复盘", ha="center", fontsize=8.5, color="#0d47a1", weight="bold", zorder=2)
-    ax.text(78.0, 107.5, "周度闭环", ha="center", fontsize=8.5, color="#1b5e20", weight="bold", zorder=2)
+    ax.text(28.5, 92.5, "日度复盘", ha="center", fontsize=8.75, color="#0d47a1", weight="bold", zorder=2)
+    ax.text(78.0, 92.5, "周度闭环", ha="center", fontsize=8.75, color="#1b5e20", weight="bold", zorder=2)
 
-    fs = 6.45
+    fs = 6.55
     x_chain = 33.0
     x_b, x_a = 13.5, 33.0
-    y_a = 102.0
+    y_a = 87.0
     _rounded_box(
         ax,
         (x_b, y_a),
@@ -647,14 +774,14 @@ def save_readme_business_overview_png(out_path: str, *, dpi: int = 240) -> None:
 
     ax.text(
         50.0,
-        3.8,
+        3.2,
         "实线：主执行顺序；灰虚线：数据/权重回流。"
         " 不含 DeepSeek 增强四段与 llm_intel（与当前 ReplayTask 一致）。",
         ha="center",
         va="center",
-        fontsize=5.85,
-        color="#616161",
-        linespacing=1.12,
+        fontsize=6.15,
+        color="#546e7a",
+        linespacing=1.15,
     )
 
     parent = os.path.dirname(out_path)
@@ -704,33 +831,34 @@ def save_kebi_framework_png(out_path: str, *, dpi: int = 220) -> None:
         i_ec="#00695c",
     )
 
-    fig_w, fig_h = 11.8, 52.0
+    # 加宽、压扁画布比例，避免「细长条」变形；连线改为正交汇流
+    fig_w, fig_h = 15.5, 27.0
     fig, ax = plt.subplots(figsize=(fig_w, fig_h), dpi=dpi)
     ax.set_xlim(0, 100)
-    ax.set_ylim(0, 165)
+    ax.set_ylim(0, 128)
     ax.axis("off")
     fig.patch.set_facecolor(pal.bg)
     ax.set_facecolor(pal.bg)
 
     # —— A ——
-    y = 158.0
-    h_a = 5.0
+    y = 122.0
+    h_a = 4.2
     _rounded_box(
         ax,
         (cx, y),
         92,
         h_a,
         "帖子核心：情绪周期四阶段 × 龙头-补涨-切换-空仓 框架",
-        fs=10.0,
+        fs=10.2,
         fc=pal.title_fc,
         ec=pal.title_ec,
     )
     y_a_bot = y - h_a / 2
-    _arrow(ax, cx, y_a_bot - 0.1, cx, y_a_bot - GAP - 0.4)
+    _arrow(ax, cx, y_a_bot - 0.1, cx, y_a_bot - GAP - 0.35)
 
     # —— B ——
-    y = y_a_bot - GAP - 0.5 - 2.75
-    h_b = 5.5
+    y = y_a_bot - GAP - 0.45 - 2.45
+    h_b = 5.0
     _diamond_text(
         ax,
         (cx, y),
@@ -751,10 +879,10 @@ def save_kebi_framework_png(out_path: str, *, dpi: int = 220) -> None:
         "题材错判\n「过于在意题材内容，忽视题材出现的时机」",
         "扛单不止损\n「被套后死拿，等待解套」",
     ]
-    bh_c = 8.0
+    bh_c = 6.5
     groups_c = _split_indices(5)
-    row_step_c = bh_c + 1.05
-    y_c1 = b_bot - GAP - 1.1 - bh_c / 2
+    row_step_c = bh_c + 0.88
+    y_c1 = b_bot - GAP - 0.95 - bh_c / 2
     row_c_y = [y_c1, y_c1 - row_step_c]
     c_centers: list[tuple[float, float, float]] = []
     bw = 26.0
@@ -768,31 +896,33 @@ def save_kebi_framework_png(out_path: str, *, dpi: int = 220) -> None:
                 bw,
                 bh_c,
                 c_items[ii],
-                fs=6.55,
+                fs=6.35,
                 fc=pal.c_fc,
                 ec=pal.c_ec,
             )
             c_centers.append((xs[j], cy, bh_c / 2))
-    for bx, by, hh in c_centers:
-        _arrow(ax, cx, b_bot, bx, by + hh)
+    _hub_fan_down(
+        ax, cx, b_bot, [(bx, by + hh) for bx, by, hh in c_centers], color="#455a64"
+    )
     c_bottom = min(by - hh for _, by, hh in c_centers)
 
     # —— D ——
-    h_d = 3.9
-    d_y = c_bottom - GAP - h_d / 2 - 0.25
+    h_d = 3.5
+    d_y = c_bottom - GAP - h_d / 2 - 0.2
     _rounded_box(
         ax,
         (cx, d_y),
         44,
         h_d,
         "造成的行为后果",
-        fs=8.9,
+        fs=8.5,
         fc=pal.d_fc,
         ec=pal.d_ec,
     )
     d_top, d_bot = d_y + h_d / 2, d_y - h_d / 2
-    for bx, by, hh in c_centers:
-        _arrow(ax, bx, by - hh, cx, d_top)
+    _fan_merge_up(
+        ax, cx, d_top, [(bx, by - hh) for bx, by, hh in c_centers], color="#455a64"
+    )
 
     e_items = [
         "高位接盘\n信了趋势故事后不止损",
@@ -801,10 +931,10 @@ def save_kebi_framework_png(out_path: str, *, dpi: int = 220) -> None:
         "错过主升\n在错误的题材上浪费时间",
         "一波大亏\n利润回吐甚至爆仓",
     ]
-    bh_e = 7.1
+    bh_e = 5.85
     groups_e = _split_indices(5)
-    row_step_e = bh_e + 1.05
-    y_e1 = d_bot - GAP - 1.0 - bh_e / 2
+    row_step_e = bh_e + 0.88
+    y_e1 = d_bot - GAP - 0.85 - bh_e / 2
     row_e_y = [y_e1, y_e1 - row_step_e]
     e_centers: list[tuple[float, float, float]] = []
     for ri, idxs in enumerate(groups_e):
@@ -817,35 +947,37 @@ def save_kebi_framework_png(out_path: str, *, dpi: int = 220) -> None:
                 bw,
                 bh_e,
                 e_items[ii],
-                fs=6.75,
+                fs=6.45,
                 fc=pal.e_fc,
                 ec=pal.e_ec,
             )
             e_centers.append((xs[j], cy, bh_e / 2))
-    for bx, by, hh in e_centers:
-        _arrow(ax, cx, d_bot, bx, by + hh)
+    _hub_fan_down(
+        ax, cx, d_bot, [(bx, by + hh) for bx, by, hh in e_centers], color="#455a64"
+    )
     e_bottom = min(by - hh for _, by, hh in e_centers)
 
     # —— F ——
-    h_f = 5.2
-    f_y = e_bottom - GAP - h_f / 2 - 0.2
+    h_f = 4.6
+    f_y = e_bottom - GAP - h_f / 2 - 0.15
     _rounded_box(
         ax,
         (cx, f_y),
         90,
         h_f,
         "交易恶果\n无法完成从初级盈利到高阶悟道的跨越",
-        fs=8.3,
+        fs=8.0,
         fc=pal.f_fc,
         ec=pal.f_ec,
     )
     f_top = f_y + h_f / 2
-    for bx, by, hh in e_centers:
-        _arrow(ax, bx, by - hh, cx, f_top)
+    _fan_merge_up(
+        ax, cx, f_top, [(bx, by - hh) for bx, by, hh in e_centers], color="#455a64"
+    )
 
     # —— G（双行）——
-    h_g = 7.0
-    g_y = f_y - h_f / 2 - GAP - h_g / 2 - 0.2
+    h_g = 6.2
+    g_y = f_y - h_f / 2 - GAP - h_g / 2 - 0.15
     _diamond_text(
         ax,
         (cx, g_y),
@@ -866,10 +998,10 @@ def save_kebi_framework_png(out_path: str, *, dpi: int = 220) -> None:
         "择时第一\n「题材内容不重要，题材出现的时机才是重点」",
         "杀伐果断\n「超短做隔日，不及预期就走人」",
     ]
-    bh_h = 8.4
+    bh_h = 6.85
     groups_h = _split_h(5)
-    row_step_h = bh_h + 1.0
-    y_h1 = g_bot - GAP - 1.0 - bh_h / 2
+    row_step_h = bh_h + 0.88
+    y_h1 = g_bot - GAP - 0.88 - bh_h / 2
     row_h_y = [y_h1, y_h1 - row_step_h]
     h_centers: list[tuple[float, float, float]] = []
     bw_h = 28.0
@@ -883,18 +1015,19 @@ def save_kebi_framework_png(out_path: str, *, dpi: int = 220) -> None:
                 bw_h,
                 bh_h,
                 h_items[ii],
-                fs=6.55,
+                fs=6.3,
                 fc=pal.h_fc,
                 ec=pal.h_ec,
             )
             h_centers.append((xs[j], cy, bh_h / 2))
-    for bx, by, hh in h_centers:
-        _arrow(ax, cx, g_bot, bx, by + hh)
+    _hub_fan_down(
+        ax, cx, g_bot, [(bx, by + hh) for bx, by, hh in h_centers], color="#455a64"
+    )
     h_bottom = min(by - hh for _, by, hh in h_centers)
 
     # —— I 菱形（情绪周期应用）——
-    h_id = 5.5
-    id_y = h_bottom - GAP - h_id / 2 - 0.45
+    h_id = 4.85
+    id_y = h_bottom - GAP - h_id / 2 - 0.38
     _diamond_text(
         ax,
         (cx, id_y),
@@ -908,8 +1041,9 @@ def save_kebi_framework_png(out_path: str, *, dpi: int = 220) -> None:
     )
     id_top = id_y + h_id / 2
     id_bot = id_y - h_id / 2
-    for bx, by, hh in h_centers:
-        _arrow(ax, bx, by - hh, cx, id_top)
+    _fan_merge_up(
+        ax, cx, id_top, [(bx, by - hh) for bx, by, hh in h_centers], color="#455a64"
+    )
 
     # —— I1～I4 ——
     stage_labels = [
@@ -919,8 +1053,8 @@ def save_kebi_framework_png(out_path: str, *, dpi: int = 220) -> None:
         "阶段四\n主跌阶段",
     ]
     xs4 = (14.0, 38.0, 62.0, 86.0)
-    h_st = 5.0
-    y_st = id_bot - GAP - h_st / 2 - 0.35
+    h_st = 4.15
+    y_st = id_bot - GAP - h_st / 2 - 0.3
     st_centers: list[tuple[float, float, float]] = []
     for i, lab in enumerate(stage_labels):
         _rounded_box(
@@ -929,13 +1063,19 @@ def save_kebi_framework_png(out_path: str, *, dpi: int = 220) -> None:
             22.0,
             h_st,
             lab,
-            fs=7.0,
+            fs=6.75,
             fc="#e1f5fe",
             ec="#0277bd",
         )
         st_centers.append((xs4[i], y_st, h_st / 2))
-    for bx, by, hh in st_centers:
-        _arrow(ax, cx, id_bot, bx, by + hh)
+    _hub_fan_down(
+        ax,
+        cx,
+        id_bot,
+        [(bx, by + hh) for bx, by, hh in st_centers],
+        color="#455a64",
+        bus_frac=0.38,
+    )
 
     # —— J1～J4 策略块 ——
     j_texts = [
@@ -944,10 +1084,10 @@ def save_kebi_framework_png(out_path: str, *, dpi: int = 220) -> None:
         "策略：空仓/轻仓\n仓位≤10%\n不建议博弈穿越，性价比太低\n高位震荡期轻仓应对",
         "策略：空仓/尾盘轻仓试错\n仓位≤10%\n主跌后尾盘找买点\n主跌后必定有切换的蛛丝马迹",
     ]
-    h_j = 14.5
+    h_j = 10.2
     w_j = 22.5
     st_bottom = min(sy - sh for (_, sy, sh) in st_centers)
-    y_j = st_bottom - GAP - h_j / 2 - 0.35
+    y_j = st_bottom - GAP - h_j / 2 - 0.3
     j_centers: list[tuple[float, float, float]] = []
     for i, txt in enumerate(j_texts):
         _rounded_box(
@@ -956,33 +1096,36 @@ def save_kebi_framework_png(out_path: str, *, dpi: int = 220) -> None:
             w_j,
             h_j,
             txt,
-            fs=5.45,
+            fs=5.05,
             fc="#fff8e1",
             ec="#ff8f00",
         )
         j_centers.append((xs4[i], y_j, h_j / 2))
     for (sx, sy, shh), (jx, jy, jhh) in zip(st_centers, j_centers):
-        _arrow(ax, sx, sy - shh, jx, jy + jhh)
+        _elbow_chain_arrow(
+            ax, [(sx, sy - shh), (jx, sy - shh), (jx, jy + jhh)], color="#455a64"
+        )
 
     # —— K ——
-    h_k = 7.0
+    h_k = 5.6
     j_bottom = min(jy - jhh for (_, jy, jhh) in j_centers)
-    y_k = j_bottom - GAP - h_k / 2 - 0.35
-    if y_k < 4.0:
-        y_k = 4.0
+    y_k = j_bottom - GAP - h_k / 2 - 0.28
+    if y_k < 3.5:
+        y_k = 3.5
     _rounded_box(
         ax,
         (cx, y_k),
         94,
         h_k,
         "交易正果\n四年从数万元做到上亿，半年500万做到2300万",
-        fs=8.6,
+        fs=8.2,
         fc=pal.i_fc,
         ec=pal.i_ec,
     )
     k_top = y_k + h_k / 2
-    for bx, by, hh in j_centers:
-        _arrow(ax, bx, by - hh, cx, k_top)
+    _fan_merge_up(
+        ax, cx, k_top, [(bx, by - hh) for bx, by, hh in j_centers], color="#455a64"
+    )
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     fig.savefig(
