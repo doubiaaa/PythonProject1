@@ -30,13 +30,14 @@ permissions:
 jobs:
   replay:
     runs-on: ubuntu-latest
-    timeout-minutes: 90  # 数据拉取 + 多轮 LLM，避免慢网络/限流时 60min 被截断
+    # GitHub-hosted 单 job 上限 360min；数据 + 多轮 LLM 偶发超 90min，预留余量
+    timeout-minutes: 180
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 1
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
           cache: pip
