@@ -248,9 +248,9 @@ def build_kpi_card_html(kpi: dict[str, Any]) -> str:
     def cell(label: str, val_html: str, *, accent: str = "#0f172a") -> str:
         return (
             f'<td width="50%" style="padding:10px 12px;vertical-align:top;border:1px solid #e2e8f0;'
-            f'background:#ffffff;">'
-            f'<div style="font-size:22px;font-weight:700;color:{accent};line-height:1.2;">{val_html}</div>'
-            f'<div style="font-size:11px;color:#64748b;margin-top:6px;letter-spacing:0.04em;">{html.escape(label)}</div>'
+            f'background:#ffffff;word-wrap:break-word;overflow-wrap:break-word;min-width:0;">'
+            f'<div class="kpi-val" style="font-size:22px;font-weight:700;color:{accent};line-height:1.25;">{val_html}</div>'
+            f'<div style="font-size:12px;color:#64748b;margin-top:6px;letter-spacing:0.03em;">{html.escape(label)}</div>'
             f"</td>"
         )
 
@@ -297,7 +297,7 @@ def build_kpi_card_html(kpi: dict[str, Any]) -> str:
         '<div style="margin:0 0 16px;padding:0;">'
         '<div style="font-size:11px;font-weight:700;color:#64748b;letter-spacing:0.08em;margin:0 0 10px;">'
         "MARKET KPI · 程序侧快照</div>"
-        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
+        '<table role="presentation" class="kpi-email-grid" width="100%" cellpadding="0" cellspacing="0" '
         'style="border-collapse:collapse;border-radius:10px;overflow:hidden;border:1px solid #e2e8f0;">'
         "<tr>"
         + cell("涨停家数", zt_html, accent="#15803d")
@@ -307,7 +307,10 @@ def build_kpi_card_html(kpi: dict[str, Any]) -> str:
         + cell("昨日涨停溢价", prem_html)
         + "</tr><tr>"
         + cell("大面家数（亏钱效应）", big_html, accent="#b45309")
-        + cell("建议仓位（程序区间）", f'<span style="font-size:18px;">{pos_s}</span>')
+        + cell(
+            "建议仓位（程序区间）",
+            f'<span class="kpi-val" style="font-size:18px;line-height:1.3;">{pos_s}</span>',
+        )
         + "</tr></table></div>"
     )
 
@@ -355,12 +358,12 @@ def build_email_content_prefix(
     title = html.escape(str(ev.get("report_banner_title") or "市场竞价深度复盘报告"))
     sub = html.escape(str(ev.get("header_date") or "").strip() or "（见页头日期）")
     parts: list[str] = [
-        '<div style="margin:0 0 18px;padding:18px 20px;border-radius:12px;border:1px solid #e2e8f0;'
-        'background:linear-gradient(165deg,#f1f5f9 0%,#ffffff 60%);">'
+        '<div class="email-report-banner" style="margin:0 0 18px;padding:18px 20px;border-radius:12px;border:1px solid #e2e8f0;'
+        'background:linear-gradient(165deg,#f1f5f9 0%,#ffffff 60%);word-wrap:break-word;">'
         '<div style="font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:#64748b;margin-bottom:8px;">'
         "Market review · 系统生成</div>"
-        f'<div style="font-size:20px;font-weight:700;color:#0f172a;line-height:1.25;letter-spacing:-0.02em;">{title}</div>'
-        f'<div style="font-size:13px;color:#64748b;margin-top:10px;">{sub}</div>'
+        f'<div class="email-report-title" style="font-size:20px;font-weight:700;color:#0f172a;line-height:1.3;letter-spacing:-0.02em;word-break:break-word;">{title}</div>'
+        f'<div class="email-report-sub" style="font-size:14px;color:#64748b;margin-top:10px;line-height:1.55;word-break:break-word;">{sub}</div>'
         "</div>"
     ]
 
@@ -442,9 +445,10 @@ def build_ladder_distribution_email_html(
         'background:linear-gradient(165deg,#f8fafc 0%,#ffffff 100%);">'
         '<div style="font-size:11px;font-weight:700;color:#3730a3;letter-spacing:0.06em;margin:0 0 10px;">'
         "LADDER · 连板梯队历史对比</div>"
-        f'<p style="margin:0 0 10px;font-size:12px;color:#475569;">情绪倾向：<strong>{trend}</strong></p>'
+        f'<p style="margin:0 0 10px;font-size:13px;line-height:1.55;color:#475569;">情绪倾向：<strong>{trend}</strong></p>'
+        '<div class="email-table-scroll email-table-scroll-hist" style="width:100%;max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 0 14px;">'
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
-        'style="border-collapse:collapse;font-size:12px;margin:0 0 14px;">'
+        'style="border-collapse:collapse;font-size:12px;min-width:520px;">'
         "<thead><tr>"
         '<th style="border:1px solid #e2e8f0;padding:6px 8px;background:#f1f5f9;">日期</th>'
         '<th style="border:1px solid #e2e8f0;padding:6px 8px;background:#f1f5f9;">涨停</th>'
@@ -456,9 +460,10 @@ def build_ladder_distribution_email_html(
         '<th style="border:1px solid #e2e8f0;padding:6px 8px;background:#f1f5f9;">最高</th>'
         "</tr></thead><tbody>"
         + "".join(rows_html)
-        + "</tbody></table>"
-        '<div style="font-size:11px;font-weight:700;color:#64748b;margin:0 0 8px;">'
+        + "</tbody></table></div>"
+        '<div style="font-size:12px;font-weight:700;color:#64748b;margin:0 0 8px;line-height:1.4;">'
         "当日梯队分布（条形长度为相对值，便于一眼对比）</div>"
+        '<div class="email-table-scroll" style="width:100%;max-width:100%;overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0 0 4px;">'
         '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" '
         'style="border-collapse:collapse;font-size:12px;">'
         "<thead><tr>"
@@ -467,7 +472,7 @@ def build_ladder_distribution_email_html(
         '<th style="border:1px solid #e2e8f0;padding:6px 8px;background:#f1f5f9;width:22%;">数量</th>'
         "</tr></thead><tbody>"
         + "".join(bars)
-        + "</tbody></table></div>"
+        + "</tbody></table></div></div>"
     )
 
 

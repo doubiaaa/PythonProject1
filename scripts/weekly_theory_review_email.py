@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-每周六温习邮件：单独发送「五人理论框架」全文（图 + 解读 + 附录），与日复盘独立。
+每周六温习邮件：单独发送「五人理论框架」全文（表格式解读 + 附录），与日复盘独立。
 
 用法：
   python scripts/weekly_theory_review_email.py
 
-依赖：与日复盘相同，需配置 SMTP；正文含 **六层架构图**（若存在 `assets/architecture_six_layers.png`）+ **五人理论**五张附图。
+依赖：与日复盘相同，需配置 SMTP；正文为 **六层架构表** + **五人理论** Markdown 表格（无流程图 PNG）。
 
 定时：
   - GitHub Actions：见 .github/workflows/weekly-theory-review.yml（北京时间周六 09:00）
@@ -43,7 +43,7 @@ def main() -> int:
 
     body = build_theory_review_markdown()
     if not body.strip():
-        print("[weekly-theory] 正文为空（assets 下图缺失？），跳过")
+        print("[weekly-theory] 正文为空（replay_footer_commentary 缺失？），跳过")
         return 0
 
     date_s = _beijing_today_str()
@@ -61,7 +61,7 @@ def main() -> int:
         subj,
         body,
         extra_vars=extra,
-        inline_images=replay_footer_inline_images_weekly(),
+        inline_images=replay_footer_inline_images_weekly(),  # 表格式文末，无 CID图
     )
     if ok and msg != "skipped":
         print(f"[weekly-theory] 已发送：{subj}")

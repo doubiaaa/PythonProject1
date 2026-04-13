@@ -71,38 +71,19 @@
 
 ## 业务全景
 
-系统存在两条可并行理解的主线：**日度复盘**（`ReplayTask` + `nightly_replay.py`）与 **周度闭环**（`weekly_performance_email.py` + `strategy_preference`）。
+系统存在两条可并行理解的主线：**日度复盘**（`ReplayTask` + `nightly_replay.py`）与 **周度闭环**（`weekly_performance_email.py` + `strategy_preference`）。下表与邮件/移动端展示一致，避免流程图缩放失真。
 
-```mermaid
-flowchart TB
-    subgraph daily["日度复盘"]
-        A[get_market_summary]
-        B[断点恢复可选]
-        C[分离确认与要闻映射]
-        D[可选风格探测]
-        E[build_prompt 与 call_llm]
-        F[摘要与龙头章节校验]
-        G[要闻前缀 / 文末附图]
-        H[龙头池存档 · 风格指数 · 邮件]
-        B -.-> A
-        A --> C --> D --> E --> F --> G --> H
-    end
+| 主线 | 主要环节（顺序） |
+|------|------------------|
+| **日度复盘** | `get_market_summary` → 断点恢复（可选）→ 分离确认与要闻映射 → 风格探测（可选）→ `build_prompt` / `call_llm` → 摘要与龙头章节校验 → 要闻前缀与文末表格式温习 → 龙头池存档、风格指数、SMTP 邮件 |
+| **周度闭环** | 程序统计周报 Markdown → 可选大模型附录 → `update_from_recent_returns` → 权重异常邮件与周报 SMTP |
 
-    subgraph weekly["周度闭环"]
-        W1[程序统计周报 Markdown]
-        W2[可选大模型附录]
-        W3[update_from_recent_returns]
-        W4[权重异常邮件与周报 SMTP]
-        W1 --> W2 --> W3 --> W4
-    end
+| 衔接 | 说明 |
+|------|------|
+| 日度 → 周度 | 龙头池 **watchlist** 供周报统计引用 |
+| 周度 → 日度 | **五桶权重**反馈至日度 Prompt 构建（`build_prompt_addon`） |
 
-    G -.->|watchlist| W1
-    W3 -.->|五桶权重| E
-```
-
-![业务全景流程图（静态 PNG，与上图同构）](assets/readme_business_overview.png)
-
-生成：`python scripts/generate_readme_business_overview_chart.py`（依赖 matplotlib，输出 `assets/readme_business_overview.png`）。
+可选：历史流程图 PNG 仍可由 `python scripts/generate_readme_business_overview_chart.py` 生成（`assets/readme_business_overview.png`），**邮件与文末温习已不再内嵌该图**。
 
 ---
 
@@ -144,7 +125,7 @@ flowchart TB
 | 9 | **`_last_news_push_prefix`**：经 **`truncate_finance_news_push_prefix`**（`email_news_max_items`、`email_news_filter_prefix`）拼到正文**最前**（插在主长文与后续块之前）。 |
 | 10 | **`program_completed` 且 `top_pool`**：`append_daily_top_pool` → **`data/watchlist_records.json`**。 |
 | 11 | **`enable_daily_style_indices_persist`**：`persist_daily_indices` → **`data/market_style_indices.json`**。 |
-| 12 | **`append_replay_viewpoint_footer`**：在要闻前缀拼入之后，为定稿追加 **「每日必看 吾日三省吾身」** 区块（五人 PNG + **`replay_footer_commentary`** 解读 + 附录；邮件 **`inline_images`** 见 `replay_footer_inline_images`）。 |
+| 12 | **`append_replay_viewpoint_footer`**：在要闻前缀拼入之后，为定稿追加 **「每日必看 吾日三省吾身」** 区块（**表格式**名家框架 + **`replay_footer_commentary`** 附录；**不再**使用 `inline_images` 内嵌流程图）。 |
 | 13 | **邮件**：`has_email_config` 时 **`send_report_email`**；`extra_vars` 含 **`report_banner_title`**（来自 `report_title_template`）、**`email_kpi`**（含大面、溢价文案、动态仓位等）、**`email_dragon_meta`**。失败路径同样可发信。 |
 
 ---
@@ -214,17 +195,17 @@ flowchart TB
 
 ## 复盘文末五人理论与每周温习
 
-日复盘主文在邮件发出前，会在末尾追加**固定附图区**（与正文由 `---` 分隔），用于温习短线名家框架；**每周六**还可单独再发一封**仅含该温习内容**的邮件，与当日复盘无关。
+日复盘主文在邮件发出前，会在末尾追加**固定温习区**（与正文由 `---` 分隔），以 **Markdown 表格**温习短线名家框架（无流程图）；**每周六**还可单独再发一封**仅含该温习内容**的邮件，与当日复盘无关。
 
 | 项目 | 说明 |
 |------|------|
 | **五人顺序** | **炒股养家** → **退学炒股** → **Asking（邱宝裕）** → **92科比** → **涅槃重升**。 |
-| **附图文件** | 五张 PNG 放在 **`assets/`**（如 `replay_footer_yangjia.png`、`replay_footer_tuixue.png`、`replay_viewpoint_footer_asking.png`、`replay_footer_kebi.png`、`replay_footer_niepan.png`）。 |
-| **邮件内嵌** | Markdown 使用 `![说明文字](cid:xxx)`，**`send_report_email(..., inline_images=...)`** 按 CID 附加 MIME 图片（见 `replay_footer_inline_images()`）。 |
-| **解读与附录** | **`app/utils/replay_footer_commentary.py`**：每张图下配 **Markdown 解读**，文末附 **四大框架 / 五维对照** 表。日复盘小节标题为 **「每日必看 吾日三省吾身」**。 |
+| **呈现形式** | 全部为 **`app/utils/replay_footer_commentary.py`** 中的 **表格 + 附录对照表**；**`replay_footer_inline_images()` / `replay_footer_inline_images_weekly()`** 恒为 `None`，邮件不再附带文末 CID PNG。 |
+| **可选资产** | 若需本地重绘示意图，**`assets/replay_footer_*.png`** 等仍可由 **`scripts/generate_replay_footer_charts_extended.py`** 等生成，**与邮件正文脱钩**。 |
 | **拼接入口** | **`app/utils/replay_viewpoint_footer.py`**：`append_replay_viewpoint_footer(md)`；`ReplayTask` 在定稿后调用。 |
-| **绘图脚本** | 通用流程图：**`app/utils/replay_footer_chart_draw.py`**（`save_flowchart_png`、`save_readme_business_overview_png`、`save_kebi_framework_png` 等）。README 业务全景：**`scripts/generate_readme_business_overview_chart.py`**。重绘示例：`scripts/generate_replay_footer_charts_extended.py`、`generate_replay_footer_kebi.py`、`generate_replay_footer_tuixue.py`、`generate_replay_viewpoint_footer_asking.py`（依赖 matplotlib）。 |
-| **每周温习邮件** | **`scripts/weekly_theory_review_email.py`**：调用 **`build_theory_review_markdown()`** 生成独立正文（**六层架构图** `architecture_six_layers.png` + 五人理论）；主题形如 **`【温习】五人理论 + 六层架构 · YYYY-MM-DD`**，SMTP 与 **`replay_footer_inline_images_weekly()`**（含架构图 CID）。 |
+| **绘图脚本（可选）** | 通用流程图：**`app/utils/replay_footer_chart_draw.py`**（`save_flowchart_png`、`save_readme_business_overview_png`、`save_kebi_framework_png` 等）。README 业务全景 PNG：**`scripts/generate_readme_business_overview_chart.py`**。 |
+| **每周温习邮件** | **`scripts/weekly_theory_review_email.py`**：调用 **`build_theory_review_markdown()`**（**六层架构表** + 五人表格 + 附录）；主题形如 **`【温习】五人理论 + 六层架构 · YYYY-MM-DD`**。 |
+| **预览发信** | **`scripts/send_flowchart_preview_email.py`**：发送与温习正文一致的 **表格式** HTML 邮件（无内嵌图）。 |
 | **GitHub 定时** | **`.github/workflows/weekly-theory-review.yml`**：`cron: "0 1 * * 6"` → **北京时间每周六 09:00**（与 `scheduled-nightly`、`weekly-report` 一样使用 `SMTP_*`、`MAIL_TO` 等 Secrets）。支持 **`workflow_dispatch`** 手动触发。 |
 | **Windows 本机定时** | **`scripts/register_weekly_theory_review_task.ps1`**：注册计划任务 **每周六 09:00**（本地时区）执行上述 Python 脚本；需已配置 SMTP 且能访问项目目录。 |
 
@@ -406,7 +387,7 @@ flowchart TB
 | 路径 | 说明 |
 |------|------|
 | `replay_config.json` | 用户配置（建议敏感仓库不入库或仅环境变量）。 |
-| `assets/replay_footer_*.png` 等 | 文末五人理论附图（温习邮件与日复盘共用 CID）。 |
+| `assets/replay_footer_*.png` 等 | 可选示意图资产；**邮件正文已改为表格式**，不再依赖这些 PNG。 |
 | `data/watchlist_records.json` | 龙头池周度统计输入。 |
 | `data/strategy_preference.json` | 五桶权重。 |
 | `data/strategy_evolution_log.jsonl` | 权重演进审计。 |
@@ -425,7 +406,7 @@ flowchart TB
 |------|------|
 | **`scripts/nightly_replay.py`** | 夜间复盘：默认北京时间当日，非交易日退出 0；**`--date YYYYMMDD`** 指定交易日。Key：`DEEPSEEK_API_KEY` 或配置。 |
 | **`scripts/weekly_performance_email.py`** | 周报：**`--anchor`**、**`--dry-run`**、**`--plot`**（`weights_trend.png`）。 |
-| **`scripts/weekly_theory_review_email.py`** | **每周温习**：单独发送五人理论附图 + 解读 + 附录（需 SMTP；与日复盘独立）。 |
+| **`scripts/weekly_theory_review_email.py`** | **每周温习**：单独发送五人理论 **表格式**正文 + 附录（需 SMTP；与日复盘独立）。 |
 | **`scripts/generate_replay_footer_charts_extended.py`** 等 | 重绘文末名家流程图 PNG（matplotlib）；见 [复盘文末五人理论与每周温习](#复盘文末五人理论与每周温习)。 |
 | **`scripts/register_weekly_theory_review_task.ps1`** | Windows **任务计划程序**：注册每周六 09:00 跑 **`weekly_theory_review_email.py`**。 |
 | **`scripts/validate.py`** | 依赖导入、`strategy_preference` 权重和、`strategy_evolution_log.jsonl` 行 JSON、环境变量提示。 |

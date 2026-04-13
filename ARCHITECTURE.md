@@ -75,47 +75,19 @@
 
 ## 4. 逻辑架构总览
 
-下图从**入口**到**输出**展示主要依赖关系（周报为并行入口）。
+下表从**入口**到**输出**归纳主要依赖（周报为并行入口）；与文档/邮件中表格式说明一致，避免流程图在小屏上难以阅读。
 
-```mermaid
-flowchart LR
-    subgraph in["入口"]
-        N[nightly_replay]
-        P[weekly_performance_email]
-        V[validate.py]
-    end
-
-    subgraph core["核心"]
-        DF[DataFetcher + 竞价半路策略]
-        RT[ReplayTask]
-        DS[DeepSeek API]
-        SP[strategy_preference]
-        WL[watchlist_store]
-    end
-
-    subgraph opt["可选"]
-        MSI[market_style_indices]
-        WP[weekly_performance]
-        ENH[replay_llm_enhancements<br/>周报叙事等]
-    end
-
-    subgraph out["输出"]
-        EM[SMTP 邮件]
-    end
-
-    N --> RT
-    RT --> DF
-    DF --> RT
-    RT --> DS
-    RT --> WL
-    RT --> SP
-    RT --> EM
-    P --> WP
-    P --> SP
-    P --> ENH
-    ENH --> EM
-    V -.-> SP
-```
+| 分组 | 组件 | 主要关联 |
+|------|------|----------|
+|入口 | `nightly_replay` | → `ReplayTask` |
+| 入口 | `weekly_performance_email` | → `weekly_performance`、`strategy_preference`、`replay_llm_enhancements`（周报叙事等） |
+| 入口 | `validate.py` | → `strategy_preference`（校验） |
+| 核心 | `ReplayTask` | ↔ `DataFetcher`（含竞价半路策略）；→ `DeepSeek API`；→ `watchlist_store`；→ `strategy_preference`；→ SMTP |
+| 核心 | `DataFetcher` | ↔ `ReplayTask`（数据回流） |
+| 可选 | `market_style_indices` | 由日复盘任务侧持久化（与配置开关联动） |
+| 可选 | `weekly_performance` | 周报统计链路 |
+| 可选 | `replay_llm_enhancements` |周报叙事等 → SMTP |
+| 输出 | SMTP 邮件 | 日复盘、周报、温习等 |
 
 ### 4.1 企业级六层架构（演进目标）
 
