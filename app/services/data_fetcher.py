@@ -4,6 +4,7 @@ import os
 import re
 import threading
 import time
+from datetime import datetime
 from contextlib import redirect_stdout
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, Tuple
@@ -657,6 +658,35 @@ class DataFetcher:
             _log.error("%s 缺少列 %s", label, miss)
             raise DataSourceInvalidError(f"{label} 缺少列: {miss}")
 
+    def _repair_eastmoney_pool_columns(
+        self, df: pd.DataFrame, label: str, required: tuple[str, ...]
+    ) -> pd.DataFrame:
+        """
+        兼容东财涨跌停池/炸板池偶发的列名乱码（如 代码/名称 变为 mojibake）。
+        优先按标准列名使用；若缺失，则按东财固定列位补回关键列名。
+        """
+        if df is None or getattr(df, "empty", True):
+            return df
+        if all(col in df.columns for col in required):
+            return df
+        cols = list(df.columns)
+        repaired = df.copy()
+
+        if "代码" not in repaired.columns and len(cols) > 1:
+            repaired = repaired.rename(columns={cols[1]: "代码"})
+        if "名称" not in repaired.columns and len(cols) > 2:
+            repaired = repaired.rename(columns={cols[2]: "名称"})
+        if "连板数" in required and "连板数" not in repaired.columns and len(cols) > 14:
+            repaired = repaired.rename(columns={cols[14]: "连板数"})
+
+        if all(col in repaired.columns for col in required):
+            _log.warning(
+                "%s 检测到非常规列名，已按列位修复。原始列: %s",
+                label,
+                cols,
+            )
+        return repaired
+
     # ---------- 辅助函数：金额单位转换 ----------
     def _parse_pct_cell_series(self, ser: pd.Series) -> pd.Series:
         """涨跌幅列：去除 %，'-' / 空 视为缺失 → 0（与东财表缺数据一致）。"""
@@ -717,21 +747,30 @@ class DataFetcher:
 
     def is_zb_pool_em_available(self, date) -> bool:
         """
-        东财炸板池接口仅覆盖最近约 ZB_POOL_EM_LOOKBACK_TRADING_DAYS 个交易日（相对当前日历末端）。
+        东财炸板池接口仅覆盖最近约 ZB_POOL_EM_LOOKBACK_TRADING_DAYS 个交易日（相对“当前日期”）。
         超出范围则不应调用 ak.stock_zt_pool_zbgc_em，否则会触发「只能获取最近 30 个交易日」类错误并刷屏。
         """
         td = self.get_trade_cal()
         if not td:
             return True
         ds = str(date)[:8]
-        # 不复用「ds > td[-1] 直接 False」：日历偶发滞后半天时仍会误跳过炸板池，导致炸板率恒为 0
-        valid = [x for x in td if x <= ds]
-        if not valid:
+        # 部分交易日历会预置未来日期，不能以 td[-1] 作为“当前时点”。
+        # 应以「不晚于今天」的最后交易日作为锚点，再回看最近 N 个交易日。
+        today = datetime.now().strftime("%Y%m%d")
+        anchors = [x for x in td if x <= today]
+        if not anchors:
+            anchors = td
+        anchor = anchors[-1]
+
+        valid_target = [x for x in td if x <= ds]
+        if not valid_target:
             return False
-        d_eff = valid[-1]
-        if len(td) < ZB_POOL_EM_LOOKBACK_TRADING_DAYS:
+        d_eff = valid_target[-1]
+
+        hist = [x for x in td if x <= anchor]
+        if len(hist) < ZB_POOL_EM_LOOKBACK_TRADING_DAYS:
             return True
-        oldest = td[-ZB_POOL_EM_LOOKBACK_TRADING_DAYS]
+        oldest = hist[-ZB_POOL_EM_LOOKBACK_TRADING_DAYS]
         return d_eff >= oldest
 
     def get_zt_pool(self, date):
@@ -750,6 +789,9 @@ class DataFetcher:
             if df is None or df.empty:
                 self._set_cache(cache_key, pd.DataFrame())
                 return pd.DataFrame()
+            df = self._repair_eastmoney_pool_columns(
+                df, "涨停池(原始)", _dsc.REQUIRED_ZT_POOL_COLUMNS
+            )
             self._validate_required_columns(df, _dsc.REQUIRED_ZT_POOL_COLUMNS, "涨停池(原始)")
             # 重命名列
             df = df.rename(columns={
@@ -784,6 +826,9 @@ class DataFetcher:
                 return df_disk
         try:
             df = self.fetch_with_retry(ak.stock_zt_pool_dtgc_em, date=date)
+            df = self._repair_eastmoney_pool_columns(
+                df, "跌停池(原始)", _dsc.REQUIRED_DT_POOL_COLUMNS
+            )
             if df is not None and not df.empty and "代码" in df.columns:
                 self._validate_required_columns(df, _dsc.REQUIRED_DT_POOL_COLUMNS, "跌停池(原始)")
                 df = df.rename(columns={"代码": "code", "名称": "name"})
@@ -817,6 +862,9 @@ class DataFetcher:
             return empty
         try:
             df = self.fetch_with_retry(ak.stock_zt_pool_zbgc_em, date=date)
+            df = self._repair_eastmoney_pool_columns(
+                df, "炸板池(原始)", _dsc.REQUIRED_ZB_POOL_COLUMNS
+            )
             if df is not None and not df.empty and "代码" in df.columns:
                 self._validate_required_columns(df, _dsc.REQUIRED_ZB_POOL_COLUMNS, "炸板池(原始)")
                 df = df.rename(columns={"代码": "code", "名称": "name"})
@@ -829,7 +877,8 @@ class DataFetcher:
                 except OSError as ex:
                     _log.warning("zb_pool 磁盘缓存失败: %s", ex)
             return df
-        except Exception:
+        except Exception as e:
+            _log.warning("获取炸板池失败(%s): %s", date, e)
             self._set_cache(cache_key, pd.DataFrame())
             return pd.DataFrame()
 
