@@ -4,6 +4,9 @@
 
 用于日志打点、监控与后续将 `run` 拆为显式步骤时的参照；
 不在此处重复业务规则实现。
+
+篇首「六维复盘框架」在 `get_market_summary` → `build_six_section_catalog` 内注入，
+与下表同一数据拉取批次，不单独占阶段名。
 """
 
 from __future__ import annotations

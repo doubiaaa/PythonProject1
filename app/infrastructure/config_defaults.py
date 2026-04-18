@@ -108,6 +108,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "enable_replay_spot_5d_leaderboard": True,
     "replay_spot_5d_top_n": 19,
     "enable_replay_checkpoint": True,
+    "enable_replay_six_pillar_framework": True,
     "resume_replay_if_available": False,
     "strategy_max_weight_delta_per_update": 0.10,
     "active_strategy_profile": "default",

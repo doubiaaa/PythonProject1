@@ -159,8 +159,11 @@
 | `replay_watchlist_spot_followup_max_codes` | 快照表最多代码数。 |
 | `enable_replay_spot_5d_leaderboard` / `replay_spot_5d_top_n` | 全 A 五日涨幅榜开关与 TOP N。 |
 | `enable_replay_checkpoint` / `resume_replay_if_available` | 断点落盘与续跑；`meta.json` 含 `zt_pool_records` 等。 |
+| `enable_replay_six_pillar_framework` | 篇首是否在「【程序生成】复盘数据目录」**之前**注入 **「【六维复盘框架】」**（数据四锚、周期—信号—操作、反人性边界、仓位与止损、心法闭环、每日三省）；默认 **true**，与 `compute_short_term_market_phase` 四象限及建议仓位联动。 |
 
 **市场阶段**（程序 `compute_short_term_market_phase`）：在情绪温度基础上结合最高连板、炸板率、涨跌结构、昨日溢价等，输出 **主升期 / 高位震荡期 / 退潮·冰点期 / 混沌·试错期** 及对应建议仓位区间。
+
+**六维复盘框架**（`app/services/replay_six_pillar.py`）：把「群体博弈数据锚、情绪周期表、名句边界、仓位纪律、预判—试错—确认—加仓、每日三省」固化为程序 Markdown，供大模型与 **§1.2** 同一口径；主 Prompt 硬性要求正文须与之呼应或写明分歧理由。
 
 ---
 
@@ -170,7 +173,7 @@
 
 | 步骤 | 动作 |
 |------|------|
-| 1 | `get_market_summary(date)` → 得到 `actual_date`、Markdown 市场正文、`_last_auction_meta`（含 `top_pool`、`program_completed`、`abort_reason`）、`_last_zt_pool`；篇首目录含首封时段分布、监控池档案等；**基础数据**与板块排名在正文中改为引用目录以免重复。 |
+| 1 | `get_market_summary(date)` → 得到 `actual_date`、Markdown 市场正文、`_last_auction_meta`（含 `top_pool`、`program_completed`、`abort_reason`）、`_last_zt_pool`；篇首含（可选）**六维复盘框架** + **【程序生成】复盘数据目录**（首封时段分布、监控池档案等）；**基础数据**与板块排名在正文中改为引用目录以免重复。 |
 | 1b | （可选）断点续跑：从 `data/replay_status/` 恢复 `market.txt`、`meta.json`（含 `zt_pool_records`、要闻前缀等），跳过步骤 1 的数据拉取。 |
 | 2 | （可选）`probe_style_stability` → `effective_weights_from_stability`，供 prompt 侧重。 |
 | 2b | `perform_separation_confirmation`（分时异动 +同板块/同梯队候选）；`analyze_finance_news` 叠加 **龙头池字面命中**；结果写入 prompt `meta_block`。 |

@@ -524,7 +524,38 @@ def build_six_section_catalog(
     if df_concept is None:
         df_concept = pd.DataFrame()
 
-    lines: list[str] = [
+    lines: list[str] = []
+    try:
+        from app.services.replay_six_pillar import (
+            build_six_pillar_framework_markdown,
+            should_emit_six_pillar,
+        )
+
+        if should_emit_six_pillar():
+            lines.append(
+                build_six_pillar_framework_markdown(
+                    fetcher,
+                    date=ds,
+                    trade_days=trade_days,
+                    zt_count=zt_count,
+                    dt_count=dt_count,
+                    zb_count=zb_count,
+                    zhaban_rate=zhaban_rate,
+                    up_n=up_n,
+                    down_n=down_n,
+                    north_money=north_money,
+                    north_status=north_status,
+                    sentiment_temp=sentiment_temp,
+                    market_phase=market_phase,
+                    position_suggestion=position_suggestion,
+                    df_zt=df_zt,
+                )
+            )
+    except Exception as ex:
+        _log.warning("六维复盘框架块跳过: %s", ex)
+
+    lines.extend(
+        [
         f"## 【程序生成】复盘数据目录（{ds_fmt}）\n",
         "> 下表为**可核对数据**；正文 **勿复述全表**，只摘结论与关键数字。\n\n",
         "---\n\n",
@@ -545,7 +576,8 @@ def build_six_section_catalog(
         "---\n\n",
         "## 1. 复盘总结\n\n",
         "### 1.1 连板梯队\n\n",
-    ]
+        ]
+    )
     if not df_zt.empty and "lb" in df_zt.columns:
         vc = df_zt["lb"].value_counts().sort_index()
         lines.append("- 结构：" + "，".join(f"{k}连×{int(v)}只" for k, v in vc.items()) + "\n")
