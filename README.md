@@ -279,11 +279,11 @@ python scripts/generate_readme_business_overview_chart.py
 
 ## 文末温习与辅助脚本
 
-定稿阶段由 **`append_replay_viewpoint_footer`**（`replay_viewpoint_footer.py`）追加：**表格式**五人框架 + **`replay_footer_commentary`** 附录；**`replay_footer_inline_images()`** 对邮件正文恒为无内嵌 CID 图。
+定稿阶段由 **`append_replay_viewpoint_footer`**（`replay_viewpoint_footer.py`）追加：**表格式**五人框架 + **`replay_footer_commentary`** 附录；**`replay_footer_inline_images()`** 对邮件正文恒为无内嵌 CID 图。周六温习邮件**不包含**「企业级六层架构」演进表（该内容仅见仓库 **`docs/six_layer_architecture.md`**）。
 
 | 脚本 | 用途 |
 |------|------|
-| `weekly_theory_review_email.py` | 周六单独发送温习邮件 |
+| `weekly_theory_review_email.py` | 周六单独发送温习邮件（五人理论表格式） |
 | `send_flowchart_preview_email.py` | 表格式预览邮件 |
 | `generate_replay_footer_charts_extended.py` 等 | 本地生成 PNG 示意图（与邮件正文脱钩） |
 | `register_weekly_theory_review_task.ps1` | Windows 计划任务注册 |

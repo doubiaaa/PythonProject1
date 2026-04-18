@@ -5,7 +5,7 @@
 用法：
   python scripts/weekly_theory_review_email.py
 
-依赖：与日复盘相同，需配置 SMTP；正文为 **六层架构表** + **五人理论** Markdown 表格（无流程图 PNG）。
+依赖：与日复盘相同，需配置 SMTP；正文为 **五人理论** Markdown 表格（无流程图 PNG）；不含仓库六层架构演进表。
 
 定时：
   - GitHub Actions：见 .github/workflows/weekly-theory-review.yml（北京时间周六 09:00）
@@ -47,9 +47,9 @@ def main() -> int:
         return 0
 
     date_s = _beijing_today_str()
-    subj = f"【温习】五人理论 + 六层架构 · {date_s}"
+    subj = f"【温习】五人理论 · {date_s}"
     _cm = ConfigManager()
-    banner = f"每周温习 · 五人理论 + 六层架构（{date_s}）"
+    banner = f"每周温习 · 五人理论（{date_s}）"
     extra = {
         "header_date": f"发送日 {date_s}",
         "title": subj,

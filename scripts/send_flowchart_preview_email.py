@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""发送「五人理论 + 六层架构」表格式预览邮件（与正式温习正文一致，无流程图 PNG）。
+"""发送「五人理论」表格式预览邮件（与正式温习正文一致，无流程图 PNG）。
 
 需已配置 SMTP：replay_config 或 SMTP_* 环境变量（与 nightly 相同）。
 默认收件人 1961141860@qq.com；可传参覆盖：python scripts/send_flowchart_preview_email.py user@example.com
@@ -61,11 +61,11 @@ def main() -> int:
         print("正文为空：请检查 app/utils/replay_footer_commentary.py。", file=sys.stderr)
         return 1
 
-    subject = "【温习预览】五人理论 + 六层架构（表格式）"
+    subject = "【温习预览】五人理论（表格式）"
     extra = {
         "header_date": "表格式预览",
         "title": subject,
-        "report_banner_title": "五人理论 + 六层架构 · 表格式预览",
+        "report_banner_title": "五人理论 · 表格式预览",
         "system_name": str(cm.get("email_system_name") or "T+0 竞价复盘系统"),
     }
 

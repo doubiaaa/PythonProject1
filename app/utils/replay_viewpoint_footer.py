@@ -56,11 +56,11 @@ FOOTER_CHART_ENTRIES: tuple[tuple[str, str, str], ...] = (
 # 文末区块在邮件 / Markdown 中的总标题
 FOOTER_SECTION_TITLE = "每日必看 吾日三省吾身"
 
-# 每周温习独立邮件的文档标题（与每日复盘文末小标题区分）
-THEORY_REVIEW_DOC_TITLE = "每周温习 · 五人理论 + 架构目标"
+# 每周温习独立邮件的文档标题（与每日复盘文末小标题区分；不含仓库六层架构演进表）
+THEORY_REVIEW_DOC_TITLE = "每周温习 · 五人理论"
 
 def _six_layers_weekly_block() -> str:
-    """周六温习邮件专用：六层架构表 + 与之一致的六点说明。"""
+    """六层架构演进表（Markdown）。**不随邮件发送**；见 `build_theory_review_markdown` 与 `docs/six_layer_architecture.md`。"""
     return (
         "## 演进目标：企业级六层架构（新标准）\n\n"
         "| 层次 | 职责 |\n"
@@ -98,18 +98,19 @@ def _build_footer_blocks_only() -> str:
 
 def build_theory_review_markdown() -> str:
     """
-    每周温习邮件专用：先六层架构表，再五人理论表格式全文（与 append_replay_viewpoint_footer 一致）。
+    每周温习邮件专用：五人理论表格式全文（与 `append_replay_viewpoint_footer` 文末块一致）。
+
+    不含「企业级六层架构」演进表（该表仅供仓库文档 `docs/six_layer_architecture.md` 与本地维护，**不进入邮件正文**）。
     """
     body = _build_footer_blocks_only()
     if not body:
         return ""
     intro = (
         f"# {THEORY_REVIEW_DOC_TITLE}\n\n"
-        "> 固定于每周六发送：巩固 **企业级六层架构目标**，并以 **表格**温习 **炒股养家、退学炒股、Asking、92科比、涅槃重升** "
+        "> 固定于每周六发送：以 **表格**温习 **炒股养家、退学炒股、Asking、92科比、涅槃重升** "
         "框架（与日复盘文末「每日必看」一致，无流程图）。\n\n"
     )
-    arch = _six_layers_weekly_block()
-    return intro + arch + body
+    return intro + body
 
 
 def replay_footer_inline_images_weekly() -> Optional[list[tuple[str, str]]]:
