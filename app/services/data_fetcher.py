@@ -857,8 +857,17 @@ class DataFetcher:
         _log.info("涨停池主接口无数据，已用昨日涨停池回退：目标日 %s（参数日 %s）", ds, nd)
         return df
 
+    def _use_lb_openclaw(self) -> bool:
+        """悟道 OpenClaw：涨停梯队/炸板/跌停等（需 data_source.use_lb_openclaw + LB_API_KEY）。"""
+        try:
+            from app.services.lb_openclaw_client import is_lb_openclaw_enabled
+
+            return is_lb_openclaw_enabled()
+        except Exception:
+            return False
+
     def get_zt_pool(self, date):
-        """获取涨停股票池（主用AKShare，失败返回空DataFrame）"""
+        """获取涨停股票池（可选悟道 OpenClaw /ladder，否则东财 AKShare，失败返回空DataFrame）"""
         ds = str(date)[:8]
         cache_key = f"zt_pool_{date}"
         if self._is_cache_valid(cache_key):
@@ -882,13 +891,29 @@ class DataFetcher:
                         self._set_cache(cache_key, df_disk)
                         return df_disk
         try:
-            df = self.fetch_with_retry(ak.stock_zt_pool_em, date=ds)
-            if df is None or df.empty:
-                df = self._try_zt_pool_via_yesterday_pool_em(ds)
+            used_lb = False
+            df = pd.DataFrame()
+            if self._use_lb_openclaw():
+                try:
+                    from app.services.lb_openclaw_pools import fetch_zt_pool_lb
+
+                    tdf = fetch_zt_pool_lb(ds)
+                    if tdf is not None and not tdf.empty:
+                        df = tdf
+                        used_lb = True
+                except Exception as ex:
+                    _log.warning("悟道 OpenClaw /ladder 失败，尝试东财: %s", ex)
+            if not used_lb:
+                df = self.fetch_with_retry(ak.stock_zt_pool_em, date=ds)
+                if df is None or df.empty:
+                    df = self._try_zt_pool_via_yesterday_pool_em(ds)
+                if df is None or df.empty:
+                    self._set_cache(cache_key, pd.DataFrame())
+                    return pd.DataFrame()
+                df = self._zt_pool_em_raw_to_internal(df)
             if df is None or df.empty:
                 self._set_cache(cache_key, pd.DataFrame())
                 return pd.DataFrame()
-            df = self._zt_pool_em_raw_to_internal(df)
             self._set_cache(cache_key, df)
             try:
                 _write_cache("zt_pool_em", ds, df_to_payload(df))
@@ -912,19 +937,35 @@ class DataFetcher:
                 self._set_cache(cache_key, df_disk)
                 return df_disk
         try:
-            df = self.fetch_with_retry(ak.stock_zt_pool_dtgc_em, date=date)
-            df = self._repair_eastmoney_pool_columns(
-                df, "跌停池(原始)", _dsc.REQUIRED_DT_POOL_COLUMNS
-            )
-            if df is not None and not df.empty and "代码" in df.columns:
-                self._validate_required_columns(df, _dsc.REQUIRED_DT_POOL_COLUMNS, "跌停池(原始)")
-                df = df.rename(columns={"代码": "code", "名称": "name"})
-            else:
-                df = pd.DataFrame()
+            ds = str(date)[:8]
+            used_lb = False
+            df = pd.DataFrame()
+            if self._use_lb_openclaw():
+                try:
+                    from app.services.lb_openclaw_pools import fetch_dt_pool_lb
+
+                    tdf = fetch_dt_pool_lb(ds)
+                    if tdf is not None and not tdf.empty:
+                        df = tdf
+                        used_lb = True
+                except Exception as ex:
+                    _log.warning("悟道 OpenClaw /limit-down 失败，尝试东财: %s", ex)
+            if not used_lb:
+                df = self.fetch_with_retry(ak.stock_zt_pool_dtgc_em, date=date)
+                df = self._repair_eastmoney_pool_columns(
+                    df, "跌停池(原始)", _dsc.REQUIRED_DT_POOL_COLUMNS
+                )
+                if df is not None and not df.empty and "代码" in df.columns:
+                    self._validate_required_columns(
+                        df, _dsc.REQUIRED_DT_POOL_COLUMNS, "跌停池(原始)"
+                    )
+                    df = df.rename(columns={"代码": "code", "名称": "name"})
+                else:
+                    df = pd.DataFrame()
             self._set_cache(cache_key, df)
             if not df.empty:
                 try:
-                    _write_cache("dt_pool_em", str(date)[:8], df_to_payload(df))
+                    _write_cache("dt_pool_em", ds, df_to_payload(df))
                 except OSError as ex:
                     _log.warning("dt_pool 磁盘缓存失败: %s", ex)
             return df
@@ -943,24 +984,44 @@ class DataFetcher:
             if df_disk is not None and not df_disk.empty and "code" in df_disk.columns:
                 self._set_cache(cache_key, df_disk)
                 return df_disk
-        if not self.is_zb_pool_em_available(date):
+        ds = str(date)[:8]
+        if not self._use_lb_openclaw() and not self.is_zb_pool_em_available(date):
             empty = pd.DataFrame()
             self._set_cache(cache_key, empty)
             return empty
         try:
-            df = self.fetch_with_retry(ak.stock_zt_pool_zbgc_em, date=date)
-            df = self._repair_eastmoney_pool_columns(
-                df, "炸板池(原始)", _dsc.REQUIRED_ZB_POOL_COLUMNS
-            )
-            if df is not None and not df.empty and "代码" in df.columns:
-                self._validate_required_columns(df, _dsc.REQUIRED_ZB_POOL_COLUMNS, "炸板池(原始)")
-                df = df.rename(columns={"代码": "code", "名称": "name"})
-            else:
-                df = pd.DataFrame()
+            used_lb = False
+            df = pd.DataFrame()
+            if self._use_lb_openclaw():
+                try:
+                    from app.services.lb_openclaw_pools import fetch_zb_pool_lb
+
+                    tdf = fetch_zb_pool_lb(ds)
+                    if tdf is not None and not tdf.empty:
+                        df = tdf
+                        used_lb = True
+                except Exception as ex:
+                    _log.warning("悟道 OpenClaw /broken-limit-up 失败，尝试东财: %s", ex)
+            if not used_lb:
+                if not self.is_zb_pool_em_available(date):
+                    empty = pd.DataFrame()
+                    self._set_cache(cache_key, empty)
+                    return empty
+                df = self.fetch_with_retry(ak.stock_zt_pool_zbgc_em, date=date)
+                df = self._repair_eastmoney_pool_columns(
+                    df, "炸板池(原始)", _dsc.REQUIRED_ZB_POOL_COLUMNS
+                )
+                if df is not None and not df.empty and "代码" in df.columns:
+                    self._validate_required_columns(
+                        df, _dsc.REQUIRED_ZB_POOL_COLUMNS, "炸板池(原始)"
+                    )
+                    df = df.rename(columns={"代码": "code", "名称": "name"})
+                else:
+                    df = pd.DataFrame()
             self._set_cache(cache_key, df)
             if not df.empty:
                 try:
-                    _write_cache("zb_pool_em", str(date)[:8], df_to_payload(df))
+                    _write_cache("zb_pool_em", ds, df_to_payload(df))
                 except OSError as ex:
                     _log.warning("zb_pool 磁盘缓存失败: %s", ex)
             return df
@@ -2616,6 +2677,18 @@ class DataFetcher:
             df_zb=df_zb,
             df_sector=df_sector,
         )
+
+        if self._use_lb_openclaw():
+            try:
+                from app.services.lb_replay_assist_markdown import (
+                    build_lb_openclaw_assist_section,
+                )
+
+                _assist = build_lb_openclaw_assist_section(str(date)[:8], trade_days)
+                if _assist:
+                    summary += _assist
+            except Exception as ex:
+                _log.warning("悟道 OpenClaw 扩展复盘块跳过：%s", ex)
 
         summary += "## 基础数据（补遗）\n"
         summary += (

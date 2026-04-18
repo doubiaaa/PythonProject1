@@ -171,6 +171,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "cache_dir": "data_cache",
         "llm_connect_timeout": 10,
         "llm_read_timeout": 120,
+        # 悟道 OpenClaw：涨停梯队/炸板/跌停等（需 LB_API_KEY；见 app/services/lb_openclaw_client.py）
+        "use_lb_openclaw": False,
+        "lb_api_base": "https://stock.quicktiny.cn/api/openclaw",
+        "lb_api_key": "",
     },
     # 容错：熔断（akshare / LLM HTTP 独立计数）、LLM 最小调用间隔（秒，0 表示不限制）
     "resilience": {

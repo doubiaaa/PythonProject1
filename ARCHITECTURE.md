@@ -160,6 +160,7 @@
 | `enable_replay_spot_5d_leaderboard` / `replay_spot_5d_top_n` | 全 A 五日涨幅榜开关与 TOP N。 |
 | `enable_replay_checkpoint` / `resume_replay_if_available` | 断点落盘与续跑；`meta.json` 含 `zt_pool_records` 等。 |
 | `enable_replay_six_pillar_framework` | 篇首是否在「【程序生成】复盘数据目录」**之前**注入 **「【六维复盘框架】」**（数据四锚、周期—信号—操作、反人性边界、仓位与止损、心法闭环、每日三省）；默认 **true**，与 `compute_short_term_market_phase` 四象限及建议仓位联动。 |
+| `data_source.use_lb_openclaw` + `LB_API_KEY` | **true** 且配置了密钥时，涨停池、炸板池、跌停池优先走悟道 OpenClaw（`/ladder`、`/broken-limit-up`、`/limit-down`），失败时回退东财 akshare；实现见 `app/services/lb_openclaw_client.py`。 |
 
 **市场阶段**（程序 `compute_short_term_market_phase`）：在情绪温度基础上结合最高连板、炸板率、涨跌结构、昨日溢价等，输出 **主升期 / 高位震荡期 / 退潮·冰点期 / 混沌·试错期** 及对应建议仓位区间。
 

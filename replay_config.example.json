@@ -1,4 +1,9 @@
 {
+  "data_source": {
+    "use_lb_openclaw": false,
+    "lb_api_base": "https://stock.quicktiny.cn/api/openclaw",
+    "lb_api_key": ""
+  },
   "active_strategy_profile": "default",
   "strategy_profiles": {
     "default": {},

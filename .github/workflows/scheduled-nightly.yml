@@ -2,6 +2,7 @@
 # 仅当「当日为 A 股交易日」时才跑复盘，周末/节假日直接跳过（成功退出）。
 # 须在仓库 Secrets 中配置（Settings → Secrets and variables → Actions）：
 #   DEEPSEEK_API_KEY    DeepSeek API Key
+#   LB_API_KEY          悟道 OpenClaw（与程序 data_fetcher / 扩展复盘块一致；不配则仍走东财等）
 # 可选邮件：
 #   SMTP_HOST SMTP_PORT SMTP_USER SMTP_PASSWORD SMTP_FROM MAIL_TO
 #   SMTP_SSL  填 true / 1 表示 SMTPS（465）；留空则默认 STARTTLS（587）
@@ -49,6 +50,10 @@ jobs:
       - name: Run nightly replay
         env:
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          LB_API_KEY: ${{ secrets.LB_API_KEY }}
+          # 与 lb_openclaw_client 默认一致；若改用自建代理可改此处或设 REPLAY__data_source__lb_api_base
+          LB_API_BASE: https://stock.quicktiny.cn/api/openclaw
+          REPLAY__data_source__use_lb_openclaw: "true"
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
           SMTP_USER: ${{ secrets.SMTP_USER }}
