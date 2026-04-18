@@ -33,6 +33,10 @@ def market_style_indices_file() -> str:
     return _path_or_fallback("market_style_indices_file", "data/market_style_indices.json")
 
 
+def simulated_account_file() -> str:
+    return _path_or_fallback("simulated_account_file", "data/simulated_account.json")
+
+
 def data_dir() -> str:
     """逻辑数据目录（默认 `data/`）。"""
     return os.path.dirname(watchlist_records_file())

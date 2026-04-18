@@ -21,6 +21,13 @@ from app.services.strategy_preference import (
     probe_style_stability,
 )
 from app.services.watchlist_store import append_daily_top_pool
+from app.services.simulated_account import (
+    prepend_simulation_to_report_body,
+    evaluate_exits_after_close,
+    process_session_opens,
+    save_signal_report,
+    schedule_next_buys,
+)
 from app.utils.config import ConfigManager
 from app.infrastructure.observability import alert_failure, emit_event
 from app.infrastructure.resilience.exceptions import format_fault_log
@@ -287,6 +294,21 @@ class ReplayTask:
             if actual_date != date:
                 self.log(f"日期已自动调整为交易日: {actual_date}")
 
+            try:
+                _td_sim = data_fetcher.get_trade_cal()
+                if _td_sim:
+                    sim_r = process_session_opens(
+                        data_fetcher, str(actual_date)[:8], _td_sim
+                    )
+                    if sim_r.get("sells") or sim_r.get("buys"):
+                        self.log(
+                            "实盘交易展示·开盘撮合："
+                            f"卖 {len(sim_r.get('sells') or [])} 笔，"
+                            f"买 {len(sim_r.get('buys') or [])} 笔"
+                        )
+            except Exception as ex:
+                self.log(f"实盘交易展示·开盘撮合跳过：{ex}")
+
             self.progress = 95
             self.log("数据获取完成，正在调用AI…")
             emit_event("replay.llm_begin", trade_date=str(actual_date))
@@ -418,8 +440,28 @@ class ReplayTask:
 
             result = append_replay_viewpoint_footer(result)
 
+            try:
+                save_signal_report(str(actual_date)[:8], result or "")
+                _td_ev = data_fetcher.get_trade_cal()
+                if _td_ev:
+                    ev = evaluate_exits_after_close(str(actual_date)[:8], _td_ev)
+                    sch = ev.get("scheduled") or []
+                    if sch:
+                        self.log(
+                            "实盘交易展示：已登记 "
+                            f"{len(sch)} 笔卖出（下一交易日开盘价执行）"
+                        )
+            except Exception as ex:
+                self.log(f"实盘交易展示·卖出评估失败：{ex}")
+
             self.progress = 100
-            self.result = result
+            try:
+                self.result = prepend_simulation_to_report_body(
+                    result, str(actual_date)[:8]
+                )
+            except Exception as ex:
+                self.log(f"实盘交易展示（报告顶部）失败：{ex}")
+                self.result = result
             self.log("分析完成")
             try:
                 write_checkpoint_phase(str(actual_date)[:8], PHASE_DONE)
@@ -438,6 +480,15 @@ class ReplayTask:
                     self.log("龙头池已记入周度统计档案（data/watchlist_records.json）")
                 except Exception as ex:
                     self.log(f"龙头池存档失败：{ex}")
+                try:
+                    _td2 = data_fetcher.get_trade_cal()
+                    if _td2:
+                        schedule_next_buys(
+                            str(actual_date)[:8], _td2, ah_meta["top_pool"]
+                        )
+                        self.log("实盘交易展示：已登记下一交易日买入计划（龙头池）")
+                except Exception as ex:
+                    self.log(f"实盘交易展示·买入登记失败：{ex}")
             _cm = ConfigManager()
             if _cm.get("enable_daily_style_indices_persist", True):
                 try:

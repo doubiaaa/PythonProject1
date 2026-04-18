@@ -154,13 +154,31 @@ python scripts/generate_readme_business_overview_chart.py
 | 6 | **风格稳定性探测**（`enable_style_stability_probe`，默认关闭）：**`probe_style_stability`** → **`effective_weights_from_stability`**；可按 **`replay_llm_spacing_sec`** 间隔后再调主文 |
 | 7 | **`build_prompt`**：含 `build_prompt_addon`、dragon JSON、分离块、要闻块、**`MAIN_REPLAY_PROMPT`** |
 | 8 | **`call_llm`** → **`ensure_summary_line`** → **`append_core_stocks_and_plan_if_missing`** → **`ensure_dragon_report_sections`** |
-| 9 | 截断并前置 **`_last_news_push_prefix`** |
+| 9 | 截断并前置 **`_last_news_push_prefix`**（财联社要闻摘要，可空） |
 | 10 | **`append_replay_viewpoint_footer`**（表格式五人理论 + 附录） |
-| 11 | 若 **`program_completed`** 且存在 **top_pool**：**`append_daily_top_pool`** |
-| 12 | 若 **`enable_daily_style_indices_persist`**：**`persist_daily_indices`** |
-| 13 | **`send_report_email`**（若已配置 SMTP） |
+| 11 | **`save_signal_report`**：当日复盘正文（**不含**顶部实盘块）写入 `simulated_account.json`，供按信号日检索预案 |
+| 12 | **`evaluate_exits_after_close`**：按当日 K 线与预案关键词登记「下一交易日开盘卖出」 |
+| 13 | **`prepend_simulation_to_report_body`**：生成配图与收益汇总，将 **【实盘交易展示】** 置于 **`self.result` 最顶** |
+| 14 | 若 **`program_completed`** 且存在 **top_pool**：**`append_daily_top_pool`**、**`schedule_next_buys`** |
+| 15 | 若 **`enable_daily_style_indices_persist`**：**`persist_daily_indices`** |
+| 16 | **`send_report_email`**（若已配置 SMTP） |
+
+另：在 **`get_market_summary`** 之后、分离确认之前，**`process_session_opens`** 会按交易日历对**已登记**的买卖在**当日开盘价**撮合（与 `replay_task` 源码顺序一致）。
 
 **依赖注入**：**`ReplayTask`** 可传入 **`llm_port`**、**`email_port`**（见 `app/domain/ports.py`），便于单测或替换实现。
+
+### 复盘报告定稿章节顺序（Markdown 从上到下）
+
+与 **`ReplayTask.run`** 最终写入 **`self.result`** 的拼接顺序一致（节选标题以配置 **`dragon_report_headings`** 为准，见 `app/infrastructure/config_defaults.py`）：
+
+| 顺序 | 内容 |
+|------|------|
+| 1 | **【实盘交易展示】**：配图（若生成）、今日收益 / 实盘至今收益 / 实盘至今收益率、说明与现金/成本口径摘要；无图时仍为表格版展示 |
+| 2 | **财经要闻前缀**（`_last_news_push_prefix`，若有） |
+| 3 | **大模型正文**：规范首行 **【摘要】…**；其后为龙头模板章节，默认依次为 **盘面综述 → 情绪与数据解读 → 周期定性 → 情绪数据量化 → 核心股聚焦 → 明日预案**（程序可补全五/七节或标缺失提示） |
+| 4 | **每日必看 吾日三省吾身**：文末温习，子块顺序同 **`FOOTER_SECTION_ORDER`**（`replay_viewpoint_footer.py`）：炒股养家 → 退学炒股 → Asking → 92科比 → 涅槃重升，再接底部附录文案 |
+
+邮件/网页预览时即为上述从上到下的阅读顺序。
 
 ---
 

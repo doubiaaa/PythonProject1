@@ -1063,12 +1063,28 @@ class DataFetcher:
 
     def get_sector_rank(self, date):
         """
-        获取板块资金流向排名（成交额、涨幅）。
-        注意：接口为当日「今日」行业资金流，非历史某日切片；参数 date 仅保留调用兼容。
+        获取板块排名：悟道 hot-sectors 优先，失败再东财行业资金流。
+        注意：东财侧为当日「今日」快照；悟道侧按复盘日 date 拉风口。
         """
-        cache_key = SECTOR_LIVE_CACHE_KEY
+        ds = str(date)[:8]
+        cache_key = (
+            f"{SECTOR_LIVE_CACHE_KEY}_{ds}"
+            if len(ds) == 8
+            else SECTOR_LIVE_CACHE_KEY
+        )
         if self._is_cache_valid(cache_key):
             return self._get_cache(cache_key)
+
+        if self._use_lb_openclaw():
+            try:
+                from app.services.lb_primary_data import lb_sector_rank_top
+
+                df_lb = lb_sector_rank_top(ds, top_n=5)
+                if df_lb is not None and not df_lb.empty:
+                    self._set_cache(cache_key, df_lb)
+                    return df_lb
+            except Exception as ex:
+                _log.warning("悟道板块排名失败，回退 akshare: %s", ex)
 
         try:
             # 使用正确的板块资金流向排名接口
@@ -1128,13 +1144,30 @@ class DataFetcher:
             self._set_cache(cache_key, pd.DataFrame())
             return pd.DataFrame()
 
-    def get_concept_fund_flow_rank(self, top_n: int = 12) -> pd.DataFrame:
+    def get_concept_fund_flow_rank(
+        self, top_n: int = 12, trade_date: Optional[str] = None
+    ) -> pd.DataFrame:
         """
-        东财「概念资金流」今日排行（与复盘日非严格对齐），用于复盘长图式「题材强弱」块。
+        概念排行：悟道 concepts/ranking 优先（按 trade_date），失败再东财概念资金流（仍为「今日」快照）。
         """
-        cache_key = CONCEPT_FLOW_CACHE_KEY
+        ds = str(trade_date)[:8] if trade_date else ""
+        cache_key = (
+            f"{CONCEPT_FLOW_CACHE_KEY}_{ds}"
+            if len(ds) == 8
+            else f"{CONCEPT_FLOW_CACHE_KEY}_live"
+        )
         if self._is_cache_valid(cache_key):
             return self._get_cache(cache_key)
+        if self._use_lb_openclaw() and len(ds) == 8:
+            try:
+                from app.services.lb_primary_data import lb_concept_flow_rank
+
+                df_lb = lb_concept_flow_rank(ds, top_n=top_n)
+                if df_lb is not None and not df_lb.empty:
+                    self._set_cache(cache_key, df_lb)
+                    return df_lb
+            except Exception as ex:
+                _log.warning("悟道概念排行失败，回退 akshare: %s", ex)
         try:
             df = self.fetch_with_retry(
                 ak.stock_sector_fund_flow_rank,
@@ -1293,8 +1326,20 @@ class DataFetcher:
                 continue
         return out
 
-    def _spot_red_green_counts(self) -> tuple[Optional[int], Optional[int]]:
-        """全 A 涨跌家数（东财 spot），失败返回 (None, None)。"""
+    def _spot_red_green_counts(
+        self, trade_date: Optional[str] = None
+    ) -> tuple[Optional[int], Optional[int]]:
+        """全 A 涨跌家数：悟道 market-overview 优先，失败再东财 spot。"""
+        ds = (str(trade_date)[:8] if trade_date else "") or ""
+        if self._use_lb_openclaw() and len(ds) == 8:
+            try:
+                from app.services.lb_primary_data import lb_rise_fall_counts
+
+                u, d = lb_rise_fall_counts(ds)
+                if u is not None and d is not None:
+                    return u, d
+            except Exception as ex:
+                _log.debug("悟道涨跌家数回退 spot: %s", ex)
         try:
             df = self.get_stock_zh_a_spot_em_cached()
             if df is None or df.empty or "涨跌幅" not in df.columns:
@@ -1777,7 +1822,9 @@ class DataFetcher:
             from app.utils.config import ConfigManager as _Cfg
 
             if _Cfg().get("enable_replay_concept_fund_snapshot", True):
-                df_concept = self.get_concept_fund_flow_rank(top_n=12)
+                df_concept = self.get_concept_fund_flow_rank(
+                    top_n=12, trade_date=str(date)[:8]
+                )
         except Exception:
             df_concept = pd.DataFrame()
 
@@ -2235,12 +2282,25 @@ class DataFetcher:
     def get_north_money(self, date) -> tuple[float, str]:
         """
         北向净流入（亿元）与状态。
+        悟道 capital-flow（hsgt）优先，失败再新浪/东财。
         状态：ok / ok_zero / empty_df / fetch_failed
         """
         ds = str(date)[:8]
         cached = _read_cache("north_net", ds)
         if isinstance(cached, dict) and "value" in cached and "status" in cached:
             return float(cached["value"]), str(cached["status"])
+        if self._use_lb_openclaw():
+            try:
+                from app.services.lb_primary_data import lb_north_money_yi
+
+                lb_out = lb_north_money_yi(ds)
+                if lb_out is not None:
+                    _write_cache(
+                        "north_net", ds, {"value": lb_out[0], "status": lb_out[1]}
+                    )
+                    return lb_out[0], lb_out[1]
+            except Exception as ex:
+                _log.warning("悟道北向资金失败，回退 akshare: %s", ex)
         try:
             df = None
             sina_fn = getattr(ak, "stock_hsgt_north_net_flow_sina", None)
@@ -2508,7 +2568,9 @@ class DataFetcher:
                 futures_map[ex.submit(self.get_yest_zt_premium, date, trade_days)] = (
                     "premium"
                 )
-                futures_map[ex.submit(self._spot_red_green_counts)] = "spot_ud"
+                futures_map[
+                    ex.submit(self._spot_red_green_counts, str(date)[:8])
+                ] = "spot_ud"
                 raw: dict = {}
                 for fut in as_completed(futures_map):
                     tag = futures_map[fut]
@@ -2636,7 +2698,7 @@ class DataFetcher:
 
         # 获取涨跌家数（并行阶段已取则复用全 A spot，避免二次请求）
         if up_n is None and down_n is None:
-            up_n, down_n = self._spot_red_green_counts()
+            up_n, down_n = self._spot_red_green_counts(str(date)[:8])
         # 存储到实例变量，供其他方法使用，确保数据一致性
         self._last_up_count = up_n
         self._last_down_count = down_n
@@ -2684,7 +2746,32 @@ class DataFetcher:
                     build_lb_openclaw_assist_section,
                 )
 
-                _assist = build_lb_openclaw_assist_section(str(date)[:8], trade_days)
+                _zt_codes_sample: list[str] = []
+                try:
+                    if (
+                        df_zt is not None
+                        and not getattr(df_zt, "empty", True)
+                        and "code" in df_zt.columns
+                    ):
+                        _dfz = df_zt.copy()
+                        if "lb" in _dfz.columns:
+                            try:
+                                _dfz = _dfz.assign(
+                                    _lb=pd.to_numeric(_dfz["lb"], errors="coerce").fillna(1)
+                                ).sort_values("_lb", ascending=False)
+                            except Exception:
+                                pass
+                        for _c in _dfz["code"].head(15):
+                            _s = re.sub(r"\D", "", str(_c))[:6].zfill(6)
+                            if len(_s) == 6 and _s not in _zt_codes_sample:
+                                _zt_codes_sample.append(_s)
+                except Exception:
+                    pass
+                _assist = build_lb_openclaw_assist_section(
+                    str(date)[:8],
+                    trade_days,
+                    zt_sample_codes=_zt_codes_sample or None,
+                )
                 if _assist:
                     summary += _assist
             except Exception as ex:

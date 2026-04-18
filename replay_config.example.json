@@ -1,4 +1,11 @@
 {
+  "enable_simulated_account": true,
+  "enable_trade_display_image": true,
+  "sim_account_initial_cash": 50000,
+  "sim_account_max_stocks": 5,
+  "sim_account_stop_loss_pct": 0.05,
+  "sim_account_take_profit_pct": 0.08,
+  "sim_account_max_hold_days": 15,
   "data_source": {
     "use_lb_openclaw": false,
     "lb_api_base": "https://stock.quicktiny.cn/api/openclaw",

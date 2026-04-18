@@ -38,6 +38,12 @@ jobs:
         with:
           fetch-depth: 1
 
+      # 实盘展示配图需中文字体；ubuntu-latest 默认不含 CJK
+      - name: Install Noto CJK fonts
+        run: |
+          sudo apt-get update -qq
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends fonts-noto-cjk
+
       - uses: actions/setup-python@v6
         with:
           python-version: "3.11"
