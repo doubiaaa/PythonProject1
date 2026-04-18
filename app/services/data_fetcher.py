@@ -678,6 +678,12 @@ class DataFetcher:
             repaired = repaired.rename(columns={cols[2]: "名称"})
         if "连板数" in required and "连板数" not in repaired.columns and len(cols) > 14:
             repaired = repaired.rename(columns={cols[14]: "连板数"})
+        if (
+            "连板数" in required
+            and "连板数" not in repaired.columns
+            and "昨日连板数" in repaired.columns
+        ):
+            repaired = repaired.rename(columns={"昨日连板数": "连板数"})
 
         if all(col in repaired.columns for col in required):
             _log.warning(
@@ -773,38 +779,119 @@ class DataFetcher:
         oldest = hist[-ZB_POOL_EM_LOOKBACK_TRADING_DAYS]
         return d_eff >= oldest
 
+    def _normalize_cached_zt_pool_df(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        磁盘/内存旧缓存可能仅有东财中文列名而无 lb，连板梯队等依赖 lb 会整表归零。
+        """
+        if df is None or getattr(df, "empty", True):
+            return pd.DataFrame()
+        out = df.copy()
+        cn_to_internal = {
+            "代码": "code",
+            "名称": "name",
+            "最新价": "price",
+            "涨跌幅": "pct_chg",
+            "连板数": "lb",
+            "炸板次数": "zb_count",
+            "所属行业": "industry",
+            "涨停原因": "reason",
+            "最后封板时间": "fb_time",
+            "首次封板时间": "first_time",
+        }
+        out = out.rename(columns={k: v for k, v in cn_to_internal.items() if k in out.columns})
+        if "lb" not in out.columns and "连板数" in out.columns:
+            out = out.rename(columns={"连板数": "lb"})
+        if "lb" not in out.columns and "昨日连板数" in out.columns:
+            out = out.rename(columns={"昨日连板数": "lb"})
+        if "lb" in out.columns:
+            _lb = pd.to_numeric(out["lb"], errors="coerce").fillna(1).astype(int)
+            out["lb"] = _lb.mask(_lb <= 0, 1)
+        return out
+
+    def _zt_pool_em_raw_to_internal(self, df: pd.DataFrame) -> pd.DataFrame:
+        """东财涨停池原始列 → 内部统一列（含 lb）。"""
+        df = self._repair_eastmoney_pool_columns(
+            df, "涨停池(原始)", _dsc.REQUIRED_ZT_POOL_COLUMNS
+        )
+        self._validate_required_columns(df, _dsc.REQUIRED_ZT_POOL_COLUMNS, "涨停池(原始)")
+        df = df.rename(
+            columns={
+                "代码": "code",
+                "名称": "name",
+                "最新价": "price",
+                "涨跌幅": "pct_chg",
+                "连板数": "lb",
+                "炸板次数": "zb_count",
+                "所属行业": "industry",
+                "涨停原因": "reason",
+                "最后封板时间": "fb_time",
+                "首次封板时间": "first_time",
+            }
+        )
+        _lb = pd.to_numeric(df["lb"], errors="coerce").fillna(1).astype(int)
+        df["lb"] = _lb.mask(_lb <= 0, 1)
+        return df
+
+    def _try_zt_pool_via_yesterday_pool_em(self, ds: str) -> pd.DataFrame:
+        """
+        东财 getTopicZTPool 对「当日涨停池」仅保留较短回溯时，较早交易日可能返回空表。
+        使用下一交易日的「昨日涨停股池」接口，等价于目标日 ds 的收盘涨停池（含连板数）。
+        """
+        td = self.get_trade_cal()
+        if not td:
+            return pd.DataFrame()
+        try:
+            i = td.index(ds)
+        except ValueError:
+            return pd.DataFrame()
+        if i + 1 >= len(td):
+            return pd.DataFrame()
+        nd = str(td[i + 1])
+        try:
+            df = self.fetch_with_retry(ak.stock_zt_pool_previous_em, date=nd)
+        except Exception as ex:
+            _log.warning("涨停池·昨日池回退失败(%s→%s): %s", ds, nd, ex)
+            return pd.DataFrame()
+        if df is None or df.empty:
+            return pd.DataFrame()
+        _log.info("涨停池主接口无数据，已用昨日涨停池回退：目标日 %s（参数日 %s）", ds, nd)
+        return df
+
     def get_zt_pool(self, date):
         """获取涨停股票池（主用AKShare，失败返回空DataFrame）"""
+        ds = str(date)[:8]
         cache_key = f"zt_pool_{date}"
         if self._is_cache_valid(cache_key):
-            return self._get_cache(cache_key)
-        disk = _read_cache("zt_pool_em", str(date)[:8])
+            cached = self._get_cache(cache_key)
+            if cached is None or getattr(cached, "empty", True):
+                return cached
+            if "lb" not in cached.columns:
+                fixed = self._normalize_cached_zt_pool_df(cached)
+                if "lb" in fixed.columns:
+                    self._set_cache(cache_key, fixed)
+                    return fixed
+            return cached
+        disk = _read_cache("zt_pool_em", ds)
         if disk is not None:
             df_disk = payload_to_df(disk)
-            if df_disk is not None and not df_disk.empty and "code" in df_disk.columns:
-                self._set_cache(cache_key, df_disk)
-                return df_disk
+            if df_disk is not None and not df_disk.empty:
+                has_code = "code" in df_disk.columns or "代码" in df_disk.columns
+                if has_code:
+                    df_disk = self._normalize_cached_zt_pool_df(df_disk)
+                    if "lb" in df_disk.columns:
+                        self._set_cache(cache_key, df_disk)
+                        return df_disk
         try:
-            df = self.fetch_with_retry(ak.stock_zt_pool_em, date=date)
+            df = self.fetch_with_retry(ak.stock_zt_pool_em, date=ds)
+            if df is None or df.empty:
+                df = self._try_zt_pool_via_yesterday_pool_em(ds)
             if df is None or df.empty:
                 self._set_cache(cache_key, pd.DataFrame())
                 return pd.DataFrame()
-            df = self._repair_eastmoney_pool_columns(
-                df, "涨停池(原始)", _dsc.REQUIRED_ZT_POOL_COLUMNS
-            )
-            self._validate_required_columns(df, _dsc.REQUIRED_ZT_POOL_COLUMNS, "涨停池(原始)")
-            # 重命名列
-            df = df.rename(columns={
-                '代码': 'code', '名称': 'name', '最新价': 'price', '涨跌幅': 'pct_chg',
-                '连板数': 'lb', '炸板次数': 'zb_count', '所属行业': 'industry',
-                '涨停原因': 'reason', '最后封板时间': 'fb_time', '首次封板时间': 'first_time'
-            })
-            # 连板数：缺失→1；≤0 归一为 1（部分源用 0 表示首板，避免「最高连板」被算成 0）
-            _lb = pd.to_numeric(df["lb"], errors="coerce").fillna(1).astype(int)
-            df["lb"] = _lb.mask(_lb <= 0, 1)
+            df = self._zt_pool_em_raw_to_internal(df)
             self._set_cache(cache_key, df)
             try:
-                _write_cache("zt_pool_em", str(date)[:8], df_to_payload(df))
+                _write_cache("zt_pool_em", ds, df_to_payload(df))
             except OSError as ex:
                 _log.warning("zt_pool 磁盘缓存失败: %s", ex)
             return df
