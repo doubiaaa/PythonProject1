@@ -40,7 +40,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "email_max_body_chars": 200000,
     "email_max_subject_chars": 200,
     "report_title_template": "T+0 竞价复盘 · 对 {trade_date} 的复盘",
-    "email_system_name": "T+0 竞价复盘系统",
+    "email_system_name": "龙头战法复盘 聚焦核心 拥抱龙头",
     "market_summary_parallel_fetch": True,
     "fetch_parallel_max_workers": 8,
     "zhaban_percentile_lookback": 15,
@@ -64,6 +64,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "enable_weekly_performance_email": True,
     "enable_weekly_ai_insight": True,
     "enable_weekly_market_snapshot": True,
+    # 龙头池明细/近四周：用悟道 /ladder 按交易日拼记录（off | when_watchlist_empty | merge | lb_only）
+    "weekly_dragon_lb_mode": "when_watchlist_empty",
+    # 周报「本周市场快照」涨跌停/炸板家数：优先按交易日拉悟道 OpenClaw（/ladder 等），需 LB_API_KEY
+    "weekly_snapshot_use_lb_limit_pools": True,
+    # 悟道三池均为空时是否再尝试东财/AkShare（避免接口偶发空表时整周为 0）
+    "weekly_snapshot_lb_fallback_ak": True,
     "enable_daily_style_indices_persist": True,
     "enable_strict_weekly_top20": True,
     "weekly_strict_top20_max_universe": 2800,

@@ -54,7 +54,7 @@ def main() -> int:
         "header_date": f"发送日 {date_s}",
         "title": subj,
         "report_banner_title": banner,
-        "system_name": str(_cm.get("email_system_name") or "T+0 竞价复盘系统"),
+        "system_name": str(_cm.get("email_system_name") or "龙头战法复盘 聚焦核心 拥抱龙头"),
     }
     ok, msg = send_report_email(
         cfg,

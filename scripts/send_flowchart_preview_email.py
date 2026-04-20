@@ -66,7 +66,7 @@ def main() -> int:
         "header_date": "表格式预览",
         "title": subject,
         "report_banner_title": "五人理论 · 表格式预览",
-        "system_name": str(cm.get("email_system_name") or "T+0 竞价复盘系统"),
+        "system_name": str(cm.get("email_system_name") or "龙头战法复盘 聚焦核心 拥抱龙头"),
     }
 
     cfg_send = dict(cfg)

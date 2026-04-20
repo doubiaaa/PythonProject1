@@ -351,6 +351,8 @@ def perform_separation_confirmation(
     result: Dict[str, Any] = {
         "date": date,
         "leading_stock": None,
+        "leading_stock_reason": "",
+        "leading_stock_candidates": [],
         "volatility_points": [],
         "candidates": [],
         "notes": [],
@@ -362,6 +364,50 @@ def perform_separation_confirmation(
         return result
     
     result['leading_stock'] = leading_stock
+    try:
+        ranked = df_zt.sort_values("lb", ascending=False).copy()
+        highest_lb = int(ranked["lb"].iloc[0])
+        peers = ranked[ranked["lb"] == highest_lb].copy()
+        peer_codes = set(str(peers.get("code", pd.Series(dtype=str)).astype(str).tolist()))
+        tie_breaker = "code_asc"
+        if len(peers) > 1:
+            if "amount" in peers.columns:
+                tie_breaker = "amount_desc"
+            elif "first_time" in peers.columns:
+                tie_breaker = "first_time_asc"
+        selected_code = str(leading_stock.get("code", ""))
+        selected_name = str(leading_stock.get("name", ""))
+        selected_lb = int(leading_stock.get("lb") or highest_lb)
+        if len(peers) == 1:
+            result["leading_stock_reason"] = (
+                f"总龙头按最高连板识别：当日空间板为 {selected_lb} 连板，仅 "
+                f"{selected_name}({selected_code}) 符合。"
+            )
+        else:
+            if tie_breaker == "amount_desc":
+                reason = "同为最高连板时按成交额降序优先"
+            elif tie_breaker == "first_time_asc":
+                reason = "同为最高连板时按首封时间更早优先"
+            else:
+                reason = "同为最高连板且无可用成交额/首封时间时按代码升序兜底"
+            result["leading_stock_reason"] = (
+                f"总龙头按最高连板识别：当日空间板为 {selected_lb} 连板；"
+                f"存在同层候选 {len(peers)} 只，{reason}，最终选中 {selected_name}({selected_code})。"
+            )
+        for _, row in peers.head(10).iterrows():
+            result["leading_stock_candidates"].append(
+                {
+                    "code": str(row.get("code") or ""),
+                    "name": str(row.get("name") or ""),
+                    "lb": int(row.get("lb") or 0),
+                    "industry": str(row.get("industry") or ""),
+                    "amount": float(row.get("amount") or 0.0),
+                    "first_time": str(row.get("first_time") or ""),
+                    "is_selected": str(row.get("code") or "") == selected_code,
+                }
+            )
+    except Exception:
+        pass
     
     # 获取总龙头分时数据
     leading_tick_df = get_tick_data(leading_stock.get("code", ""), date)

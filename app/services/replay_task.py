@@ -141,6 +141,40 @@ class ReplayTask:
         separation_block = ""
         if separation_result:
             notes = separation_result.get("notes") or []
+            leading_stock = separation_result.get("leading_stock") or {}
+            if leading_stock:
+                separation_block += "\n## 【总龙头·详细数据】\n"
+                separation_block += (
+                    f"- 总龙头：{leading_stock.get('name', '')}"
+                    f"({leading_stock.get('code', '')})\n"
+                )
+                separation_block += (
+                    f"- 连板：{int(leading_stock.get('lb') or 0)}"
+                    f"｜行业：{leading_stock.get('industry') or '—'}\n"
+                )
+                separation_block += (
+                    f"- 收盘价：{leading_stock.get('price') or leading_stock.get('close') or '—'}"
+                    f"｜涨跌幅：{leading_stock.get('pct_chg') or '—'}\n"
+                )
+                separation_block += (
+                    f"- 成交额：{leading_stock.get('amount') or '—'}"
+                    f"｜首次封板：{leading_stock.get('first_time') or '—'}\n"
+                )
+                lreason = str(separation_result.get("leading_stock_reason") or "").strip()
+                if lreason:
+                    separation_block += f"- 判定依据：{lreason}\n"
+                peers = separation_result.get("leading_stock_candidates") or []
+                if peers:
+                    separation_block += "- 同层候选（最高连板）：" + "；".join(
+                        [
+                            (
+                                f"{p.get('name','')}({p.get('code','')})"
+                                f" {int(p.get('lb') or 0)}连板"
+                                f"{' [已选]' if p.get('is_selected') else ''}"
+                            )
+                            for p in peers[:6]
+                        ]
+                    ) + "\n"
             if notes:
                 separation_block += "\n## 【分离确认·说明】\n"
                 for n in notes:
@@ -522,7 +556,7 @@ class ReplayTask:
                         "title": subj,
                         "report_banner_title": _banner,
                         "system_name": str(
-                            _cm.get("email_system_name") or "T+0 竞价复盘系统"
+                            _cm.get("email_system_name") or "龙头战法复盘 聚焦核心 拥抱龙头"
                         ),
                         "email_kpi": _kpi,
                         "email_dragon_meta": _dm,
