@@ -39,7 +39,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "email_app_version": "1.0",
     "email_max_body_chars": 200000,
     "email_max_subject_chars": 200,
-    "report_title_template": "T+0 竞价复盘 · 对 {trade_date} 的复盘",
+    "report_title_template": "龙头战法复盘 聚焦核心 拥抱龙头",
     "email_system_name": "龙头战法复盘 聚焦核心 拥抱龙头",
     "market_summary_parallel_fetch": True,
     "fetch_parallel_max_workers": 8,
@@ -147,6 +147,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "情绪数据量化",
         "核心股聚焦",
         "明日预案",
+        "明日交易计划模块",
     ],
     "replay_summary_line_max_chars": 220,
     "replay_text_templates": {

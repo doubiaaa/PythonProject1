@@ -51,6 +51,7 @@ from app.application.replay_text_rules import (
     ensure_summary_line as _ensure_summary_line,
     extract_summary_line as _extract_summary_line,
     is_llm_failure_payload as _is_llm_failure_payload,
+    strip_backup_targets_section as _strip_backup_targets_section,
 )
 from app.domain.ports import EmailDeliveryPort, LLMCompletionPort
 from app.output.replay_email_subject import (
@@ -436,6 +437,7 @@ class ReplayTask:
                     use_llm=bool(_cm_rb.get("enable_report_core_stocks_llm", False)),
                 )
             result = _ensure_dragon_report_sections(result)
+            result = _strip_backup_targets_section(result)
             try:
                 write_checkpoint_phase(
                     str(actual_date)[:8],
@@ -544,7 +546,7 @@ class ReplayTask:
                 _dm = getattr(data_fetcher, "_last_dragon_trader_meta", None) or {}
                 _title_tpl = str(
                     _cm.get("report_title_template")
-                    or "T+0 竞价复盘 · 对 {trade_date} 的复盘"
+                    or "龙头战法复盘 聚焦核心 拥抱龙头"
                 )
                 _banner = _title_tpl.replace("{trade_date}", str(actual_date))
                 eok, emsg = self._send_report_email(

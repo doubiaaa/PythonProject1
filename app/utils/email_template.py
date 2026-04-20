@@ -355,17 +355,7 @@ def build_email_content_prefix(
     if should_skip_rich_email_prefix(raw_md):
         return ""
 
-    title = html.escape(str(ev.get("report_banner_title") or "市场竞价深度复盘报告"))
-    sub = html.escape(str(ev.get("header_date") or "").strip() or "（见页头日期）")
-    parts: list[str] = [
-        '<div class="email-report-banner" style="margin:0 0 18px;padding:18px 20px;border-radius:12px;border:1px solid #e2e8f0;'
-        'background:linear-gradient(165deg,#f1f5f9 0%,#ffffff 60%);word-wrap:break-word;">'
-        '<div style="font-size:10px;letter-spacing:0.14em;text-transform:uppercase;color:#64748b;margin-bottom:8px;">'
-        "Market review · 系统生成</div>"
-        f'<div class="email-report-title" style="font-size:20px;font-weight:700;color:#0f172a;line-height:1.3;letter-spacing:-0.02em;word-break:break-word;">{title}</div>'
-        f'<div class="email-report-sub" style="font-size:14px;color:#64748b;margin-top:10px;line-height:1.55;word-break:break-word;">{sub}</div>'
-        "</div>"
-    ]
+    parts: list[str] = []
 
     kpi_html = build_kpi_card_html(ev.get("email_kpi") or {})
     if kpi_html:

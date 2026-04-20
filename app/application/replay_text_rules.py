@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Optional
 
 from app.utils.config import ConfigManager
@@ -96,3 +97,17 @@ def ensure_summary_line(text: str, market_phase: str = "高位震荡期") -> str
         market_phase=market_phase
     )
     return prefix + text
+
+
+def strip_backup_targets_section(text: str) -> str:
+    """
+    删除模型偶发输出的「备选标的」章节，落实“只做核心”。
+    """
+    s = text or ""
+    if not s.strip():
+        return s
+    # 删除标题为“八、备选标的”的整节，直到下一个同级标题或文末
+    pat = re.compile(
+        r"(?ms)^\s*###\s*八、\s*备选标的.*?(?=^\s*###\s*[一二三四五六七八九十]+、|\Z)"
+    )
+    return re.sub(pat, "", s).rstrip() + ("\n" if s.endswith("\n") else "")

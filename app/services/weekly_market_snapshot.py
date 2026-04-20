@@ -11,6 +11,10 @@ import pandas as pd
 if TYPE_CHECKING:
     from app.services.data_fetcher import DataFetcher
 
+from app.utils.logger import get_logger
+
+_log = get_logger(__name__)
+
 
 def trade_days_in_iso_week(
     trade_days: list[str], iso_year: int, iso_week: int
@@ -33,10 +37,52 @@ def _prev_iso_week(y: int, w: int) -> tuple[int, int]:
 def snapshot_one_day(
     fetcher: Any, date: str, trade_days: list[str]
 ) -> dict[str, Any]:
-    """单日：涨停家数、跌停、炸板、炸板率、溢价、最高连板。"""
-    df_zt = fetcher.get_zt_pool(date)
-    df_dt = fetcher.get_dt_pool(date)
-    df_zb = fetcher.get_zb_pool(date)
+    """单日：涨停家数、跌停、炸板、炸板率、溢价、最高连板。
+
+    若配置 ``weekly_snapshot_use_lb_limit_pools`` 且已配置 ``LB_API_KEY``（或 ``data_source.lb_api_key``），
+    则优先按交易日调用悟道 OpenClaw：/ladder、/limit-down、/broken-limit-up，与全局限流下的 AkShare 解耦。
+    """
+    from app.utils.config import ConfigManager
+
+    cm = ConfigManager()
+    use_lb = bool(cm.get("weekly_snapshot_use_lb_limit_pools", True))
+    fallback_ak = bool(cm.get("weekly_snapshot_lb_fallback_ak", True))
+
+    df_zt = pd.DataFrame()
+    df_dt = pd.DataFrame()
+    df_zb = pd.DataFrame()
+    pool_source = ""
+
+    if use_lb:
+        try:
+            from app.services.lb_openclaw_client import get_lb_api_key
+            from app.services.lb_openclaw_pools import (
+                fetch_dt_pool_lb,
+                fetch_zb_pool_lb,
+                fetch_zt_pool_lb,
+            )
+
+            if get_lb_api_key():
+                ds = str(date)[:8]
+                df_zt = fetch_zt_pool_lb(ds)
+                df_dt = fetch_dt_pool_lb(ds)
+                df_zb = fetch_zb_pool_lb(ds)
+                if fallback_ak and df_zt.empty and df_dt.empty and df_zb.empty:
+                    df_zt = fetcher.get_zt_pool(date)
+                    df_dt = fetcher.get_dt_pool(date)
+                    df_zb = fetcher.get_zb_pool(date)
+                    pool_source = "akshare_fallback"
+                else:
+                    pool_source = "wudao_lb"
+        except Exception as ex:
+            _log.warning("周报快照·悟道涨跌停池失败(%s)，将回退 DataFetcher: %s", date, ex)
+
+    if not pool_source:
+        df_zt = fetcher.get_zt_pool(date)
+        df_dt = fetcher.get_dt_pool(date)
+        df_zb = fetcher.get_zb_pool(date)
+        pool_source = "fetcher"
+
     zt_n = len(df_zt)
     dt_n = len(df_dt)
     zb_n = len(df_zb)
@@ -58,6 +104,7 @@ def snapshot_one_day(
         "premium_note": str(prem_note),
         "max_lb": max_lb,
         "top3_zt_industry": top3_ind,
+        "pool_source": pool_source,
     }
 
 
@@ -186,6 +233,15 @@ def format_snapshot_markdown(snap: Optional[dict[str, Any]]) -> str:
         "> 用于风格归纳：涨停家数、炸板率、溢价、连板高度、涨停行业分布。"
         "**锚点日涨幅前 20** 为**当日截面**；**严格周涨幅前 20** 见下文（自然周首尾价，与截面可对照）。\n\n",
     ]
+    if any(
+        (r.get("pool_source") == "wudao_lb")
+        for r in (snap.get("daily") or [])
+        if isinstance(r, dict)
+    ):
+        lines.append(
+            "> **涨跌停/炸板家数**：已按各交易日由 **悟道 OpenClaw**（`/ladder`、`/limit-down`、`/broken-limit-up`）拉取；"
+            "需配置 `LB_API_KEY`（或 `data_source.lb_api_key`）。\n\n"
+        )
     for row in snap.get("daily") or []:
         if row.get("error"):
             lines.append(f"- **{row.get('date')}**：拉取失败 {row.get('error')}\n")
