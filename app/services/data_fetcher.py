@@ -362,6 +362,8 @@ class DataFetcher:
         self._last_dragon_trader_meta: dict = {}
         self._last_finance_news_related: list = []
         self._last_finance_news_general: list = []
+        self._last_market_env_snapshot: dict = {}
+        self._last_sector_rank_df = None
         self._tick_js_cache: dict[str, tuple[float, Optional[pd.DataFrame]]] = {}
         self._north_hist_em_df: Optional[pd.DataFrame] = None
         self._north_hist_em_ts: float = 0.0
@@ -406,6 +408,141 @@ class DataFetcher:
 
     def set_current_task(self, task):
         self.current_task = task
+
+    @staticmethod
+    def _as_float(v: object) -> Optional[float]:
+        try:
+            if v is None:
+                return None
+            return float(v)
+        except (TypeError, ValueError):
+            return None
+
+    def _market_overview_turnover_yi(self, ds: str) -> Optional[float]:
+        """优先悟道 market-overview 获取当日全市场成交额（亿元）。"""
+        try:
+            from app.services.lb_openclaw_client import lb_get_safe, is_lb_openclaw_enabled
+        except Exception:
+            return None
+        if not is_lb_openclaw_enabled():
+            return None
+        d8 = re.sub(r"\D", "", str(ds))[:8]
+        if len(d8) != 8:
+            return None
+        iso = f"{d8[:4]}-{d8[4:6]}-{d8[6:8]}"
+        raw = lb_get_safe("/market-overview", {"date": iso})
+        if not isinstance(raw, dict):
+            raw = lb_get_safe("/market-overview", {"date": d8})
+        if not isinstance(raw, dict):
+            return None
+        for k in ("turnover", "成交额", "amount", "total_turnover", "成交额(亿)"):
+            x = self._as_float(raw.get(k))
+            if x is None:
+                continue
+            if x > 1e8:
+                x = x / 1e8
+            return round(x, 2)
+        return None
+
+    def _build_market_env_snapshot(
+        self,
+        date: str,
+        trade_days: list[str],
+        up_n: Optional[int],
+        down_n: Optional[int],
+        premium: float,
+        turnover_yi: Optional[float],
+    ) -> dict:
+        """系统性风险评估快照（供报告强制插入）。"""
+        out: dict[str, object] = {
+            "sh_point": None,
+            "sh_pct": None,
+            "sh_ma20_position": None,
+            "sh_ma20_direction": None,
+            "turnover_yi": turnover_yi,
+            "turnover_change_pct": None,
+            "turnover_gt_8000": None,
+            "up_count": up_n,
+            "down_count": down_n,
+            "rise_fall_ratio": None,
+            "yest_limitup_index_pct": (premium if premium != -99 else None),
+            "yest_limitup_gt_2pct": (premium > 2.0 if premium != -99 else None),
+            "has_missing": False,
+        }
+        try:
+            if up_n is not None and down_n is not None and down_n > 0:
+                out["rise_fall_ratio"] = round(float(up_n) / float(down_n), 2)
+        except Exception:
+            pass
+        if turnover_yi is not None:
+            out["turnover_gt_8000"] = bool(turnover_yi >= 8000.0)
+
+        try:
+            ds = str(date)[:8]
+            idx_df = self.fetch_with_retry(ak.stock_zh_index_spot_em)
+            if idx_df is not None and not idx_df.empty:
+                code_col = next((c for c in idx_df.columns if str(c).strip() == "代码"), None)
+                close_col = next((c for c in idx_df.columns if "最新价" in str(c)), None)
+                pct_col = next((c for c in idx_df.columns if "涨跌幅" in str(c)), None)
+                if code_col and close_col:
+                    idx_df = idx_df.copy()
+                    idx_df["_c6"] = (
+                        idx_df[code_col].astype(str).str.replace(r"[^0-9]", "", regex=True).str[-6:]
+                    )
+                    row = idx_df[idx_df["_c6"] == "000001"]
+                    if not row.empty:
+                        out["sh_point"] = self._as_float(row.iloc[0].get(close_col))
+                        if pct_col:
+                            out["sh_pct"] = self._as_float(row.iloc[0].get(pct_col))
+
+            hist = self.fetch_with_retry(ak.stock_zh_index_daily_em, symbol="sh000001")
+            if hist is not None and not hist.empty:
+                h = hist.copy()
+                dcol = next((c for c in h.columns if "日期" in str(c) or str(c) == "date"), None)
+                ccol = next((c for c in h.columns if "收盘" in str(c) or str(c) == "close"), None)
+                if dcol and ccol:
+                    h["_ds"] = h[dcol].astype(str).str.replace("-", "", regex=False).str[:8]
+                    h = h[h["_ds"] <= ds].sort_values("_ds")
+                    if len(h) >= 20:
+                        close_series = pd.to_numeric(h[ccol], errors="coerce")
+                        ma20 = close_series.rolling(20).mean()
+                        cur_close = float(close_series.iloc[-1])
+                        cur_ma20 = float(ma20.iloc[-1])
+                        out["sh_ma20_position"] = "上" if cur_close >= cur_ma20 else "下"
+                        if len(h) >= 21 and pd.notna(ma20.iloc[-2]):
+                            prev_ma20 = float(ma20.iloc[-2])
+                            diff = cur_ma20 - prev_ma20
+                            if diff > 0.05:
+                                out["sh_ma20_direction"] = "上"
+                            elif diff < -0.05:
+                                out["sh_ma20_direction"] = "下"
+                            else:
+                                out["sh_ma20_direction"] = "平"
+        except Exception as ex:
+            _log.warning("market_env index snapshot failed: %s", ex)
+
+        try:
+            i = trade_days.index(str(date)[:8])
+            if i > 0 and turnover_yi is not None:
+                prev_turn = self._market_overview_turnover_yi(trade_days[i - 1])
+                if prev_turn and prev_turn > 0:
+                    out["turnover_change_pct"] = round((turnover_yi - prev_turn) / prev_turn * 100.0, 1)
+        except Exception:
+            pass
+
+        required = (
+            "sh_point",
+            "sh_pct",
+            "sh_ma20_position",
+            "sh_ma20_direction",
+            "turnover_yi",
+            "turnover_change_pct",
+            "up_count",
+            "down_count",
+            "yest_limitup_index_pct",
+        )
+        out["has_missing"] = any(out.get(k) is None for k in required)
+        return out
 
     def get_stock_zh_a_spot_em_cached(self):
         """全 A 行情（东财优先，失败或空表则新浪 stock_zh_a_spot）短缓存。"""
@@ -1261,7 +1398,8 @@ class DataFetcher:
             # 样本过少或股票过多：回退全市场 spot
             avg_premium = self._yest_premium_from_full_spot(yest_codes)
             if avg_premium is None:
-                return 0.0, "无匹配数据"
+                # 无有效样本时返回缺失哨兵，避免被误展示为 0.0% 的“中性行情”
+                return -99.0, "无匹配数据"
             return round(avg_premium, 2), "正常"
         except Exception as e:
             _log.warning("计算溢价异常: %s", e)
@@ -2538,6 +2676,8 @@ class DataFetcher:
         self._last_dragon_trader_meta = {}
         self._last_finance_news_related = []
         self._last_finance_news_general = []
+        self._last_market_env_snapshot = {}
+        self._last_sector_rank_df = None
         summary = ""
         trade_days = self.get_trade_cal()
         if not trade_days:
@@ -2610,6 +2750,7 @@ class DataFetcher:
 
         # 供 replay_task 分离确认等复用（须为当日涨停池 DataFrame）
         self._last_zt_pool = df_zt.copy() if df_zt is not None else pd.DataFrame()
+        self._last_sector_rank_df = df_sector.copy() if df_sector is not None else pd.DataFrame()
         try:
             from app.services.market_kpi import premium_analysis
 
@@ -2941,6 +3082,14 @@ class DataFetcher:
             summary += f"\n## 分时成交探测\n- 跳过：{e!s}\n\n"
 
         _ty, _rp, _ = self._spot_turnover_rise_rate_flat()
+        self._last_market_env_snapshot = self._build_market_env_snapshot(
+            str(date)[:8],
+            trade_days,
+            up_n,
+            down_n,
+            float(premium),
+            _ty,
+        )
         _pa = getattr(self, "_last_premium_analysis", None) or {}
         _bf = int(getattr(self, "_last_big_face_count", 0) or 0)
         self._last_email_kpi = {
@@ -2961,5 +3110,6 @@ class DataFetcher:
             "position_suggestion": str(position_suggestion),
             "turnover_yi_est": _ty,
             "rise_rate_pct": _rp,
+            "market_env_snapshot": self._last_market_env_snapshot,
         }
         return summary, date  # 返回可能调整后的日期

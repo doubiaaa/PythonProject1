@@ -45,7 +45,13 @@ from app.services.replay_checkpoint import (
 from app.services.llm_client import get_llm_client
 from app.services.separation_confirmation import perform_separation_confirmation
 from app.services.news_mapper import analyze_finance_news
-from app.services.report_builder import append_core_stocks_and_plan_if_missing
+from app.services.report_builder import (
+    append_core_stocks_and_plan_if_missing,
+    enforce_final_report_cleanup,
+    enforce_execution_review_block,
+    enforce_market_env_block,
+    sanitize_replay_report_output_with_stats,
+)
 from app.services.replay_rule_engine import (
     evaluate_daily_replay_rules,
     render_replay_rule_markdown,
@@ -490,6 +496,35 @@ class ReplayTask:
                 self.log("已附加财经要闻摘要（推送与正文顶部）")
 
             result = append_replay_viewpoint_footer(result)
+            result, env_stats = enforce_market_env_block(result, data_fetcher)
+            self.log(
+                "系统性风险数据块："
+                f"插入{env_stats.get('market_env_block_inserted', 0)}处，"
+                f"摘要缺失标记{env_stats.get('summary_missing_marked', 0)}处"
+            )
+            result, sanitize_stats = sanitize_replay_report_output_with_stats(result)
+            result, exec_stats = enforce_execution_review_block(result, data_fetcher)
+            self.log(
+                "昨日计划执行评价："
+                f"插入{exec_stats.get('execution_review_inserted', 0)}处"
+            )
+            result, clean_stats = enforce_final_report_cleanup(result, str(actual_date))
+            self.log(
+                "最终清理器："
+                f"异常字符清理{clean_stats.get('abnormal_chars_removed', 0)}处，"
+                f"表格规范{clean_stats.get('tables_normalized', 0)}处，"
+                f"百分号空格修复{clean_stats.get('percent_spacing_fixed', 0)}处，"
+                f"重复标题移除{clean_stats.get('duplicate_headings_removed', 0)}处，"
+                f"日期统一{clean_stats.get('title_date_normalized', 0)}处"
+            )
+            self.log(
+                "输出校验器："
+                f"标签替换{sanitize_stats.get('status_replacements', 0)}处，"
+                f"触发条件量化替换{sanitize_stats.get('trigger_replacements', 0)}处，"
+                f"仓位冲突{sanitize_stats.get('position_conflicts', 0)}处，"
+                f"表格转换{sanitize_stats.get('wide_tables_converted', 0)}处，"
+                f"附录裁剪{sanitize_stats.get('appendix_lines_trimmed', 0)}行"
+            )
 
             try:
                 save_signal_report(str(actual_date)[:8], result or "")

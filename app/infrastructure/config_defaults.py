@@ -155,22 +155,19 @@ DEFAULT_CONFIG: dict[str, Any] = {
     ],
     "llm_failure_payload_scan_chars": 1200,
     "dragon_report_headings": [
-        "盘面综述",
-        "情绪与数据解读",
-        "周期定性",
-        "情绪数据量化",
-        "核心股聚焦",
-        "明日预案",
-        "明日交易计划模块",
+        "数据快照",
+        "情绪与周期",
+        "主线与备选",
+        "附录/心法",
     ],
     "replay_summary_line_max_chars": 220,
     "replay_text_templates": {
         "summary_fallback_api_error": (
-            "【摘要】周期阶段：{market_phase}｜适宜度：—｜置信度：低"
+            "【摘要】大盘：⚠️ 观望｜主线：待确认｜备选：待确认｜明日计划：若信号缺失则0%｜止损：破10日线减仓破20日线清仓"
             "（未生成正文：大模型限速或服务异常，见下方）\n\n"
         ),
         "summary_fallback_generic": (
-            "【摘要】周期阶段：{market_phase}｜适宜度：中｜置信度：低"
+            "【摘要】大盘：⚠️ 观望｜主线：待确认｜备选：待确认｜明日计划：若信号缺失则0%｜止损：破10日线减仓破20日线清仓"
             "（系统补全：模型未输出规范首行摘要）\n\n"
         ),
         "dragon_llm_failure_note": (
