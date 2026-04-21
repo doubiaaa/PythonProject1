@@ -315,6 +315,78 @@ def build_kpi_card_html(kpi: dict[str, Any]) -> str:
     )
 
 
+def build_next_day_alert_html(rule_report: Optional[dict[str, Any]] = None) -> str:
+    """明日条件单高亮块（来自程序化规则引擎）。"""
+    rr = rule_report or {}
+    alerts = rr.get("alerts_for_tomorrow") or []
+    if not alerts:
+        return ""
+    market_ok = bool(rr.get("market_ok"))
+    strong_sectors = {str(x) for x in (rr.get("strong_sectors") or []) if str(x).strip()}
+    executable_count = 0
+    blocked_count = 0
+    blocked_market_count = 0
+    blocked_sector_count = 0
+    rows: list[str] = []
+    for a in alerts[:8]:
+        sector = str(a.get("sector") or "")
+        sector_ok = (not strong_sectors) or (sector in strong_sectors)
+        executable = market_ok and sector_ok
+        if executable:
+            executable_count += 1
+        else:
+            blocked_count += 1
+            if not market_ok:
+                blocked_market_count += 1
+            else:
+                blocked_sector_count += 1
+        status_text = "可执行" if executable else "不可执行"
+        reason = "大盘与板块满足条件" if executable else ("大盘过滤未通过" if not market_ok else "板块共振未满足")
+        if executable:
+            row_bg = "#ecfdf5"
+            row_text = "#166534"
+        elif not market_ok:
+            row_bg = "#fee2e2"
+            row_text = "#991b1b"
+        else:
+            row_bg = "#fef2f2"
+            row_text = "#b91c1c"
+        rows.append(
+            "<tr>"
+            f'<td style="border:1px solid #fde68a;padding:6px 8px;background:{row_bg};color:{row_text};">{html.escape(str(a.get("name") or ""))}'
+            f'({html.escape(str(a.get("code") or ""))})</td>'
+            f'<td style="border:1px solid #fde68a;padding:6px 8px;text-align:right;background:{row_bg};color:{row_text};">{html.escape(str(a.get("trigger_price") or "—"))}</td>'
+            f'<td style="border:1px solid #fde68a;padding:6px 8px;text-align:right;background:{row_bg};color:{row_text};">>{html.escape(str(a.get("require_sector_rise") or "—"))}%</td>'
+            f'<td style="border:1px solid #fde68a;padding:6px 8px;text-align:right;background:{row_bg};color:{row_text};">{html.escape(str(a.get("stop_loss") or "—"))}</td>'
+            f'<td style="border:1px solid #fde68a;padding:6px 8px;text-align:center;background:{row_bg};color:{row_text};font-weight:700;">{status_text}</td>'
+            f'<td style="border:1px solid #fde68a;padding:6px 8px;background:{row_bg};color:{row_text};">{html.escape(reason)}</td>'
+            "</tr>"
+        )
+    return (
+        '<div style="margin:0 0 16px;padding:14px 16px;border:1px solid #f59e0b;border-radius:10px;'
+        'background:linear-gradient(180deg,#fffbeb 0%,#ffffff 100%);">'
+        '<div style="font-size:11px;font-weight:700;color:#b45309;letter-spacing:0.08em;margin:0 0 8px;">'
+        "ALERT · 明日条件单（程序化）</div>"
+        '<p style="margin:0 0 10px;font-size:13px;color:#92400e;line-height:1.6;">'
+        "以下标的仅在触发条件满足时执行；未触发则观望。"
+        f' <strong style="color:#166534;">可执行 {executable_count} 条</strong>'
+        f' / <strong style="color:#b91c1c;">不可执行 {blocked_count} 条</strong>'
+        f'（大盘阻塞 {blocked_market_count} 条，板块阻塞 {blocked_sector_count} 条）'
+        "</p>"
+        '<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:12px;">'
+        "<thead><tr>"
+        '<th style="border:1px solid #fde68a;padding:6px 8px;background:#fef3c7;text-align:left;">标的</th>'
+        '<th style="border:1px solid #fde68a;padding:6px 8px;background:#fef3c7;text-align:right;">触发价</th>'
+        '<th style="border:1px solid #fde68a;padding:6px 8px;background:#fef3c7;text-align:right;">板块涨幅</th>'
+        '<th style="border:1px solid #fde68a;padding:6px 8px;background:#fef3c7;text-align:right;">止损位</th>'
+        '<th style="border:1px solid #fde68a;padding:6px 8px;background:#fef3c7;text-align:center;">状态</th>'
+        '<th style="border:1px solid #fde68a;padding:6px 8px;background:#fef3c7;text-align:left;">说明</th>'
+        "</tr></thead><tbody>"
+        + "".join(rows)
+        + "</tbody></table></div>"
+    )
+
+
 def strip_first_summary_line(md: str) -> str:
     """去掉正文里首条【摘要】行（若需与页头模块去重时由调用方使用）。"""
     lines = (md or "").split("\n")
@@ -360,6 +432,10 @@ def build_email_content_prefix(
     kpi_html = build_kpi_card_html(ev.get("email_kpi") or {})
     if kpi_html:
         parts.append(kpi_html)
+
+    alert_html = build_next_day_alert_html(ev.get("email_rule_report") or {})
+    if alert_html:
+        parts.append(alert_html)
 
     ladder_html = build_ladder_distribution_email_html(ev.get("email_dragon_meta"))
     if ladder_html:

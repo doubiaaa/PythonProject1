@@ -46,6 +46,11 @@ from app.services.llm_client import get_llm_client
 from app.services.separation_confirmation import perform_separation_confirmation
 from app.services.news_mapper import analyze_finance_news
 from app.services.report_builder import append_core_stocks_and_plan_if_missing
+from app.services.replay_rule_engine import (
+    evaluate_daily_replay_rules,
+    render_replay_rule_markdown,
+    save_replay_rule_report,
+)
 from app.application.replay_text_rules import (
     ensure_dragon_report_sections as _ensure_dragon_report_sections,
     ensure_summary_line as _ensure_summary_line,
@@ -350,6 +355,7 @@ class ReplayTask:
             eff_w = None
             stab_hint = ""
             separation_result = None
+            rule_report: Optional[dict[str, Any]] = None
             
             # 执行分离确认分析（断点续跑时可能未经过 get_market_summary，须补拉涨停池）
             try:
@@ -438,6 +444,15 @@ class ReplayTask:
                 )
             result = _ensure_dragon_report_sections(result)
             result = _strip_backup_targets_section(result)
+            try:
+                _cm_rule = ConfigManager()
+                if _cm_rule.get("enable_replay_rule_engine", True):
+                    rule_report = evaluate_daily_replay_rules(actual_date, data_fetcher)
+                    save_replay_rule_report(rule_report, _cm_rule)
+                    result += render_replay_rule_markdown(rule_report)
+                    self.log("程序化复盘条件引擎已生成（含明日预警条件）")
+            except Exception as ex:
+                self.log(f"程序化复盘条件引擎执行失败：{ex}")
             try:
                 write_checkpoint_phase(
                     str(actual_date)[:8],
@@ -537,10 +552,30 @@ class ReplayTask:
                 except Exception as ex:
                     self.log(f"风格指数入库失败：{ex}")
             if email_cfg and has_email_config(email_cfg):
+                _rule_suffix = ""
+                if rule_report:
+                    _alerts = rule_report.get("alerts_for_tomorrow") or []
+                    _market_ok = bool(rule_report.get("market_ok"))
+                    _strong = {
+                        str(x)
+                        for x in (rule_report.get("strong_sectors") or [])
+                        if str(x).strip()
+                    }
+                    _exec = 0
+                    _block = 0
+                    for _a in _alerts:
+                        _sec = str(_a.get("sector") or "")
+                        _sec_ok = (not _strong) or (_sec in _strong)
+                        if _market_ok and _sec_ok:
+                            _exec += 1
+                        else:
+                            _block += 1
+                    _rule_suffix = f"[可执行{_exec}/阻塞{_block}]"
                 subj = build_replay_success_email_subject(
                     summary_line=sum_line,
                     trade_date=str(actual_date),
                     mode_name=MODE_NAME,
+                    rule_status_suffix=_rule_suffix,
                 )
                 _kpi = getattr(data_fetcher, "_last_email_kpi", None) or {}
                 _dm = getattr(data_fetcher, "_last_dragon_trader_meta", None) or {}
@@ -562,6 +597,7 @@ class ReplayTask:
                         ),
                         "email_kpi": _kpi,
                         "email_dragon_meta": _dm,
+                        "email_rule_report": rule_report or {},
                     },
                     inline_images=replay_footer_inline_images(),
                 )
