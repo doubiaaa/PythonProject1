@@ -26,11 +26,10 @@ def main() -> int:
         ok = False
 
     try:
-        import akshare as ak
         import pandas as pd
 
         _ = pd.__version__
-        print(f"[OK] akshare / pandas")
+        print("[OK] akshare / pandas")
     except Exception as e:
         print(f"[FAIL] akshare/pandas: {e}")
         ok = False

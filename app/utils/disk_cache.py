@@ -88,7 +88,6 @@ def set_json(key: str, payload: Any, *, cache_root: Optional[str] = None) -> Non
 
 
 def df_to_payload(df) -> dict[str, Any]:
-    import pandas as pd
 
     if df is None:
         return {"empty": True, "columns": [], "records": []}

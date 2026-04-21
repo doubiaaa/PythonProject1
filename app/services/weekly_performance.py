@@ -12,8 +12,6 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any, Optional
 
-import akshare as ak
-import pandas as pd
 
 from app.services.watchlist_store import load_all_records
 
@@ -443,7 +441,6 @@ def build_weekly_report_markdown(
     )
     for r in sorted(rows, key=lambda x: (x.signal_date, x.code)):
         rp = f"{r.ret_pct}%" if r.ret_pct is not None else "—"
-        tag_s = r.tag or "—"
         lines.append(
             f"| {r.signal_date} | {r.code} | {r.name} | {r.tag or '—'} | {r.entry_date or '—'} | "
             f"{r.exit_date or '—'} | {rp} | {r.note} |\n"

@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any, Optional
 import pandas as pd
 
 if TYPE_CHECKING:
-    from app.services.data_fetcher import DataFetcher
+    pass
 
 from app.utils.logger import get_logger
 

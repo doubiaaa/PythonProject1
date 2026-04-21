@@ -23,25 +23,20 @@ _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from app.services.strategy_preference import (
+from app.services.strategy_preference import (  # noqa: E402
     BUCKETS,
     DEFAULT_WEIGHTS,
     tag_to_bucket,
     _smooth,
     _penalize_large_shift,
     _apply_floor_cap,
-    _clip_bucket_normalize,
     _limit_weight_delta_vs_old,
 )
-from app.services.weekly_performance import (
-    SignalReturnRow,
+from app.services.weekly_performance import (  # noqa: E402
     compute_returns_for_records,
     records_for_iso_week,
-    entry_exit_for_signal,
-    fetch_open_close_qfq,
-    norm_code,
 )
-from app.services.watchlist_store import load_all_records
+from app.services.watchlist_store import load_all_records  # noqa: E402
 
 
 def get_trade_days() -> List[str]:

@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable, Optional, TypeVar
+from typing import Callable, Optional, TypeVar
 
 from app.infrastructure.resilience.exceptions import format_fault_log
 from app.utils.logger import get_logger

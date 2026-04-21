@@ -9,8 +9,9 @@ from app.services.strategy_preference import (
     tag_to_bucket,
 )
 
-_OLD = {k: 0.2 for k in BUCKETS}
 from app.services.weekly_performance import SignalReturnRow
+
+_OLD = {k: 0.2 for k in BUCKETS}
 
 
 def test_tag_to_bucket():

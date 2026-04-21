@@ -21,9 +21,9 @@ _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from app.services.email_notify import has_email_config, resolve_email_config, send_report_email
-from app.utils.config import ConfigManager
-from app.utils.replay_viewpoint_footer import (
+from app.services.email_notify import has_email_config, resolve_email_config, send_report_email  # noqa: E402
+from app.utils.config import ConfigManager  # noqa: E402
+from app.utils.replay_viewpoint_footer import (  # noqa: E402
     build_theory_review_markdown,
     replay_footer_inline_images_weekly,
 )

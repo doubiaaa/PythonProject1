@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 from __future__ import annotations
 
-import pandas as pd
 
 from app.services.lb_openclaw_pools import (
     ladder_to_zt_dataframe,

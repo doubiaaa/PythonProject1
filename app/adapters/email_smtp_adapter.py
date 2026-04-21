@@ -5,7 +5,6 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from app.domain.ports import EmailDeliveryPort
 from app.services.email_notify import send_report_email
 
 

@@ -24,11 +24,16 @@ def is_reasonable_ohlc_row(
 ) -> bool:
     """粗筛价格行：非负且 high>=low（用于拦截明显脏行）。"""
     try:
-        o, h, l, c = float(open_v), float(high), float(low), float(close_v)
+        open_p, high_p, low_p, close_p = (
+            float(open_v),
+            float(high),
+            float(low),
+            float(close_v),
+        )
     except (TypeError, ValueError):
         return False
-    if min(o, h, l, c) < 0:
+    if min(open_p, high_p, low_p, close_p) < 0:
         return False
-    if h < l:
+    if high_p < low_p:
         return False
     return True

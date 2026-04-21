@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import threading
 from datetime import datetime, timedelta
 from typing import Any, Optional

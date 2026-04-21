@@ -368,7 +368,6 @@ def perform_separation_confirmation(
         ranked = df_zt.sort_values("lb", ascending=False).copy()
         highest_lb = int(ranked["lb"].iloc[0])
         peers = ranked[ranked["lb"] == highest_lb].copy()
-        peer_codes = set(str(peers.get("code", pd.Series(dtype=str)).astype(str).tolist()))
         tie_breaker = "code_asc"
         if len(peers) > 1:
             if "amount" in peers.columns:

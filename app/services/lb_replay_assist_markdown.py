@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import html
-from typing import Any, Optional
+from typing import Optional
 
 from app.services.lb_openclaw_client import lb_get_safe
 from app.utils.logger import get_logger
@@ -156,9 +156,9 @@ def _block_hot_sectors(ds: str) -> str:
 def _block_rank_pair() -> str:
     """实时排行快照（无历史 date 参数，标注为拉取时刻）。"""
     g = lb_get_safe("/rank", {"type": "gainers", "market": "all", "limit": 15})
-    l = lb_get_safe("/rank", {"type": "losers", "market": "all", "limit": 15})
+    losers = lb_get_safe("/rank", {"type": "losers", "market": "all", "limit": 15})
     parts: list[str] = []
-    for title, data in (("涨幅榜 TOP15（快照）", g), ("跌幅榜 TOP15（快照）", l)):
+    for title, data in (("涨幅榜 TOP15（快照）", g), ("跌幅榜 TOP15（快照）", losers)):
         if not isinstance(data, list):
             continue
         rows = []

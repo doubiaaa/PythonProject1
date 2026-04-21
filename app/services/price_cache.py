@@ -5,13 +5,11 @@
 
 import os
 import json
-from datetime import datetime
-from typing import Optional, Dict, Any
+from typing import Optional
 
 import pandas as pd
 import akshare as ak
 
-from app.utils.config import ConfigManager
 
 _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
 DATA_DIR = os.path.join(_PROJECT_ROOT, "data")

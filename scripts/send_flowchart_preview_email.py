@@ -13,9 +13,9 @@ _ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 if _ROOT not in sys.path:
     sys.path.insert(0, _ROOT)
 
-from app.services.email_notify import resolve_email_config, send_report_email
-from app.utils.config import ConfigManager
-from app.utils.replay_viewpoint_footer import build_theory_review_markdown
+from app.services.email_notify import resolve_email_config, send_report_email  # noqa: E402
+from app.utils.config import ConfigManager  # noqa: E402
+from app.utils.replay_viewpoint_footer import build_theory_review_markdown  # noqa: E402
 
 
 def _smtp_cfg_fallback() -> dict | None:

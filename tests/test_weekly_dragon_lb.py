@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """悟道梯队补全：龙头池明细 / 近四周与 resolve_week_dragon_records。"""
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pandas as pd
 
