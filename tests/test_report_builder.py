@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 from app.services.report_builder import (
+    _build_sector_strength_table,
     _detect_stage_92kebi,
     append_core_stocks_and_plan_if_missing,
     enforce_final_report_cleanup,
@@ -65,6 +66,18 @@ def test_sanitize_compresses_wide_table():
     assert "| field1" not in out
 
 
+def test_sanitize_keeps_commentary_module_table():
+    raw = (
+        "### 退学炒股 · 解读摘要\n\n"
+        "| 模块 | 要点 |\n"
+        "|---|---|\n"
+        "| 核心原则 | 这是一条很长很长的描述，用于覆盖移动端宽度阈值但仍应保留表格形态，不应被自动改写成列表。 |\n"
+    )
+    out = sanitize_replay_report_output(raw)
+    assert "表格已自动转列表" not in out
+    assert "| 模块 | 要点 |" in out
+
+
 def test_sanitize_stats_are_reported():
     raw = (
         "结论：可交易\n"
@@ -110,6 +123,8 @@ def test_enforce_market_env_block_inserts_before_section_and_marks_summary():
     raw = "【摘要】大盘：⚠️ 观望\n\n### 一、大盘与主线环境评估\n正文"
     out, stats = enforce_market_env_block(raw, _F())
     assert "### 程序侧行情接口快照（系统性风险评估）" in out
+    assert "创业板指" in out
+    assert "昨日涨停溢价" in out
     assert out.index("程序侧行情接口快照") < out.index("### 一、大盘与主线环境评估")
     assert "数据缺失，系统性风险评估不完整" in out
     assert stats["market_env_block_inserted"] == 1
@@ -140,10 +155,12 @@ def test_sector_rps_missing_shows_no_data():
         use_llm=False,
     )
     assert "主线板块评估（多维评分）" in out
-    assert "无数据" in out
+    assert "<table>" in out
+    assert "—" in out
+    assert "暂无可用数据" in out
 
 
-def test_enforce_execution_review_block_before_section_five():
+def test_enforce_execution_review_block_disabled():
     class _F:
         _last_auction_meta = {
             "top_pool": [
@@ -154,10 +171,9 @@ def test_enforce_execution_review_block_before_section_five():
 
     raw = "## 明日计划\n内容\n\n### 五、持仓标的的应对预案\n内容"
     out, stats = enforce_execution_review_block(raw, _F())
-    assert "## 昨日计划执行评价" in out
-    assert "000001 平安银行" in out
-    assert out.index("## 昨日计划执行评价") < out.index("### 五、持仓标的的应对预案")
-    assert stats["execution_review_inserted"] == 1
+    assert "## 昨日计划执行评价" not in out
+    assert out == raw
+    assert stats["execution_review_inserted"] == 0
 
 
 def test_final_cleanup_rules():
@@ -199,3 +215,38 @@ def test_detect_stage_92kebi_main_fall():
     )
     assert stage == "主跌"
     assert "空仓" in advice
+
+
+def test_sector_strength_table_enriches_from_lb(monkeypatch):
+    class _F:
+        _last_email_kpi = {"turnover_yi_est": 10000.0}
+        _last_sector_rank_df = None
+
+        @staticmethod
+        def _use_lb_openclaw():
+            return True
+
+    def _fake_lb_get_safe(path, params=None, timeout=None):
+        if path == "/rank" and (params or {}).get("type") == "amount":
+            return [{"code": "000001", "amount": 1230000000}]
+        if path == "/rank" and (params or {}).get("type") == "gainers_20d":
+            return [{"code": "000001", "metricValue": 86.4}]
+        if path == "/search":
+            return {"items": [{"symbol": "000001", "industry": "算力"}]}
+        return None
+
+    monkeypatch.setattr(
+        "app.services.lb_openclaw_client.lb_get_safe",
+        _fake_lb_get_safe,
+    )
+    lines = _build_sector_strength_table(
+        main_sectors=[],
+        top_pool=[{"code": "000001", "name": "A股", "sector": ""}],
+        market_env={"turnover_yi": 10000.0},
+        data_fetcher=_F(),
+    )
+    out = "\n".join(lines)
+    assert "<table>" in out
+    assert "算力" in out
+    assert "12.3" in out
+    assert "86.4" in out

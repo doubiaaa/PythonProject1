@@ -459,6 +459,12 @@ class DataFetcher:
             "sh_pct": None,
             "sh_ma20_position": None,
             "sh_ma20_direction": None,
+            "sh_above_ma20": None,
+            "cyb_point": None,
+            "cyb_pct": None,
+            "cyb_ma20_position": None,
+            "cyb_ma20_direction": None,
+            "cyb_above_ma20": None,
             "turnover_yi": turnover_yi,
             "turnover_change_pct": None,
             "turnover_gt_8000": None,
@@ -494,6 +500,11 @@ class DataFetcher:
                         out["sh_point"] = self._as_float(row.iloc[0].get(close_col))
                         if pct_col:
                             out["sh_pct"] = self._as_float(row.iloc[0].get(pct_col))
+                    row_cyb = idx_df[idx_df["_c6"] == "399006"]
+                    if not row_cyb.empty:
+                        out["cyb_point"] = self._as_float(row_cyb.iloc[0].get(close_col))
+                        if pct_col:
+                            out["cyb_pct"] = self._as_float(row_cyb.iloc[0].get(pct_col))
 
             hist = self.fetch_with_retry(ak.stock_zh_index_daily_em, symbol="sh000001")
             if hist is not None and not hist.empty:
@@ -509,6 +520,7 @@ class DataFetcher:
                         cur_close = float(close_series.iloc[-1])
                         cur_ma20 = float(ma20.iloc[-1])
                         out["sh_ma20_position"] = "上" if cur_close >= cur_ma20 else "下"
+                        out["sh_above_ma20"] = bool(cur_close >= cur_ma20)
                         if len(h) >= 21 and pd.notna(ma20.iloc[-2]):
                             prev_ma20 = float(ma20.iloc[-2])
                             diff = cur_ma20 - prev_ma20
@@ -518,8 +530,44 @@ class DataFetcher:
                                 out["sh_ma20_direction"] = "下"
                             else:
                                 out["sh_ma20_direction"] = "平"
+            hist_cyb = self.fetch_with_retry(ak.stock_zh_index_daily_em, symbol="sz399006")
+            if hist_cyb is not None and not hist_cyb.empty:
+                h = hist_cyb.copy()
+                dcol = next((c for c in h.columns if "日期" in str(c) or str(c) == "date"), None)
+                ccol = next((c for c in h.columns if "收盘" in str(c) or str(c) == "close"), None)
+                if dcol and ccol:
+                    h["_ds"] = h[dcol].astype(str).str.replace("-", "", regex=False).str[:8]
+                    h = h[h["_ds"] <= ds].sort_values("_ds")
+                    if len(h) >= 20:
+                        close_series = pd.to_numeric(h[ccol], errors="coerce")
+                        ma20 = close_series.rolling(20).mean()
+                        cur_close = float(close_series.iloc[-1])
+                        cur_ma20 = float(ma20.iloc[-1])
+                        out["cyb_ma20_position"] = "上" if cur_close >= cur_ma20 else "下"
+                        out["cyb_above_ma20"] = bool(cur_close >= cur_ma20)
+                        if len(h) >= 21 and pd.notna(ma20.iloc[-2]):
+                            prev_ma20 = float(ma20.iloc[-2])
+                            diff = cur_ma20 - prev_ma20
+                            if diff > 0.05:
+                                out["cyb_ma20_direction"] = "上"
+                            elif diff < -0.05:
+                                out["cyb_ma20_direction"] = "下"
+                            else:
+                                out["cyb_ma20_direction"] = "平"
         except Exception as ex:
             _log.warning("market_env index snapshot failed: %s", ex)
+
+        # 东财指数日线偶发空表时，用悟道 kline 回退补 20 日线位置。
+        if out.get("sh_ma20_position") is None:
+            p, d, a = self._index_ma20_snapshot_from_lb(str(date)[:8], "000001.SH")
+            out["sh_ma20_position"] = p
+            out["sh_ma20_direction"] = d
+            out["sh_above_ma20"] = a
+        if out.get("cyb_ma20_position") is None:
+            p, d, a = self._index_ma20_snapshot_from_lb(str(date)[:8], "399006.SZ")
+            out["cyb_ma20_position"] = p
+            out["cyb_ma20_direction"] = d
+            out["cyb_above_ma20"] = a
 
         try:
             i = trade_days.index(str(date)[:8])
@@ -1372,6 +1420,113 @@ class DataFetcher:
             return None
         return float(today_data["涨跌幅"].mean())
 
+    def _yest_premium_from_lb(self, yest_date: str) -> Optional[float]:
+        """悟道接口回退：按昨日窗口聚合涨停溢价均值。"""
+        if not self._use_lb_openclaw():
+            return None
+        try:
+            from app.services.lb_openclaw_client import lb_get_safe
+
+            rows: list[float] = []
+            page = 1
+            while page <= 5:
+                raw = lb_get_safe(
+                    "/limit-up/premium",
+                    {
+                        "startDate": yest_date,
+                        "endDate": yest_date,
+                        "minLimitUpCount": 1,
+                        "limit": 200,
+                        "page": page,
+                    },
+                )
+                if raw is None:
+                    break
+                stocks = raw.get("stocks") if isinstance(raw, dict) else raw
+                if not isinstance(stocks, list) or not stocks:
+                    break
+                for it in stocks:
+                    if not isinstance(it, dict):
+                        continue
+                    v = it.get("avgPremium")
+                    try:
+                        if v is not None:
+                            rows.append(float(v))
+                    except (TypeError, ValueError):
+                        continue
+                if isinstance(raw, dict):
+                    total = raw.get("total")
+                    limit = raw.get("limit") or 200
+                    if isinstance(total, int) and total <= page * int(limit):
+                        break
+                page += 1
+            if not rows:
+                return None
+            return float(sum(rows) / len(rows))
+        except Exception:
+            return None
+
+    def _yest_premium_from_market_overview(self, date: str) -> Optional[float]:
+        """悟道 market-overview 口径：昨日涨停股今日平均涨幅。"""
+        if not self._use_lb_openclaw():
+            return None
+        try:
+            from app.services.lb_openclaw_client import lb_get_safe
+
+            ds = re.sub(r"\D", "", str(date))[:8]
+            if len(ds) != 8:
+                return None
+            iso = f"{ds[:4]}-{ds[4:6]}-{ds[6:8]}"
+            raw = lb_get_safe("/market-overview", {"date": iso})
+            if not isinstance(raw, dict):
+                raw = lb_get_safe("/market-overview", {"date": ds})
+            if not isinstance(raw, dict):
+                return None
+            v = raw.get("yesterday_limit_up_avg_pcp")
+            return float(v) if v is not None else None
+        except Exception:
+            return None
+
+    def _index_ma20_snapshot_from_lb(self, ds: str, code: str) -> tuple[Optional[str], Optional[str], Optional[bool]]:
+        """悟道 kline 回退：计算指数 20 日线位置/方向。"""
+        if not self._use_lb_openclaw():
+            return None, None, None
+        try:
+            from app.services.lb_openclaw_client import lb_get_safe
+
+            raw = lb_get_safe(f"/kline/{code}", {"days": 80, "endDate": ds})
+            rows = raw if isinstance(raw, list) else []
+            closes: list[float] = []
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                d = re.sub(r"\D", "", str(r.get("date") or ""))[:8]
+                if len(d) != 8 or d > ds:
+                    continue
+                v = self._as_float(r.get("close"))
+                if v is not None:
+                    closes.append(float(v))
+            if len(closes) < 20:
+                return None, None, None
+            cur_close = float(closes[-1])
+            ma20 = sum(closes[-20:]) / 20.0
+            pos = "上" if cur_close >= ma20 else "下"
+            above = bool(cur_close >= ma20)
+            if len(closes) >= 21:
+                prev_ma20 = sum(closes[-21:-1]) / 20.0
+                diff = ma20 - prev_ma20
+                if diff > 0.05:
+                    direction = "上"
+                elif diff < -0.05:
+                    direction = "下"
+                else:
+                    direction = "平"
+            else:
+                direction = None
+            return pos, direction, above
+        except Exception:
+            return None, None, None
+
     def get_yest_zt_premium(self, date, trade_days=None):
         """计算昨日涨停股票在当日（date）的平均溢价"""
         trade_days = trade_days if trade_days is not None else self.get_trade_cal()
@@ -1382,9 +1537,18 @@ class DataFetcher:
             return -99.0, "无昨日数据"
         yest_date = trade_days[idx - 1]
 
+        mo_premium = self._yest_premium_from_market_overview(date)
+        if mo_premium is not None:
+            return round(mo_premium, 2), "悟道总览"
+
         yest_zt = self.get_zt_pool(yest_date)
         if yest_zt.empty:
             return -99.0, "昨日无涨停"
+
+        # 悟道接口可用时优先使用官方涨停溢价口径，避免本地 spot/hist 匹配误差。
+        lb_premium = self._yest_premium_from_lb(yest_date)
+        if lb_premium is not None:
+            return round(lb_premium, 2), "悟道直连"
 
         yest_codes = yest_zt["code"].tolist()
 
@@ -1392,15 +1556,24 @@ class DataFetcher:
             chgs = None
             if len(yest_codes) <= YEST_PREMIUM_HIST_MAX_CODES:
                 chgs = self._pct_chg_for_codes_on_date(yest_codes, date)
-                if chgs and len(chgs) >= max(1, len(yest_codes) // 2):
+                if chgs:
                     avg_premium = sum(chgs) / len(chgs)
-                    return round(avg_premium, 2), "正常"
+                    if len(chgs) >= max(1, len(yest_codes) // 2):
+                        return round(avg_premium, 2), "正常"
+                    return (
+                        round(avg_premium, 2),
+                        f"样本偏少({len(chgs)}/{len(yest_codes)})",
+                    )
             # 样本过少或股票过多：回退全市场 spot
             avg_premium = self._yest_premium_from_full_spot(yest_codes)
-            if avg_premium is None:
-                # 无有效样本时返回缺失哨兵，避免被误展示为 0.0% 的“中性行情”
-                return -99.0, "无匹配数据"
-            return round(avg_premium, 2), "正常"
+            if avg_premium is not None:
+                return round(avg_premium, 2), "正常"
+            # 再次回退悟道接口（可用于历史复盘时避免 spot 失配）
+            lb_premium = self._yest_premium_from_lb(yest_date)
+            if lb_premium is not None:
+                return round(lb_premium, 2), "悟道回退"
+            # 无有效样本时返回缺失哨兵，避免被误展示为 0.0% 的“中性行情”
+            return -99.0, "无匹配数据"
         except Exception as e:
             _log.warning("计算溢价异常: %s", e)
             return -99.0, f"异常:{str(e)[:20]}"
@@ -2108,7 +2281,14 @@ class DataFetcher:
         if len(yest_codes) <= YEST_PREMIUM_HIST_MAX_CODES:
             pct_map = self._pct_map_for_codes_on_date(yest_codes, date)
         if len(pct_map) < max(3, len(yest_codes) // 3):
-            pct_map = self._pct_map_from_spot_for_codes(yest_codes)
+            spot_map = self._pct_map_from_spot_for_codes(yest_codes)
+            if spot_map:
+                pct_map.update(spot_map)
+            if len(pct_map) < max(3, len(yest_codes) // 3):
+                miss = [c for c in yest_codes if c not in pct_map]
+                if miss:
+                    # spot 失配时补拉缺失代码，避免大面家数被误判为 0。
+                    pct_map.update(self._pct_map_for_codes_on_date(miss, date))
         dt_codes: set[str] = set()
         if df_dt is not None and not df_dt.empty and "code" in df_dt.columns:
             dt_codes = {self._norm_code(x) for x in df_dt["code"].tolist()}

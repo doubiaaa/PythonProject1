@@ -73,12 +73,107 @@ def _normalize_action(tag: str) -> str:
     return tag if tag in valid else "⚠️ 观望"
 
 
+def _lb_enabled(data_fetcher: Any) -> bool:
+    fn = getattr(data_fetcher, "_use_lb_openclaw", None)
+    if callable(fn):
+        try:
+            return bool(fn())
+        except Exception:
+            return False
+    return False
+
+
+def _lb_items(raw: Any) -> list[dict[str, Any]]:
+    if isinstance(raw, list):
+        return [x for x in raw if isinstance(x, dict)]
+    if isinstance(raw, dict):
+        for k in ("items", "data", "list", "records"):
+            v = raw.get(k)
+            if isinstance(v, list):
+                return [x for x in v if isinstance(x, dict)]
+    return []
+
+
+def _norm_code6(v: Any) -> str:
+    s = re.sub(r"\D", "", str(v or ""))[:6]
+    return s.zfill(6) if len(s) == 6 else ""
+
+
+def _enrich_top_pool_from_lb(top_pool: list[Any], data_fetcher: Any) -> list[Any]:
+    """悟道补数：补齐 amount_yi / rps20 / sector，减少表格缺失值。"""
+    if not top_pool or not _lb_enabled(data_fetcher):
+        return top_pool
+    try:
+        from app.services.lb_openclaw_client import lb_get_safe
+    except Exception:
+        return top_pool
+
+    amount_map: dict[str, float] = {}
+    rps20_map: dict[str, float] = {}
+    sector_map: dict[str, str] = {}
+    amount_rows = _lb_items(
+        lb_get_safe("/rank", {"type": "amount", "market": "all", "limit": 200})
+    )
+    for it in amount_rows:
+        code = _norm_code6(it.get("code"))
+        if not code:
+            continue
+        amt = _to_float(it.get("amount"))
+        if amt is None:
+            continue
+        if amt > 1e6:
+            amt = amt / 1e8
+        amount_map[code] = float(amt)
+
+    rps_rows = _lb_items(
+        lb_get_safe("/rank", {"type": "gainers_20d", "market": "all", "limit": 200})
+    )
+    for it in rps_rows:
+        code = _norm_code6(it.get("code"))
+        if not code:
+            continue
+        rv = _to_float(_pick_first(it, ("metricValue", "changePercent"), None))
+        if rv is not None:
+            rps20_map[code] = float(rv)
+
+    out: list[Any] = []
+    for p in top_pool:
+        if not isinstance(p, dict):
+            out.append(p)
+            continue
+        q = dict(p)
+        code = _norm_code6(q.get("code"))
+        if code:
+            if _to_float(_pick_first(q, ("amount_yi", "turnover_yi", "amount"), None)) is None:
+                av = amount_map.get(code)
+                if av is not None:
+                    q["amount_yi"] = round(float(av), 2)
+            if _to_float(_pick_first(q, ("rps20", "sector_rps20", "rps_20d"), None)) is None:
+                rv = rps20_map.get(code)
+                if rv is not None:
+                    q["rps20"] = round(float(rv), 2)
+            if not str(q.get("sector") or "").strip():
+                sec = sector_map.get(code)
+                if sec is None:
+                    sraw = lb_get_safe("/search", {"query": code, "limit": 1})
+                    items = _lb_items(sraw)
+                    sec = ""
+                    if items:
+                        sec = str(items[0].get("industry") or "").strip()
+                    sector_map[code] = sec
+                if sec:
+                    q["sector"] = sec
+        out.append(q)
+    return out
+
+
 def _build_sector_strength_table(
     main_sectors: list[Any],
     top_pool: list[Any],
     market_env: dict[str, Any],
     data_fetcher: Any,
 ) -> list[str]:
+    top_pool = _enrich_top_pool_from_lb(top_pool, data_fetcher)
     turnover_total = _to_float(market_env.get("turnover_yi")) or _to_float(
         (getattr(data_fetcher, "_last_email_kpi", None) or {}).get("turnover_yi_est")
     )
@@ -121,19 +216,47 @@ def _build_sector_strength_table(
                 rv = _to_float(_pick_first(r, ("rps20", "RPS20", "rps"), None))
                 if rv is not None:
                     row["rps"] = rv
+                elif row["rps"] is None:
+                    # 兼容悟道热榜场景：没有 RPS 时用板块涨幅做近似强度刻度。
+                    pv = _to_float(_pick_first(r, ("pct", "changePercent"), None))
+                    if pv is not None:
+                        row["rps"] = pv
         except Exception:
             pass
 
     lines = [
         "**主线板块评估（多维评分）**",
         "",
-        "| 板块名称 | 涨停家数 | 板块成交额(亿) | 占全市场成交额比 | 板块RPS(20日) | 中军容量票(>=5亿) | 综合强度评分(1-5) |",
-        "|---|---|---|---|---|---|---|",
+        "<table>",
+        "  <thead>",
+        "    <tr>",
+        "      <th>板块名称</th>",
+        "      <th>涨停家数</th>",
+        "      <th>板块成交额(亿)</th>",
+        "      <th>占全市场成交额比</th>",
+        "      <th>板块RPS(20日)</th>",
+        "      <th>中军容量票(&gt;=5亿)</th>",
+        "      <th>综合强度评分(1-5)</th>",
+        "    </tr>",
+        "  </thead>",
+        "  <tbody>",
     ]
-    for row in list(rows.values())[:8]:
+    has_missing = False
+    row_count = 0
+    rows_list = list(rows.values())[:8]
+    fallback_total_amt = sum(
+        float(_to_float(r.get("amt")) or 0.0)
+        for r in rows_list
+        if _to_float(r.get("amt")) is not None
+    )
+    for row in rows_list:
         zt = int(row.get("zt") or 0)
         amt = _to_float(row.get("amt"))
-        share = (amt / turnover_total * 100.0) if (amt is not None and turnover_total and turnover_total > 0) else None
+        share = None
+        if amt is not None and turnover_total and turnover_total > 0:
+            share = amt / turnover_total * 100.0
+        elif amt is not None and fallback_total_amt > 0:
+            share = amt / fallback_total_amt * 100.0
         rps = _to_float(row.get("rps"))
         caps = int(row.get("caps") or 0)
         hit_zt = zt >= 5
@@ -143,13 +266,30 @@ def _build_sector_strength_table(
             score = 5 if (zt >= 8 and (share or 0) >= 5.0 and (rps or 0) >= 90.0) else 4
         else:
             score = 1 + int(hit_zt) + int(hit_share) + int(hit_rps)
+        if amt is None or share is None or rps is None:
+            has_missing = True
+        amt_s = "—" if amt is None else f"{amt:.1f}"
+        share_s = "—" if share is None else f"{share:.1f}%"
+        rps_s = "—" if rps is None else f"{rps:.1f}"
         lines.append(
-            f"| {row['name']} | {zt} | {'无数据' if amt is None else f'{amt:.1f}'} | "
-            f"{'无数据' if share is None else f'{share:.1f}%'} | "
-            f"{'无数据' if rps is None else f'{rps:.1f}'} | {caps} | {score} |"
+            "    <tr>"
+            f"<td>{row['name']}</td>"
+            f"<td>{zt}</td>"
+            f"<td>{amt_s}</td>"
+            f"<td>{share_s}</td>"
+            f"<td>{rps_s}</td>"
+            f"<td>{caps}</td>"
+            f"<td>{score}</td>"
+            "</tr>"
         )
-    if len(lines) == 4:
-        lines.append("| 无数据 | 0 | 无数据 | 无数据 | 无数据 | 0 | 1 |")
+        row_count += 1
+    if row_count == 0:
+        has_missing = True
+        lines.append("    <tr><td>—</td><td>0</td><td>—</td><td>—</td><td>—</td><td>0</td><td>1</td></tr>")
+    lines.extend(["  </tbody>", "</table>"])
+    if has_missing:
+        lines.append("")
+        lines.append("注：`—` 表示该项暂无可用数据（非 0 值）。")
     return lines
 
 
@@ -489,6 +629,21 @@ def _table_to_list(lines: list[str]) -> list[str]:
     return result if len(result) > 1 else lines
 
 
+def _should_preserve_table(block: list[str], prev_lines: list[str]) -> bool:
+    """保留固定学习附录表格，避免被自动转列表破坏可读性。"""
+    if not block:
+        return False
+    header = block[0].strip().strip("|")
+    cols = [x.strip() for x in header.split("|")]
+    # 两列表格（如 模块/要点）一律保留，避免文末学习摘要被打散成列表。
+    if len(cols) == 2:
+        return True
+    if len(cols) == 2 and cols[0] == "模块" and cols[1] == "要点":
+        return True
+    ctx = "\n".join(x.strip() for x in prev_lines[-6:] if x.strip())
+    return "解读摘要" in ctx
+
+
 def _compress_wide_tables(text: str, width_limit: int = 80) -> tuple[str, int]:
     lines = (text or "").splitlines()
     out: list[str] = []
@@ -501,7 +656,9 @@ def _compress_wide_tables(text: str, width_limit: int = 80) -> tuple[str, int]:
             while j < len(lines) and lines[j].lstrip().startswith("|"):
                 block.append(lines[j])
                 j += 1
-            if any(len(x) > width_limit for x in block):
+            if _should_preserve_table(block, out):
+                out.extend(block)
+            elif any(len(x) > width_limit for x in block):
                 out.extend(_table_to_list(block))
                 converted += 1
             else:
@@ -555,6 +712,10 @@ def _market_env_block_and_missing(data_fetcher: Any) -> tuple[str, bool]:
     sh_pct = snap.get("sh_pct")
     sh_pos = snap.get("sh_ma20_position")
     sh_dir = snap.get("sh_ma20_direction")
+    cyb_point = snap.get("cyb_point")
+    cyb_pct = snap.get("cyb_pct")
+    cyb_pos = snap.get("cyb_ma20_position")
+    cyb_dir = snap.get("cyb_ma20_direction")
     ty = snap.get("turnover_yi")
     tchg = snap.get("turnover_change_pct")
     gt8k = snap.get("turnover_gt_8000")
@@ -574,9 +735,10 @@ def _market_env_block_and_missing(data_fetcher: Any) -> tuple[str, bool]:
             "### 程序侧行情接口快照（系统性风险评估）",
             "",
             f"- 上证指数：{_fmtf(sh_point, 2)} 点，{_fmtf(sh_pct, 1, '%')}，20日线位置={sh_pos or '—'}，20日线方向={sh_dir or '—'}",
+            f"- 创业板指：{_fmtf(cyb_point, 2)} 点，{_fmtf(cyb_pct, 1, '%')}，20日线位置={cyb_pos or '—'}，20日线方向={cyb_dir or '—'}",
             f"- 全市场成交额：{_fmtf(ty, 1)} 亿，较前日变化={_fmtf(tchg, 1, '%')}，是否大于8000亿={'是' if gt8k is True else ('否' if gt8k is False else '—')}",
             f"- 涨跌家数比：{up_n if up_n is not None else '—'}/{down_n if down_n is not None else '—'}（比值={_fmtf(ratio, 2)}）",
-            f"- 昨日涨停指数：当日涨幅={_fmtf(yli, 1, '%')}，是否高于2%={'是' if yli2 is True else ('否' if yli2 is False else '—')}",
+            f"- 昨日涨停溢价：当日涨幅={_fmtf(yli, 1, '%')}，是否高于2%={'是' if yli2 is True else ('否' if yli2 is False else '—')}",
             "",
             "---",
             "",
@@ -653,31 +815,10 @@ def _build_execution_review_block(data_fetcher: Any) -> str:
 
 
 def enforce_execution_review_block(text: str, data_fetcher: Any) -> tuple[str, dict[str, int]]:
-    """在“五、持仓标的的应对预案”前强制插入昨日计划执行评价。"""
-    stats = {"execution_review_inserted": 0}
+    """不再自动插入「昨日计划执行评价」块，保留原文。"""
+    _ = data_fetcher
     s = text or ""
-    if not s.strip():
-        return s, stats
-    if "## 昨日计划执行评价" in s:
-        return s, stats
-    block = _build_execution_review_block(data_fetcher)
-    markers = (
-        "### 五、持仓标的的应对预案",
-        "## 五、持仓标的的应对预案",
-    )
-    for m in markers:
-        if m in s:
-            parts = s.split(m, 1)
-            stats["execution_review_inserted"] = 1
-            return parts[0].rstrip() + "\n\n" + block + "\n" + m + parts[1], stats
-    # 若不存在「五」节，则回退在“明日计划”后补充
-    fallback = "## 明日计划"
-    if fallback in s:
-        parts = s.split(fallback, 1)
-        stats["execution_review_inserted"] = 1
-        return parts[0] + fallback + parts[1] + "\n\n" + block, stats
-    stats["execution_review_inserted"] = 1
-    return s.rstrip() + "\n\n" + block, stats
+    return s, {"execution_review_inserted": 0}
 
 
 def _clean_abnormal_chars(text: str) -> tuple[str, int]:

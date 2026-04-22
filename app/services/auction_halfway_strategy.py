@@ -19,6 +19,8 @@ from app.services.trend_momentum_strategy import (
     fetch_stock_hist_daily,
 )
 
+_SECTOR_HIST_CACHE: dict[tuple[str, str, str], Optional[pd.DataFrame]] = {}
+
 def _load_strategy_params() -> dict:
     """权重与技术面开关：strategy.json 默认值 + replay_config.json 可覆盖。"""
     from app.services.strategy_engine import get_strategy_engine
@@ -70,6 +72,86 @@ def _norm_code(x) -> str:
     return s.zfill(6)[:6] if s else ""
 
 
+def _lb_fallback_top_pool(date: str, max_main: int, max_pool: int) -> tuple[list[str], list[dict]]:
+    """
+    悟道回退：hot-sectors + stocks 直接生成主线与候选池。
+    仅在东财行业板块链路失败时启用，避免整段中断。
+    """
+    try:
+        from app.services.lb_openclaw_client import is_lb_openclaw_enabled, lb_get_safe
+    except Exception:
+        return [], []
+    if not is_lb_openclaw_enabled():
+        return [], []
+    ds = str(date)[:8]
+    iso = f"{ds[:4]}-{ds[4:6]}-{ds[6:8]}" if len(ds) == 8 else ds
+    raw = lb_get_safe("/hot-sectors", {"date": iso})
+    if raw is None:
+        raw = lb_get_safe("/hot-sectors", {"date": ds})
+    sectors = raw if isinstance(raw, list) else []
+    if not sectors:
+        return [], []
+
+    main_sectors: list[str] = []
+    rows: list[dict] = []
+    for sec in sectors[: max(1, max_main)]:
+        if not isinstance(sec, dict):
+            continue
+        name = str(sec.get("name") or sec.get("sector") or "").strip()
+        if not name:
+            continue
+        main_sectors.append(name)
+        stocks = sec.get("stocks") or []
+        if not isinstance(stocks, list):
+            continue
+        for s in stocks:
+            if not isinstance(s, dict):
+                continue
+            code = _norm_code(s.get("code"))
+            if not code:
+                continue
+            try:
+                lb = int(s.get("continueNum") or 1)
+            except Exception:
+                lb = 1
+            try:
+                pct = float(s.get("changePercent") or 0.0)
+            except Exception:
+                pct = 0.0
+            try:
+                tr = float(s.get("turnoverRate") or 0.0)
+            except Exception:
+                tr = 0.0
+            rows.append(
+                {
+                    "code": code,
+                    "name": str(s.get("name") or "").strip(),
+                    "sector": name,
+                    "tag": "悟道回退候选",
+                    "lb": max(1, lb),
+                    "pct": round(pct, 2),
+                    "turn": round(tr, 2),
+                    "score": round(max(0.0, lb * 1.2 + pct * 0.2), 2),
+                    "tech_score": 0.0,
+                    "s1_main": 0,
+                    "close": round(float(s.get("price") or 0.0), 4),
+                }
+            )
+    if not rows:
+        return main_sectors, []
+    rows.sort(key=lambda x: (x["lb"], x["pct"]), reverse=True)
+    uniq: list[dict] = []
+    seen: set[str] = set()
+    for r in rows:
+        if r["code"] in seen:
+            continue
+        seen.add(r["code"])
+        uniq.append(r)
+        if len(uniq) >= max_pool:
+            break
+    return main_sectors[:max_main], uniq
+
+
 def _pick_sector_universe(max_sectors_scan: int) -> list[str]:
     """优先取 5 日资金靠前的行业名称，缩小扫描范围。"""
     try:
@@ -90,24 +172,34 @@ def _pick_sector_universe(max_sectors_scan: int) -> list[str]:
 
 
 def _sector_hist_for_range(symbol: str, start: str, end: str) -> Optional[pd.DataFrame]:
-    try:
-        df = ak.stock_board_industry_hist_em(
-            symbol=symbol,
-            start_date=start,
-            end_date=end,
-            period="日k",
-            adjust="",
-        )
-        if df is None or df.empty:
-            return None
-        df = df.copy()
-        df["日期"] = pd.to_datetime(df["日期"]).dt.strftime("%Y%m%d")
-        for c in ("涨跌幅", "成交额"):
-            if c in df.columns:
-                df[c] = pd.to_numeric(df[c], errors="coerce")
-        return df
-    except Exception:
-        return None
+    key = (str(symbol), str(start), str(end))
+    if key in _SECTOR_HIST_CACHE:
+        cached = _SECTOR_HIST_CACHE[key]
+        return cached.copy() if cached is not None else None
+    for _ in range(3):
+        try:
+            df = ak.stock_board_industry_hist_em(
+                symbol=symbol,
+                start_date=start,
+                end_date=end,
+                period="日k",
+                adjust="",
+            )
+            if df is None or df.empty:
+                time.sleep(0.08)
+                continue
+            df = df.copy()
+            df["日期"] = pd.to_datetime(df["日期"]).dt.strftime("%Y%m%d")
+            for c in ("涨跌幅", "成交额"):
+                if c in df.columns:
+                    df[c] = pd.to_numeric(df[c], errors="coerce")
+            _SECTOR_HIST_CACHE[key] = df
+            return df.copy()
+        except Exception:
+            time.sleep(0.08)
+            continue
+    _SECTOR_HIST_CACHE[key] = None
+    return None
 
 
 def _last_n_trade_days(trade_days: list[str], date: str, n: int) -> list[str]:
@@ -338,6 +430,21 @@ def build_auction_halfway_report(
         time.sleep(SLEEP_SEC)
 
     if not sector_daily:
+        fb_main, fb_pool = _lb_fallback_top_pool(date, MAX_MAIN_SECTORS, MAX_DRAGON_POOL)
+        if fb_pool:
+            lines.append("- 行业板块历史行情获取失败，已切换悟道 `hot-sectors` 回退口径。\n\n")
+            lines.append("### 第二步：龙头池（悟道回退）\n")
+            for r in fb_pool:
+                lines.append(
+                    f"- **{r['name']}({r['code']})** [{r['tag']}] 板块:{r['sector']} "
+                    f"连板{r['lb']} 涨跌幅{r['pct']:.2f}% 换手{r['turn']:.2f}% 综合={r['score']:.2f}\n"
+                )
+            lines.append("\n")
+            meta["main_sectors"] = list(fb_main)
+            meta["top_pool"] = fb_pool
+            meta["program_completed"] = True
+            meta["abort_reason"] = None
+            return "".join(lines), meta
         lines.append("- 行业板块历史行情获取失败，跳过。\n\n")
         meta["abort_reason"] = "行业板块历史行情获取失败"
         return "".join(lines), meta
@@ -435,6 +542,21 @@ def build_auction_halfway_report(
             )
 
     if not raw_rows:
+        fb_main, fb_pool = _lb_fallback_top_pool(date, MAX_MAIN_SECTORS, MAX_DRAGON_POOL)
+        if fb_pool:
+            lines.append("### 第二步：龙头池（悟道回退）\n")
+            lines.append("- 主线板块成份股为空，已切换悟道 `hot-sectors` 回退口径。\n")
+            for r in fb_pool:
+                lines.append(
+                    f"- **{r['name']}({r['code']})** [{r['tag']}] 板块:{r['sector']} "
+                    f"连板{r['lb']} 涨跌幅{r['pct']:.2f}% 换手{r['turn']:.2f}% 综合={r['score']:.2f}\n"
+                )
+            lines.append("\n")
+            meta["main_sectors"] = list(fb_main or main_sectors)
+            meta["top_pool"] = fb_pool
+            meta["program_completed"] = True
+            meta["abort_reason"] = None
+            return "".join(lines), meta
         lines.append("### 第二步：龙头池\n")
         lines.append("- 主线板块成份股为空。\n\n")
         meta["main_sectors"] = list(main_sectors)
@@ -484,6 +606,21 @@ def build_auction_halfway_report(
     pool_rows = uniq[: MAX_DRAGON_POOL * POOL_PRE]
 
     if not pool_rows:
+        fb_main, fb_pool = _lb_fallback_top_pool(date, MAX_MAIN_SECTORS, MAX_DRAGON_POOL)
+        if fb_pool:
+            lines.append("### 第二步：龙头池（悟道回退）\n")
+            lines.append("- 本地标签筛选为空，已切换悟道 `hot-sectors` 回退口径。\n")
+            for r in fb_pool:
+                lines.append(
+                    f"- **{r['name']}({r['code']})** [{r['tag']}] 板块:{r['sector']} "
+                    f"连板{r['lb']} 涨跌幅{r['pct']:.2f}% 换手{r['turn']:.2f}% 综合={r['score']:.2f}\n"
+                )
+            lines.append("\n")
+            meta["main_sectors"] = list(fb_main or main_sectors)
+            meta["top_pool"] = fb_pool
+            meta["program_completed"] = True
+            meta["abort_reason"] = None
+            return "".join(lines), meta
         lines.append("### 第二步：龙头池\n")
         lines.append("- 未筛出符合分类标签的标的（可提高阈值或检查数据）。\n\n")
         meta["main_sectors"] = list(main_sectors)
