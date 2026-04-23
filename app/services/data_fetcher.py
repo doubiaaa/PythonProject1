@@ -1483,7 +1483,13 @@ class DataFetcher:
             if not isinstance(raw, dict):
                 return None
             v = raw.get("yesterday_limit_up_avg_pcp")
-            return float(v) if v is not None else None
+            if v is not None:
+                # market-overview API 返回的是百分比值（如 1.2 表示 1.2%），需要转换为小数形式
+                try:
+                    return float(v) / 100
+                except (TypeError, ValueError):
+                    return None
+            return None
         except Exception:
             return None
 
