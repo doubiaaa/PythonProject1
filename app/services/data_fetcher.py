@@ -2195,6 +2195,35 @@ class DataFetcher:
                 for fut in as_completed(futs):
                     d, df = fut.result()
                     pool_by_day[d] = df
+        # 并发拉取时偶发网络/接口抖动会把个别交易日误判为空，导致历史表出现“假 0”。
+        # 对空结果做一次串行补拉，并在启用悟道源时增加东财兜底，优先保证历史口径稳定。
+        retry_days: list[str] = []
+        for d in days:
+            df0 = pool_by_day.get(d)
+            if df0 is None or df0.empty:
+                retry_days.append(d)
+        for d in retry_days:
+            try:
+                with self._cache_lock:
+                    self.cache.pop(f"zt_pool_{d}", None)
+            except Exception:
+                pass
+            df_retry = self.get_zt_pool(d)
+            if (
+                (df_retry is None or df_retry.empty)
+                and self._use_lb_openclaw()
+            ):
+                try:
+                    ds = str(d)[:8]
+                    raw = self.fetch_with_retry(ak.stock_zt_pool_em, date=ds)
+                    if raw is None or raw.empty:
+                        raw = self._try_zt_pool_via_yesterday_pool_em(ds)
+                    if raw is not None and not raw.empty:
+                        df_retry = self._zt_pool_em_raw_to_internal(raw)
+                except Exception:
+                    pass
+            pool_by_day[d] = df_retry if df_retry is not None else pd.DataFrame()
+
         for d in days:
             df = pool_by_day.get(d)
             if df is not None and not df.empty and "lb" in df.columns:
