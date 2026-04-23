@@ -558,12 +558,13 @@ class DataFetcher:
             _log.warning("market_env index snapshot failed: %s", ex)
 
         # 东财指数日线偶发空表时，用悟道 kline 回退补 20 日线位置。
-        if out.get("sh_ma20_position") is None:
+        # 若指数点位本身缺失，则不再额外补抓 20 日线，避免出现“点位缺失但均线有值”的不一致展示。
+        if out.get("sh_point") is not None and out.get("sh_ma20_position") is None:
             p, d, a = self._index_ma20_snapshot_from_lb(str(date)[:8], "000001.SH")
             out["sh_ma20_position"] = p
             out["sh_ma20_direction"] = d
             out["sh_above_ma20"] = a
-        if out.get("cyb_ma20_position") is None:
+        if out.get("cyb_point") is not None and out.get("cyb_ma20_position") is None:
             p, d, a = self._index_ma20_snapshot_from_lb(str(date)[:8], "399006.SZ")
             out["cyb_ma20_position"] = p
             out["cyb_ma20_direction"] = d
@@ -581,8 +582,6 @@ class DataFetcher:
         required = (
             "sh_point",
             "sh_pct",
-            "sh_ma20_position",
-            "sh_ma20_direction",
             "turnover_yi",
             "turnover_change_pct",
             "up_count",

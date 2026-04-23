@@ -730,12 +730,20 @@ def _market_env_block_and_missing(data_fetcher: Any) -> tuple[str, bool]:
         fv = _to_float(v)
         return "—" if fv is None else f"{fv:.{nd}f}{suffix}"
 
+    def _index_line(name: str, point: Any, pct: Any, ma_pos: Any, ma_dir: Any) -> str:
+        segs = [f"- {name}：{_fmtf(point, 2)} 点，{_fmtf(pct, 1, '%')}"]
+        if ma_pos is not None:
+            segs.append(f"20日线位置={ma_pos}")
+        if ma_dir is not None:
+            segs.append(f"20日线方向={ma_dir}")
+        return "，".join(segs)
+
     block = "\n".join(
         [
             "### 程序侧行情接口快照（系统性风险评估）",
             "",
-            f"- 上证指数：{_fmtf(sh_point, 2)} 点，{_fmtf(sh_pct, 1, '%')}，20日线位置={sh_pos or '—'}，20日线方向={sh_dir or '—'}",
-            f"- 创业板指：{_fmtf(cyb_point, 2)} 点，{_fmtf(cyb_pct, 1, '%')}，20日线位置={cyb_pos or '—'}，20日线方向={cyb_dir or '—'}",
+            _index_line("上证指数", sh_point, sh_pct, sh_pos, sh_dir),
+            _index_line("创业板指", cyb_point, cyb_pct, cyb_pos, cyb_dir),
             f"- 全市场成交额：{_fmtf(ty, 1)} 亿，较前日变化={_fmtf(tchg, 1, '%')}，是否大于8000亿={'是' if gt8k is True else ('否' if gt8k is False else '—')}",
             f"- 涨跌家数比：{up_n if up_n is not None else '—'}/{down_n if down_n is not None else '—'}（比值={_fmtf(ratio, 2)}）",
             f"- 昨日涨停溢价：当日涨幅={_fmtf(yli, 1, '%')}，是否高于2%={'是' if yli2 is True else ('否' if yli2 is False else '—')}",
