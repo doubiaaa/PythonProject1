@@ -13,7 +13,7 @@ name: Nightly replay (~18:00 CST)
 
 on:
   schedule:
-    - cron: "0 10 * * *"
+    #- cron: "0 10 * * *"
   workflow_dispatch:
     inputs:
       date:
