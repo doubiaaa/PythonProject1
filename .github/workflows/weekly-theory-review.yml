@@ -4,7 +4,7 @@ name: Weekly theory review email
 
 on:
   schedule:
-    - cron: "0 1 * * 6"
+    #- cron: "0 1 * * 6"
   workflow_dispatch: {}
 
 concurrency:
