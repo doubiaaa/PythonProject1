@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from unittest.mock import patch
 
+import pytest
+
 from app.services import simulated_account as sa
 
 
@@ -139,6 +141,9 @@ def test_markdown_embeds_image_when_path_given():
     assert "### 当前持仓" not in md
 
 
+@pytest.mark.filterwarnings(
+    "ignore:Glyph .* missing from font\\(s\\) DejaVu Sans\\.:UserWarning"
+)
 def test_write_trade_display_png_file(tmp_path, monkeypatch):
     from matplotlib import font_manager as fm
 

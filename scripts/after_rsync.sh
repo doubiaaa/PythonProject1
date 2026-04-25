@@ -9,4 +9,17 @@ fi
 # shellcheck disable=SC1091
 source .venv/bin/activate
 pip install -q -r requirements.txt
+
+# 安装前端依赖并构建前端项目
+if [[ -d frontend ]]; then
+  cd frontend
+  if [[ ! -d node_modules ]]; then
+    npm install
+  fi
+  npm run build
+  cd ..
+fi
+
 echo "[after_rsync] OK: $(which python)"
+echo "[after_rsync] Frontend built successfully"
+
