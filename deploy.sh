@@ -21,7 +21,13 @@ echo "✓ Docker 和 Docker Compose 已安装"
 
 # 2. 克隆代码仓库
 echo "=== 克隆代码仓库 ==="
-git clone https://github.com/doubiaaa/PythonProject1.git .
+if [ -d ".git" ]; then
+    echo "目录已存在，执行 git pull 更新代码"
+    git pull
+else
+    echo "目录不存在，执行 git clone 克隆代码"
+    git clone https://gitee.com/kkllll/python-project1.git .
+fi
 
 # 3. 创建环境变量文件
 echo "=== 创建环境变量文件 ==="

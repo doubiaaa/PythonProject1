@@ -1,25 +1,5 @@
-akshare>=1.12.0
-pandas>=2.0.0
-requests>=2.28.0
-markdown>=3.5.0
-pygments>=2.17.0
-jinja2>=3.1.0
-beautifulsoup4>=4.12.0
-pytest>=8.0.0
-matplotlib>=3.8.0
-tenacity>=8.2.0
-Flask>=2.0.0
-
-# 数据库依赖
-mysql-connector-python>=8.0.33
-redis>=4.5.4
-
-# API 服务依赖
-fastapi>=0.100.0
-uvicorn>=0.23.2
-python-jose[cryptography]>=3.3.0
-passlib[bcrypt]>=1.7.4
-python-multipart>=0.0.6
-
-# 环境变量管理
-python-dotenv>=1.0.0
+Flask
+Flask-Cors
+pymysql
+SQLAlchemy
+redis
