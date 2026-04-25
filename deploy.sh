@@ -1,28 +1,53 @@
 #!/bin/bash
 
-# 部署脚本
+# 部署脚本：在服务器上部署 A 股收盘智能复盘系统
 
-# 服务器信息
-SERVER_IP="124.223.139.147"
-SERVER_USER="ubuntu"
-SERVER_PATH="/home/ubuntu/projects/rich"
+set -e
 
-# 构建前端项目
-echo "构建前端项目..."
-cd frontend
-npm run build
-cd ..
+echo "=== 开始部署 A 股收盘智能复盘系统 ==="
 
-# 复制文件到服务器
-echo "复制文件到服务器..."
-rsync -av --exclude="node_modules" --exclude=".git" --exclude="__pycache__" --exclude="*.pyc" . $SERVER_USER@$SERVER_IP:$SERVER_PATH
+# 1. 检查 Docker 和 Docker Compose 是否已安装
+if ! command -v docker &> /dev/null; then
+    echo "错误：Docker 未安装，请先安装 Docker"
+    exit 1
+fi
 
-# 执行服务器上的部署后脚本
-echo "执行部署后脚本..."
-ssh $SERVER_USER@$SERVER_IP "bash $SERVER_PATH/after_rsync.sh"
+if ! command -v docker-compose &> /dev/null; then
+    echo "错误：Docker Compose 未安装，请先安装 Docker Compose"
+    exit 1
+fi
 
-# 配置定时任务
-echo "配置定时任务..."
-ssh $SERVER_USER@$SERVER_IP "(crontab -l 2>/dev/null | grep -v 'run_daily.sh'; echo '10 18 * * 1-5 cd /home/ubuntu/projects/rich && /usr/bin/env bash /home/ubuntu/projects/rich/run_daily.sh') | crontab -"
+echo "✓ Docker 和 Docker Compose 已安装"
 
-echo "部署完成！"
+# 2. 克隆代码仓库
+echo "=== 克隆代码仓库 ==="
+git clone https://github.com/doubiaaa/PythonProject1.git .
+
+# 3. 创建环境变量文件
+echo "=== 创建环境变量文件 ==="
+cp .env.example .env
+
+# 4. 构建 Docker 镜像
+echo "=== 构建 Docker 镜像 ==="
+docker-compose build
+
+# 5. 启动服务
+echo "=== 启动服务 ==="
+docker-compose up -d
+
+# 6. 检查服务状态
+echo "=== 检查服务状态 ==="
+docker-compose ps
+
+# 7. 配置定时任务
+echo "=== 配置定时任务 ==="
+(crontab -l 2>/dev/null | grep -v 'run_daily.sh'; echo '10 18 * * 1-5 cd /opt/python-project1 && docker exec python-project1-backend /usr/bin/env bash /app/run_daily.sh') | crontab -
+
+# 8. 输出部署信息
+echo "=== 部署完成 ==="
+echo "前端服务地址: http://$(hostname -I | awk '{print $1}'):3000"
+echo "后端 API 地址: http://$(hostname -I | awk '{print $1}'):8000"
+echo "默认登录账号: admin"
+echo "默认登录密码: admin123"
+echo ""
+echo "请访问前端服务地址，使用默认账号登录系统，然后在设置页面配置 API Key 和其他参数。"

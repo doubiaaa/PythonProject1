@@ -10,6 +10,13 @@ from typing import Optional
 import pandas as pd
 import akshare as ak
 
+# 尝试导入 Redis 客户端
+try:
+    from backend.app.utils.database import db
+    use_redis = True
+except ImportError:
+    use_redis = False
+
 
 _PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
 DATA_DIR = os.path.join(_PROJECT_ROOT, "data")
@@ -27,6 +34,11 @@ def get_cache_file_path(code: str, start_date: str, end_date: str) -> str:
     return os.path.join(CACHE_DIR, f"{code}_{start_date}_{end_date}.json")
 
 
+def get_redis_cache_key(code: str, start_date: str, end_date: str) -> str:
+    """获取 Redis 缓存键"""
+    return f"price:{code}:{start_date}:{end_date}"
+
+
 def fetch_stock_hist_with_cache(
     code: str, 
     start_date: str, 
@@ -40,10 +52,27 @@ def fetch_stock_hist_with_cache(
     if not code:
         return None
     
-    # 生成缓存文件路径
+    # 生成缓存键
+    redis_key = get_redis_cache_key(code, start_date, end_date)
     cache_file = get_cache_file_path(code, start_date, end_date)
     
-    # 尝试从缓存读取
+    # 尝试从 Redis 缓存读取
+    if use_redis:
+        try:
+            redis_client = db.get_redis_client()
+            data = redis_client.get(redis_key)
+            if data:
+                data = json.loads(data)
+                df = pd.DataFrame(data)
+                df['日期'] = pd.to_datetime(df['日期']).dt.strftime('%Y%m%d')
+                for col in ['开盘', '收盘', '最高', '最低', '成交量', '成交额']:
+                    if col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors='coerce')
+                return df
+        except Exception:
+            pass
+    
+    # 尝试从磁盘缓存读取
     if os.path.exists(cache_file):
         try:
             with open(cache_file, 'r', encoding='utf-8') as f:
@@ -69,9 +98,19 @@ def fetch_stock_hist_with_cache(
         if df is None or df.empty:
             return None
         
-        # 保存到缓存
+        # 转换数据格式
         df['日期'] = pd.to_datetime(df['日期']).dt.strftime('%Y%m%d')
         data = df.to_dict('records')
+        
+        # 保存到 Redis 缓存
+        if use_redis:
+            try:
+                redis_client = db.get_redis_client()
+                redis_client.setex(redis_key, 3600 * 24 * 30, json.dumps(data))  # 30天过期
+            except Exception:
+                pass
+        
+        # 保存到磁盘缓存
         with open(cache_file, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
         
@@ -115,6 +154,17 @@ def fetch_open_close_qfq_cached(
 
 def clear_cache() -> None:
     """清空缓存"""
+    # 清空 Redis 缓存
+    if use_redis:
+        try:
+            redis_client = db.get_redis_client()
+            keys = redis_client.keys("price:*")
+            if keys:
+                redis_client.delete(*keys)
+        except Exception:
+            pass
+    
+    # 清空磁盘缓存
     _ensure_cache_dir()
     for file in os.listdir(CACHE_DIR):
         if file.endswith('.json'):
