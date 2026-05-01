@@ -1,5 +1,8 @@
-Flask
-Flask-Cors
-pymysql
-SQLAlchemy
+fastapi
+uvicorn
+python-jose
+passlib
+python-multipart
+mysql-connector-python
 redis
+python-dotenv
