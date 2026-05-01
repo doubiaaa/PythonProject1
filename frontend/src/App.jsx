@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import './index.css';
-import LoginPage from './pages/LoginPage';
-import DashboardPage from './pages/DashboardPage';
+import Login from './pages/Login';
+import Dashboard from './pages/Dashboard';
 
 function App() {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -45,9 +45,9 @@ function App() {
   return (
     <div className="min-h-screen bg-gray-100">
       {isAuthenticated ? (
-        <DashboardPage user={user} onLogout={handleLogout} />
+        <Dashboard user={user} onLogout={handleLogout} />
       ) : (
-        <LoginPage onLogin={handleLogin} error={error} />
+        <Login onLogin={handleLogin} error={error} />
       )}
     </div>
   );
