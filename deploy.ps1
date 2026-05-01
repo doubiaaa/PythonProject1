@@ -5,12 +5,6 @@ $SERVER_IP = "124.223.139.147"
 $SERVER_USER = "ubuntu"
 $SERVER_PATH = "/home/ubuntu/projects/rich"
 
-# 构建前端项目
-Write-Host "构建前端项目..."
-Set-Location frontend
-npm run build
-Set-Location ..
-
 # 复制文件到服务器
 Write-Host "复制文件到服务器..."
 robocopy . "\\$SERVER_IP\$($SERVER_PATH -replace '/', '\')" /E /XD node_modules .git __pycache__ /XF "*.pyc"

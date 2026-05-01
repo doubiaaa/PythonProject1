@@ -1,7 +1,7 @@
 fastapi
 uvicorn
-python-jose
-passlib
+python-jose[cryptography]
+passlib[bcrypt]
 python-multipart
 mysql-connector-python
 redis

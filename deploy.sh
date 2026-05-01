@@ -51,9 +51,6 @@ echo "=== 配置定时任务 ==="
 
 # 8. 输出部署信息
 echo "=== 部署完成 ==="
-echo "前端服务地址: http://$(hostname -I | awk '{print $1}'):3000"
 echo "后端 API 地址: http://$(hostname -I | awk '{print $1}'):8000"
-echo "默认登录账号: admin"
-echo "默认登录密码: admin123"
 echo ""
-echo "请访问前端服务地址，使用默认账号登录系统，然后在设置页面配置 API Key 和其他参数。"
+echo "定时任务已配置，每个交易日 18:10 自动执行复盘。"
